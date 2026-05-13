@@ -56,7 +56,7 @@ interface OverviewProps {
 }
 
 export function Overview({
-  metrics,
+  metrics: _metrics,
   minerStats,
   rejectionReasons,
   activeMinerCount,
@@ -66,7 +66,7 @@ export function Overview({
   alphaPrice,
   onMinerClick,
   metagraph,
-  qualificationMinerHotkeys = [],
+  qualificationMinerHotkeys: _qualificationMinerHotkeys = [],
 }: OverviewProps) {
   const [sortKey, setSortKey] = useState<SortKey>('accepted')
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc')

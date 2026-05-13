@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback, useEffect, useRef } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
   Overview,
@@ -11,31 +11,37 @@ import {
   FAQ,
 } from '@/components/dashboard'
 import { Fulfillment } from '@/components/dashboard/Fulfillment'
+import { ErrorBoundary } from '@/components/shared/ErrorBoundary'
 import type {
   MetagraphData,
 } from '@/lib/types'
 import type { AllDashboardData } from '@/lib/db-precalc'
-import {
-  LayoutDashboard,
-  Pickaxe,
-  Layers,
-  Search,
-  HelpCircle,
-  Trophy,
-  Package,
-} from 'lucide-react'
+import { cn } from '@/lib/utils'
 
-// Server handles background refresh every 5 minutes via instrumentation.ts
-// Client polls every 5 minutes to stay in sync with server cache
+// =================================================================
+// Tab routing config
+// =================================================================
+// Single source of truth for which tabs exist, their valid URL keys,
+// and which subset is live in the launch product. Set
+// `NEXT_PUBLIC_LAUNCH_MODE=full` in dev to expose all tabs.
+const LAUNCH_TABS = ['fulfillment', 'model-competition', 'faq'] as const
+const FULL_TABS = [
+  'fulfillment',
+  'model-competition',
+  'overview',
+  'miner-tracker',
+  'epoch-analysis',
+  'submission-tracker',
+  'faq',
+] as const
+type TabKey = (typeof FULL_TABS)[number]
+const LAUNCH_MODE = process.env.NEXT_PUBLIC_LAUNCH_MODE ?? 'launch'
+const VISIBLE_TABS: readonly TabKey[] =
+  LAUNCH_MODE === 'full' ? FULL_TABS : LAUNCH_TABS
+const DEFAULT_TAB: TabKey = VISIBLE_TABS[0]
 
-// Helper function to calculate relative time on the client
-function getRelativeTime(date: Date): string {
-  const now = new Date()
-  const diff = Math.floor((now.getTime() - date.getTime()) / 1000)
-  if (diff < 60) return 'just now'
-  if (diff < 3600) return `${Math.floor(diff / 60)} minute${Math.floor(diff / 60) === 1 ? '' : 's'} ago`
-  if (diff < 86400) return `${Math.floor(diff / 3600)} hour${Math.floor(diff / 3600) === 1 ? '' : 's'} ago`
-  return `${Math.floor(diff / 86400)} day${Math.floor(diff / 86400) === 1 ? '' : 's'} ago`
+function isValidTab(value: string | null): value is TabKey {
+  return Boolean(value && (VISIBLE_TABS as readonly string[]).includes(value))
 }
 
 // Dashboard data from API
@@ -59,55 +65,61 @@ export function DashboardClient({ initialData, metagraph: initialMetagraph }: Da
   const [dashboardData, setDashboardData] = useState<DashboardData>(initialData)
   const [metagraph, setMetagraph] = useState<MetagraphData | null>(initialMetagraph)
 
-  // "Updated X minutes ago" - based on server's data refresh time
-  const [relativeTime, setRelativeTime] = useState<string>(
-    initialData.serverRelativeTime || 'just now'
-  )
-
-  // Track server timestamp in ref for interval access
-  const serverTimestampRef = useRef<string | undefined>(initialData.serverRefreshedAt)
-
-  // Update relative time every minute based on server refresh timestamp
-  useEffect(() => {
-    let timeoutId: number
-    let mounted = true
-
-    const tick = () => {
-      if (!mounted) return
-
-      if (serverTimestampRef.current) {
-        setRelativeTime(getRelativeTime(new Date(serverTimestampRef.current)))
-      }
-
-      // Schedule next tick in 60 seconds
-      timeoutId = window.setTimeout(tick, 60000)
-    }
-
-    // Start after 60 seconds
-    timeoutId = window.setTimeout(tick, 60000)
-
-    return () => {
-      mounted = false
-      window.clearTimeout(timeoutId)
-    }
-  }, [])
-
   const [selectedMinerHotkey, setSelectedMinerHotkey] = useState<string | null>(null)
   const [selectedEpochId, setSelectedEpochId] = useState<number | null>(null)
 
-  const [activeTab, setActiveTab] = useState('overview')
+  // -------------------------------------------------------------------
+  // Tab routing. Keep tab state in memory so the public URL stays clean.
+  // Older shared URLs with ?tab=... are honored once on mount, then cleaned.
+  // -------------------------------------------------------------------
+  const [activeTab, setActiveTab] = useState<TabKey>(DEFAULT_TAB)
+  const [mountedTabs, setMountedTabs] = useState<Set<TabKey>>(() => new Set([DEFAULT_TAB]))
 
-  // Poll for fresh data every 5 minutes using recursive setTimeout
+  const activateTab = useCallback((tab: TabKey) => {
+    setMountedTabs((prev) => {
+      if (prev.has(tab)) return prev
+      const next = new Set(prev)
+      next.add(tab)
+      return next
+    })
+    setActiveTab(tab)
+  }, [])
+
   useEffect(() => {
-    console.log('[Dashboard] Starting polling useEffect')
+    const params = new URLSearchParams(window.location.search)
+    const tab = params.get('tab')
+    if (isValidTab(tab)) activateTab(tab)
+
+    if (params.has('tab')) {
+      params.delete('tab')
+      const query = params.toString()
+      const next = `${window.location.pathname}${query ? `?${query}` : ''}${window.location.hash}`
+      window.history.replaceState(null, '', next)
+    }
+  }, [activateTab])
+
+  const handleTabChange = useCallback((value: string) => {
+    if (!isValidTab(value)) return
+    activateTab(value)
+  }, [activateTab])
+
+  // -------------------------------------------------------------------
+  // Polling: every 60s, paused when the tab isn't visible so we
+  // don't burn battery or hammer the API when nobody's looking.
+  // -------------------------------------------------------------------
+  useEffect(() => {
     let timeoutId: number
     let mounted = true
     const initialBuildVersion = initialData.buildVersion
 
     const fetchData = async () => {
       if (!mounted) return
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') {
+        // Skip this tick; reschedule. Will resume next time we're visible.
+        if (mounted) timeoutId = window.setTimeout(fetchData, 60 * 1000)
+        return
+      }
 
-      console.log('[Dashboard] Polling for new data...')
       try {
         const cacheBuster = `?t=${Date.now()}`
         const [dashboardRes, metagraphRes] = await Promise.all([
@@ -117,39 +129,34 @@ export function DashboardClient({ initialData, metagraph: initialMetagraph }: Da
         if (dashboardRes.ok && mounted) {
           const newData = await dashboardRes.json()
 
-          // Check if server was redeployed - reload page to get new JS
+          // Reload page to pick up new JS when the server has redeployed.
           if (initialBuildVersion && newData.buildVersion &&
               newData.buildVersion !== initialBuildVersion) {
             window.location.reload()
             return
           }
 
-          // Update dashboard data - this triggers re-render
           setDashboardData(newData)
 
-          // Update server timestamp for "Updated X minutes ago"
-          if (newData.serverRefreshedAt) {
-            serverTimestampRef.current = newData.serverRefreshedAt
-            setRelativeTime(getRelativeTime(new Date(newData.serverRefreshedAt)))
-          }
         }
         if (metagraphRes.ok && mounted) {
           const newMetagraph = await metagraphRes.json()
           setMetagraph(newMetagraph)
         }
       } catch (error) {
-        console.error('Auto-refresh failed:', error)
+        // Silent. Surfaced by the stale "Updated X ago" timestamp. Logged
+        // only to aid local debugging.
+        if (process.env.NODE_ENV !== 'production') {
+          console.error('Auto-refresh failed:', error)
+        }
       }
 
-      // Schedule next fetch in 60 seconds
       if (mounted) {
         timeoutId = window.setTimeout(fetchData, 60 * 1000)
       }
     }
 
-    // Start first fetch after 60 seconds
     timeoutId = window.setTimeout(fetchData, 60 * 1000)
-    console.log('[Dashboard] First poll scheduled in 60 seconds')
 
     return () => {
       mounted = false
@@ -157,36 +164,30 @@ export function DashboardClient({ initialData, metagraph: initialMetagraph }: Da
     }
   }, [initialData.buildVersion])
 
-  // Refresh data immediately when tab becomes visible (user returns to tab)
+  // Refresh immediately when the tab becomes visible again after backgrounding.
   useEffect(() => {
     const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible') {
-        console.log('[Dashboard] Tab became visible, refreshing data...')
-        const fetchData = async () => {
-          try {
-            const cacheBuster = `?t=${Date.now()}`
-            const [dashboardRes, metagraphRes] = await Promise.all([
-              fetch(`/api/dashboard${cacheBuster}`),
-              fetch(`/api/metagraph${cacheBuster}`)
-            ])
-            if (dashboardRes.ok) {
-              const newData = await dashboardRes.json()
-              setDashboardData(newData)
-              if (newData.serverRefreshedAt) {
-                serverTimestampRef.current = newData.serverRefreshedAt
-                setRelativeTime(getRelativeTime(new Date(newData.serverRefreshedAt)))
-              }
-            }
-            if (metagraphRes.ok) {
-              const newMetagraph = await metagraphRes.json()
-              setMetagraph(newMetagraph)
-            }
-          } catch (error) {
-            console.error('[Dashboard] Visibility refresh failed:', error)
+      if (document.visibilityState !== 'visible') return
+      const fetchData = async () => {
+        try {
+          const cacheBuster = `?t=${Date.now()}`
+          const [dashboardRes, metagraphRes] = await Promise.all([
+            fetch(`/api/dashboard${cacheBuster}`),
+            fetch(`/api/metagraph${cacheBuster}`)
+          ])
+          if (dashboardRes.ok) {
+            const newData = await dashboardRes.json()
+            setDashboardData(newData)
           }
+          if (metagraphRes.ok) {
+            const newMetagraph = await metagraphRes.json()
+            setMetagraph(newMetagraph)
+          }
+        } catch {
+          // Best-effort refresh; ignore.
         }
-        fetchData()
       }
+      fetchData()
     }
 
     document.addEventListener('visibilitychange', handleVisibilityChange)
@@ -291,132 +292,223 @@ export function DashboardClient({ initialData, metagraph: initialMetagraph }: Da
     setActiveTab('miner-tracker')
   }
 
+  const isLaunchMode = LAUNCH_MODE !== 'full'
+
   return (
     <div className="min-h-screen bg-background">
       {/* Main Content */}
       <div className="max-w-[1500px] mx-auto px-5 py-4 md:py-6 overflow-auto">
-        {/* Header */}
-        <div className="mb-4 md:mb-6">
-          <div className="flex items-start gap-2 md:gap-3">
-            <a href="https://leadpoet.com" target="_blank" rel="noopener noreferrer" className="hover:opacity-80 transition-opacity mt-0.5">
-              <img
-                src="/icon-64.png"
-                alt="Leadpoet Logo"
-                width={32}
-                height={32}
-                className="rounded"
-              />
+        <header className="relative mb-6 md:mb-8 pb-4 md:pb-5 border-b border-[var(--surface-border)]">
+          <h1 className="text-xl sm:text-2xl md:text-[26px] leading-none tracking-[-0.018em] text-[color:var(--text-primary)]">
+            <a
+              href="https://leadpoet.com"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-semibold hover:opacity-80 transition-opacity"
+              aria-label="Leadpoet, open marketing site in a new tab"
+            >
+              Leadpoet
             </a>
-            <div>
-              <h1 className="text-lg sm:text-xl md:text-2xl font-bold">
-                Leadpoet Subnet Dashboard
-              </h1>
-              <p className="text-xs sm:text-sm text-muted-foreground mt-1">
-                <span>Updated {relativeTime}</span>
-                <span className="hidden sm:inline">{' '}| <strong>{(dashboardData.totalSubmissionCount || metrics.total).toLocaleString()}</strong> total lead submissions</span>
-              </p>
-            </div>
-          </div>
-        </div>
+            <span className="ml-2 font-light text-[color:var(--text-secondary)]">Subnet Dashboard</span>
+          </h1>
+          {/* Subtle gold underscore: editorial masthead accent. */}
+          <span
+            aria-hidden
+            className="absolute left-0 bottom-[-1px] h-px w-16 md:w-20"
+            style={{
+              background:
+                'linear-gradient(90deg, var(--brand) 0%, rgba(201,169,110,0) 100%)',
+            }}
+          />
+        </header>
 
-        {/* Tabs */}
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4 md:space-y-6">
-          <TabsList className="flex w-full overflow-x-auto">
-            <TabsTrigger value="overview" className="flex-1 gap-1.5">
-              <LayoutDashboard className="h-4 w-4 shrink-0" />
-              <span className="hidden sm:inline lg:hidden text-xs whitespace-nowrap">Overview</span>
-              <span className="hidden lg:inline text-xs whitespace-nowrap">Overview</span>
-            </TabsTrigger>
-            <TabsTrigger value="fulfillment" className="flex-1 gap-1.5">
-              <Package className="h-4 w-4 shrink-0" />
-              <span className="hidden sm:inline lg:hidden text-xs whitespace-nowrap">Fulfill</span>
-              <span className="hidden lg:inline text-xs whitespace-nowrap">Fulfillment</span>
-            </TabsTrigger>
-            <TabsTrigger value="model-competition" className="flex-1 gap-1.5">
-              <Trophy className="h-4 w-4 shrink-0" />
-              <span className="hidden sm:inline lg:hidden text-xs whitespace-nowrap">Model</span>
-              <span className="hidden lg:inline text-xs whitespace-nowrap">Model Competition</span>
-            </TabsTrigger>
-            <TabsTrigger value="miner-tracker" className="flex-1 gap-1.5">
-              <Pickaxe className="h-4 w-4 shrink-0" />
-              <span className="hidden sm:inline lg:hidden text-xs whitespace-nowrap">Miner</span>
-              <span className="hidden lg:inline text-xs whitespace-nowrap">Miner Tracker</span>
-            </TabsTrigger>
-            <TabsTrigger value="epoch-analysis" className="flex-1 gap-1.5">
-              <Layers className="h-4 w-4 shrink-0" />
-              <span className="hidden sm:inline lg:hidden text-xs whitespace-nowrap">Epoch</span>
-              <span className="hidden lg:inline text-xs whitespace-nowrap">Epoch Analysis</span>
-            </TabsTrigger>
-            <TabsTrigger value="submission-tracker" className="flex-1 gap-1.5">
-              <Search className="h-4 w-4 shrink-0" />
-              <span className="hidden sm:inline lg:hidden text-xs whitespace-nowrap">Search</span>
-              <span className="hidden lg:inline text-xs whitespace-nowrap">Lead Search</span>
-            </TabsTrigger>
-            <TabsTrigger value="faq" className="flex-1 gap-1.5">
-              <HelpCircle className="h-4 w-4 shrink-0" />
-              <span className="hidden sm:inline text-xs whitespace-nowrap">FAQ</span>
-            </TabsTrigger>
+        {/* Tabs: gated by launch mode. */}
+        <Tabs value={activeTab} onValueChange={handleTabChange} className="space-y-4 md:space-y-6">
+          <TabsList
+            className={cn(
+              'flex w-full overflow-x-auto bg-slate-900/40 border border-slate-800/70 backdrop-blur-sm h-auto p-1 gap-1'
+            )}
+          >
+            {VISIBLE_TABS.includes('fulfillment') && (
+              <DashboardTabTrigger
+                value="fulfillment"
+                label="Fulfillment"
+              />
+            )}
+            {VISIBLE_TABS.includes('model-competition') && (
+              <DashboardTabTrigger
+                value="model-competition"
+                label="Model Competition"
+                shortLabel="Model"
+              />
+            )}
+            {/* Below this point: only rendered in `full` mode. */}
+            {VISIBLE_TABS.includes('overview') && (
+              <DashboardTabTrigger
+                value="overview"
+                label="Overview"
+              />
+            )}
+            {VISIBLE_TABS.includes('miner-tracker') && (
+              <DashboardTabTrigger
+                value="miner-tracker"
+                label="Miner Tracker"
+                shortLabel="Miner"
+              />
+            )}
+            {VISIBLE_TABS.includes('epoch-analysis') && (
+              <DashboardTabTrigger
+                value="epoch-analysis"
+                label="Epoch Analysis"
+                shortLabel="Epoch"
+              />
+            )}
+            {VISIBLE_TABS.includes('submission-tracker') && (
+              <DashboardTabTrigger
+                value="submission-tracker"
+                label="Lead Search"
+                shortLabel="Search"
+              />
+            )}
+            {VISIBLE_TABS.includes('faq') && (
+              <DashboardTabTrigger
+                value="faq"
+                label="FAQ"
+              />
+            )}
           </TabsList>
 
-          <TabsContent value="overview" keepMounted>
-            <Overview
-              metrics={metrics}
-              minerStats={minerStats}
-              rejectionReasons={rejectionReasons}
-              activeMinerCount={activeMinerCount}
-              inventoryData={inventoryData}
-              weeklyInventoryData={weeklyInventoryData}
-              leadInventoryCount={dashboardData.leadInventoryCount}
-              alphaPrice={metagraph?.alphaPrice ?? null}
-              onMinerClick={handleMinerClick}
-              metagraph={metagraph}
-              qualificationMinerHotkeys={dashboardData.qualificationMinerHotkeys || []}
-            />
-          </TabsContent>
+          {/* Launch tabs stay mounted so switching tabs does not flash loading states. */}
+          {VISIBLE_TABS.includes('fulfillment') && mountedTabs.has('fulfillment') && (
+            <TabsContent
+              value="fulfillment"
+              keepMounted
+              className="data-[state=active]:animate-in data-[state=active]:fade-in-0 data-[state=active]:duration-300"
+            >
+              <ErrorBoundary label="Fulfillment">
+                <Fulfillment />
+              </ErrorBoundary>
+            </TabsContent>
+          )}
 
-          <TabsContent value="miner-tracker" keepMounted>
-            <MinerTracker
-              minerStats={minerStats}
-              activeMiners={activeMiners}
-              metagraph={metagraph}
-              externalSelectedMiner={selectedMinerHotkey}
-              onMinerSelected={() => setSelectedMinerHotkey(null)}
-            />
-          </TabsContent>
+          {VISIBLE_TABS.includes('model-competition') && mountedTabs.has('model-competition') && (
+            <TabsContent
+              value="model-competition"
+              keepMounted
+              className="data-[state=active]:animate-in data-[state=active]:fade-in-0 data-[state=active]:duration-300"
+            >
+              <ErrorBoundary label="ModelCompetition">
+                <ModelCompetition />
+              </ErrorBoundary>
+            </TabsContent>
+          )}
 
-          <TabsContent value="epoch-analysis" keepMounted>
-            <EpochAnalysis
-              epochStats={epochStats}
-              metagraph={metagraph}
-              onMinerClick={handleMinerClick}
-              externalSelectedEpoch={selectedEpochId}
-              onEpochSelected={() => setSelectedEpochId(null)}
-            />
-          </TabsContent>
+          {VISIBLE_TABS.includes('faq') && mountedTabs.has('faq') && (
+            <TabsContent
+              value="faq"
+              keepMounted
+              className="data-[state=active]:animate-in data-[state=active]:fade-in-0 data-[state=active]:duration-300"
+            >
+              <ErrorBoundary label="FAQ">
+                <FAQ />
+              </ErrorBoundary>
+            </TabsContent>
+          )}
 
-          <TabsContent value="submission-tracker" keepMounted>
-            <SubmissionTracker
-              minerStats={minerStats}
-              epochStats={epochStats}
-              metagraph={metagraph}
-              onUidClick={handleUidClick}
-              onEpochClick={handleEpochClick}
-            />
-          </TabsContent>
+          {/* Non-launch tabs: keepMounted is intentional here so the
+              chart-heavy Overview / MinerTracker views don't lose state
+              when admins switch back-and-forth. Only rendered in full mode. */}
+          {!isLaunchMode && VISIBLE_TABS.includes('overview') && (
+            <TabsContent value="overview" keepMounted>
+              <Overview
+                metrics={metrics}
+                minerStats={minerStats}
+                rejectionReasons={rejectionReasons}
+                activeMinerCount={activeMinerCount}
+                inventoryData={inventoryData}
+                weeklyInventoryData={weeklyInventoryData}
+                leadInventoryCount={dashboardData.leadInventoryCount}
+                alphaPrice={metagraph?.alphaPrice ?? null}
+                onMinerClick={handleMinerClick}
+                metagraph={metagraph}
+                qualificationMinerHotkeys={dashboardData.qualificationMinerHotkeys || []}
+              />
+            </TabsContent>
+          )}
 
-          <TabsContent value="model-competition" keepMounted>
-            <ModelCompetition />
-          </TabsContent>
+          {!isLaunchMode && VISIBLE_TABS.includes('miner-tracker') && (
+            <TabsContent value="miner-tracker" keepMounted>
+              <MinerTracker
+                minerStats={minerStats}
+                activeMiners={activeMiners}
+                metagraph={metagraph}
+                externalSelectedMiner={selectedMinerHotkey}
+                onMinerSelected={() => setSelectedMinerHotkey(null)}
+              />
+            </TabsContent>
+          )}
 
-          <TabsContent value="fulfillment" keepMounted>
-            <Fulfillment />
-          </TabsContent>
+          {!isLaunchMode && VISIBLE_TABS.includes('epoch-analysis') && (
+            <TabsContent value="epoch-analysis" keepMounted>
+              <EpochAnalysis
+                epochStats={epochStats}
+                metagraph={metagraph}
+                onMinerClick={handleMinerClick}
+                externalSelectedEpoch={selectedEpochId}
+                onEpochSelected={() => setSelectedEpochId(null)}
+              />
+            </TabsContent>
+          )}
 
-          <TabsContent value="faq" keepMounted>
-            <FAQ />
-          </TabsContent>
+          {!isLaunchMode && VISIBLE_TABS.includes('submission-tracker') && (
+            <TabsContent value="submission-tracker" keepMounted>
+              <SubmissionTracker
+                minerStats={minerStats}
+                epochStats={epochStats}
+                metagraph={metagraph}
+                onUidClick={handleUidClick}
+                onEpochClick={handleEpochClick}
+              />
+            </TabsContent>
+          )}
         </Tabs>
       </div>
     </div>
+  )
+}
+
+/* ============================================================
+ * DashboardTabTrigger. Styled to match the editorial palette.
+ * Gold active indicator, warm-neutral resting state, accessible
+ * focus ring. Replaces the default muted Radix styling.
+ * ============================================================ */
+function DashboardTabTrigger({
+  value,
+  label,
+  shortLabel,
+}: {
+  value: string
+  label: string
+  shortLabel?: string
+}) {
+  return (
+    <TabsTrigger
+      value={value}
+      className={cn(
+        'flex-1 inline-flex items-center justify-center gap-1.5 rounded-md border border-transparent',
+        'h-10 px-2.5 text-xs font-medium whitespace-nowrap transition-all',
+        // Resting state
+        'text-slate-400 hover:text-slate-100 hover:bg-slate-800/40',
+        // Focus
+        'focus:outline-none focus-visible:ring-1 focus-visible:ring-[color:var(--brand)]',
+        // Active state: gold accent
+        'data-[state=active]:bg-slate-900/70 data-[state=active]:text-gold',
+        'data-[state=active]:border-[rgba(201,169,110,0.30)]',
+        'data-[state=active]:shadow-[0_0_0_1px_rgba(201,169,110,0.10)]'
+      )}
+    >
+      <span className="inline md:hidden">{shortLabel ?? label}</span>
+      <span className="hidden md:inline">{label}</span>
+    </TabsTrigger>
   )
 }

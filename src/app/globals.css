@@ -119,9 +119,220 @@
   * {
     @apply border-border outline-ring/50;
   }
+  /* Reserve space for the vertical scrollbar so tab content with
+     different heights doesn't horizontally shift the layout. */
+  html {
+    scrollbar-gutter: stable;
+  }
   body {
     @apply bg-background text-foreground;
+    /* Premium typography: tabular numerals + proper kerning everywhere */
+    font-feature-settings: "tnum" 1, "ss01" 1, "cv11" 1;
+    font-variant-numeric: tabular-nums;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
+  /* Numbers always align in columns */
+  code,
+  kbd,
+  .font-mono {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+/* =================================================================
+ * Premium dashboard design tokens. Editorial palette.
+ *
+ * Direction: warm off-black canvas, monochrome neutrals with a
+ * single warm-gold brand accent. Inspired by Stripe Atlas, Linear,
+ * and editorial print design. Avoids generic Tailwind saturation.
+ * ================================================================= */
+:root {
+  /* Brand: warm champagne gold. Used for win states, focus rings,
+     and the single "value" accent throughout. */
+  --brand: #c9a96e;
+  --brand-soft: #c9a96e1f;
+  --brand-strong: #b89456;
+
+  /* Semantic accents. Restrained, warm-leaning. */
+  --accent-pending: #cf9d61;       /* dusty amber, less screaming than #f59e0b */
+  --accent-completed: #e8e1d4;     /* warm cream white, "finalized" */
+  --accent-positive: #c9a96e;      /* brand gold, used for wins */
+  --accent-negative: #a8746f;      /* dusty burgundy-rose */
+  --accent-top: #e8c987;           /* brighter gold for top-tier emphasis */
+
+  /* Surface elevation. Exactly three levels (base, surface, elevated). */
+  --surface-base: #08080a;          /* canvas, warm off-black */
+  --surface: #101013;               /* card / panel base */
+  --surface-elevated: #18181d;      /* hover / popover */
+  --surface-border: rgba(245, 240, 232, 0.07);
+  --surface-border-strong: rgba(245, 240, 232, 0.14);
+
+  /* Type. Warm off-whites and grays. */
+  --text-primary: #f5f0e8;
+  --text-secondary: #a8a39a;
+  --text-tertiary: #6a655e;
+}
+
+/* =================================================================
+ * Semantic accent utilities, used instead of Tailwind's emerald /
+ * amber / rose / sky stocks. Each token has matching text-, bg-soft,
+ * bg-tint, and border-soft variants so the palette stays disciplined.
+ * ================================================================= */
+.text-gold        { color: #c9a96e; }
+.text-gold-bright { color: #e8c987; }
+.text-cream       { color: #e8e1d4; }
+.text-amber-warm  { color: #cf9d61; }
+.text-burgundy    { color: #a8746f; }
+
+.bg-gold-soft       { background-color: rgba(201, 169, 110, 0.10); }
+.bg-gold-tint       { background-color: rgba(201, 169, 110, 0.16); }
+.bg-amber-warm-soft { background-color: rgba(207, 157, 97, 0.12); }
+.bg-cream-soft      { background-color: rgba(232, 225, 212, 0.08); }
+.bg-cream-tint      { background-color: rgba(232, 225, 212, 0.14); }
+.bg-burgundy-soft   { background-color: rgba(168, 116, 111, 0.10); }
+
+.border-gold-soft       { border-color: rgba(201, 169, 110, 0.30); }
+.border-amber-warm-soft { border-color: rgba(207, 157, 97, 0.32); }
+.border-cream-soft      { border-color: rgba(232, 225, 212, 0.28); }
+.border-burgundy-soft   { border-color: rgba(168, 116, 111, 0.30); }
+.border-gold-strong     { border-color: rgba(201, 169, 110, 0.45); }
+
+.ring-gold-soft   { box-shadow: 0 0 0 1px rgba(201, 169, 110, 0.20); }
+
+/* Hover bg used on neutral interactive surfaces (rows, list items) */
+.hover-bg-warm:hover { background-color: rgba(245, 240, 232, 0.04); }
+
+/* Solid dot for live indicators */
+.dot-gold  { background-color: #c9a96e; }
+.dot-amber { background-color: #cf9d61; }
+
+/* =================================================================
+ * Premium micro-animations
+ * ================================================================= */
+
+/* Live data pulse: fades in/out behind a small dot.
+   The transform-box / transform-origin pair is critical: SVG elements
+   default to (0,0) as the transform origin, which would scale the
+   element away from its own center. These two properties make the
+   scale animation pulse in place on both HTML and SVG. */
+@keyframes live-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(1.25); }
+}
+.live-pulse {
+  animation: live-pulse 2s ease-in-out infinite;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+/* Soft breathing for pending request nodes */
+@keyframes pending-breath {
+  0%, 100% { opacity: 0.85; }
+  50% { opacity: 1; }
+}
+.pending-breath {
+  animation: pending-breath 2.4s ease-in-out infinite;
+}
+
+/* Shimmer for loading skeletons */
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+.shimmer {
+  background-image: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(245, 240, 232, 0.04) 20%,
+    rgba(245, 240, 232, 0.08) 50%,
+    rgba(245, 240, 232, 0.04) 80%,
+    transparent 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 2.2s ease-in-out infinite;
+}
+
+/* Orbital loading dots for the cosmos */
+@keyframes orbit-fade {
+  0%, 100% { opacity: 0.15; }
+  50% { opacity: 0.85; }
+}
+.orbit-dot {
+  animation: orbit-fade 1.6s ease-in-out infinite;
+}
+
+/* Cosmos filter-change soft fade */
+@keyframes cosmos-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.cosmos-fade-in {
+  animation: cosmos-fade-in 380ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* Premium card hover lift */
+.card-lift {
+  transition: transform 180ms cubic-bezier(0.16, 1, 0.3, 1),
+              box-shadow 180ms cubic-bezier(0.16, 1, 0.3, 1),
+              border-color 180ms ease-out;
+}
+.card-lift:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 18px 40px -20px rgba(0, 0, 0, 0.7),
+              0 0 0 1px rgba(245, 240, 232, 0.06);
+}
+
+/* Subtle focus ring for inputs (warm gold) */
+.premium-focus:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 1px var(--surface-border),
+              0 0 0 3px rgba(201, 169, 110, 0.18);
+  border-color: var(--brand);
+  transition: box-shadow 160ms ease-out, border-color 160ms ease-out;
+}
+
+/* Mobile safe-area utilities (iPhone home indicator etc.) */
+.safe-bottom {
+  padding-bottom: max(1rem, env(safe-area-inset-bottom));
+}
+.safe-top {
+  padding-top: max(0.5rem, env(safe-area-inset-top));
+}
+
+/* Mobile section card. Used by FulfillmentMobile. */
+.mobile-section {
+  border-radius: 0.875rem;
+  border: 1px solid var(--surface-border);
+  background: rgba(16, 16, 19, 0.65);
+  overflow: hidden;
+}
+
+/* Hide scrollbars but keep scrollability. Used for filter pill rows. */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* Keyboard hint chip */
+.kbd-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.25rem;
+  height: 1.25rem;
+  padding: 0 0.3125rem;
+  font-family: var(--font-mono), monospace;
+  font-size: 10px;
+  font-weight: 500;
+  color: rgba(245, 240, 232, 0.6);
+  background: rgba(24, 24, 29, 0.8);
+  border: 1px solid var(--surface-border-strong);
+  border-radius: 4px;
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.5);
 }
 
 /* Remove focus outline from chart elements */
@@ -146,10 +357,10 @@
   box-shadow: none !important;
 }
 
-/* Custom scrollbar styling - remove white background */
+/* Custom scrollbar styling: warm neutral, low contrast */
 * {
   scrollbar-width: thin;
-  scrollbar-color: #1e293b transparent;
+  scrollbar-color: #25252b transparent;
 }
 
 *::-webkit-scrollbar {
@@ -162,12 +373,12 @@
 }
 
 *::-webkit-scrollbar-thumb {
-  background-color: #1e293b;
+  background-color: #25252b;
   border-radius: 4px;
 }
 
 *::-webkit-scrollbar-thumb:hover {
-  background-color: #334155;
+  background-color: #35353c;
 }
 
 *::-webkit-scrollbar-corner {

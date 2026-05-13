@@ -697,7 +697,7 @@ export function useLeadsQuery(options: UseLeadsQueryOptions = {}): UseLeadsQuery
         }
       }
 
-      // Build leads — match consensus by lead_id first, then email_hash
+      // Build leads. Match consensus by lead_id first, then email_hash.
       const leads: CachedLead[] = submissions.map(sub => {
         const subPayload = sub.payload as { lead_id?: string } | null
         const lid = subPayload?.lead_id

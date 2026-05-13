@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server'
 import { fetchMetagraph } from '@/lib/metagraph'
 
+export const dynamic = 'force-dynamic'
+
 // Metagraph changes slowly on-chain, but keep cache aligned with server memory TTL
 export async function GET() {
   try {

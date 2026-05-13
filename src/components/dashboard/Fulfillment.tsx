@@ -1,21 +1,30 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import * as DialogPrimitive from '@radix-ui/react-dialog'
+import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
-  Package,
-  Trophy,
-  Search,
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import { cn } from '@/lib/utils'
+import {
   AlertCircle,
-  CheckCircle,
-  XCircle,
-  Clock,
-  Target,
   Copy,
-  Recycle,
+  X,
+  ChevronRight,
+  Loader2,
 } from 'lucide-react'
+import {
+  FulfillmentCosmos,
+  type CosmosConsensusLead,
+  type CosmosRequest,
+} from './FulfillmentCosmos'
+import { FulfillmentMobile } from './FulfillmentMobile'
 
 interface IcpDetails {
   prompt?: string
@@ -79,59 +88,152 @@ interface MinerScore {
 
 interface FulfillmentData {
   activeRequests: ActiveRequest[]
-  winners: ConsensusResult[]
   allConsensus: ConsensusResult[]
   minerScores: MinerScore[] | null
   requestMap: Record<string, { icp_details: IcpDetails; num_leads: number; status: string }>
   rejectionBreakdown: { reason: string; count: number }[]
   leaderboard: { rank: number; hotkey: string; wins: number; bonusPct: number }[]
-  scoreTotals: { passed: number; failed: number }
+  scoreTotals: { passed: number; failed: number; sampleSize?: number }
   stats: {
     activeRequestCount: number
     totalConsensus: number
     totalWinners: number
     fulfilledCount: number
     recycledCount: number
+    leaderboardWindowDays?: number
   }
 }
 
+type FilterMode = 'all' | 'pending' | 'completed'
+
+const PENDING_STATUSES = ['pending', 'open', 'continued_open', 'commit_closed', 'scoring']
+
+// Human-readable rejection labels.
+// Pattern: prefer "Wrong X" for ICP-fit mismatches (concise, scannable),
+// descriptive for verification states ("Email greylisted", "Already delivered").
+// Where the same concept is checked twice (e.g. industry by miner text-match
+// vs by LLM verification), suffix with the verifier in parens.
 const REJECTION_LABELS: Record<string, string> = {
-  seniority_mismatch: 'Seniority Mismatch',
-  insufficient_intent: 'Insufficient Intent',
-  lead_validation_stage4: 'Person Not Verified (LinkedIn)',
-  truelist_inline_verification: 'Email Verification Failed (Inline)',
-  truelist_batch: 'Email Verification Failed (Batch)',
-  check_stage5_unified: 'Company Verification Failed',
-  check_domain_age: 'Domain Age Check Failed',
-  check_mx_record: 'MX Record Check Failed',
-  check_head_request: 'Website Head Request Failed',
-  industry_mismatch: 'Industry Mismatch',
-  sub_industry_mismatch: 'Sub-Industry Mismatch',
-  employee_count_mismatch: 'Employee Count Mismatch',
-  country_mismatch: 'Country Mismatch',
-  role_mismatch: 'Role Mismatch',
-  geography_mismatch: 'Geography Mismatch',
-  duplicate_company: 'Duplicate Company',
-  company_excluded: 'Company Excluded',
-  fabricated_lead: 'Fabricated Lead',
-  fulfillment_company_industry_mismatch: 'Company Industry Mismatch',
-  fulfillment_company_website_mismatch: 'Company Website Mismatch',
-  fulfillment_company_name_mismatch: 'Company Name Mismatch',
-  fulfillment_company_description_invalid: 'Company Description Invalid',
-  fulfillment_company_size_mismatch: 'Company Size Mismatch',
-  fulfillment_person_company_name_mismatch: 'Person/Company Name Mismatch',
-  fulfillment_person_company_url_mismatch: 'Person/Company URL Mismatch',
-  fulfillment_person_no_company_url: 'Person No Company URL',
-  fulfillment_person_location_mismatch: 'Person Location Mismatch',
-  fulfillment_person_role_mismatch: 'Person Role Mismatch',
-  email_accept_all: 'Email Accept-All (Unverifiable)',
-  email_unknown_error: 'Email Verification Error',
-  email_failed_greylisted: 'Email Greylisted',
-  email_failed_no_mailbox: 'Email No Mailbox',
+  // Intent & ICP fit
+  insufficient_intent: 'Weak intent signals',
+  seniority_mismatch: 'Wrong seniority',
+  industry_mismatch: 'Wrong industry',
+  sub_industry_mismatch: 'Wrong sub-industry',
+  employee_count_mismatch: 'Wrong company size',
+  country_mismatch: 'Wrong country',
+  role_mismatch: 'Wrong role',
+  geography_mismatch: 'Wrong location',
+
+  // Email verification
+  truelist_inline_verification: 'Invalid email',
+  truelist_batch: 'Invalid email',
+  email_accept_all: 'Catch-all email server',
+  email_unknown_error: 'Email check failed',
+  email_failed_greylisted: 'Email greylisted',
+  email_failed_no_mailbox: 'No mailbox',
+  check_mx_record: 'No email server',
+
+  // Person verification (LinkedIn)
+  lead_validation_stage4: 'Person not on LinkedIn',
+  fulfillment_person_company_name_mismatch: 'Different company on LinkedIn',
+  fulfillment_person_company_url_mismatch: 'LinkedIn company link mismatch',
+  fulfillment_person_no_company_url: 'No company linked on LinkedIn',
+  fulfillment_person_location_mismatch: 'Wrong location on LinkedIn',
+  fulfillment_person_role_mismatch: 'Wrong role on LinkedIn',
+
+  // Company verification (LLM / web)
+  check_stage5_unified: "Couldn't verify company",
+  check_domain_age: 'Company too new',
+  check_head_request: 'Company website unreachable',
+  fulfillment_company_industry_mismatch: 'Wrong industry (verified)',
+  fulfillment_company_industry_classification_mismatch: 'Wrong industry (verified)',
+  fulfillment_company_website_mismatch: 'Wrong company website',
+  fulfillment_company_name_mismatch: 'Wrong company name',
+  fulfillment_company_description_invalid: 'Bad company description',
+  fulfillment_company_size_mismatch: 'Wrong company size (verified)',
+
+  // Other / outcome
+  duplicate_company: 'Duplicate company',
+  company_excluded: 'Already delivered',
+  fabricated_lead: 'Fabricated data',
 }
 
 function readableReason(reason: string): string {
-  return REJECTION_LABELS[reason] || reason.replace(/_/g, ' ')
+  if (REJECTION_LABELS[reason]) return REJECTION_LABELS[reason]
+  // Fallback for unknown keys: sentence case, with common proper nouns preserved.
+  const spaced = reason.replace(/_/g, ' ').trim().toLowerCase()
+  const sentence = spaced.charAt(0).toUpperCase() + spaced.slice(1)
+  // Restore casing for known proper nouns / acronyms.
+  return sentence
+    .replace(/\blinkedin\b/gi, 'LinkedIn')
+    .replace(/\bicp\b/gi, 'ICP')
+    .replace(/\burl\b/gi, 'URL')
+    .replace(/\bllm\b/gi, 'LLM')
+    .replace(/\bmx\b/gi, 'MX')
+}
+
+// Map a failure_reason to a high-level category for grouping.
+const CATEGORY_FOR_REASON: Record<string, string> = {
+  insufficient_intent: 'ICP mismatch',
+  industry_mismatch: 'ICP mismatch',
+  sub_industry_mismatch: 'ICP mismatch',
+  role_mismatch: 'ICP mismatch',
+  seniority_mismatch: 'ICP mismatch',
+  geography_mismatch: 'ICP mismatch',
+  country_mismatch: 'ICP mismatch',
+  employee_count_mismatch: 'ICP mismatch',
+  truelist_inline_verification: 'Email verification',
+  truelist_batch: 'Email verification',
+  email_accept_all: 'Email verification',
+  email_unknown_error: 'Email verification',
+  email_failed_greylisted: 'Email verification',
+  email_failed_no_mailbox: 'Email verification',
+  lead_validation_stage4: 'Person verification',
+  fulfillment_person_company_name_mismatch: 'Person verification',
+  fulfillment_person_company_url_mismatch: 'Person verification',
+  fulfillment_person_no_company_url: 'Person verification',
+  fulfillment_person_location_mismatch: 'Person verification',
+  fulfillment_person_role_mismatch: 'Person verification',
+  check_stage5_unified: 'Company verification',
+  check_domain_age: 'Company verification',
+  check_mx_record: 'Company verification',
+  check_head_request: 'Company verification',
+  fulfillment_company_industry_mismatch: 'Company verification',
+  fulfillment_company_website_mismatch: 'Company verification',
+  fulfillment_company_name_mismatch: 'Company verification',
+  fulfillment_company_description_invalid: 'Company verification',
+  fulfillment_company_size_mismatch: 'Company verification',
+  duplicate_company: 'Other',
+  company_excluded: 'Other',
+  fabricated_lead: 'Fabrication',
+}
+
+// Editorial category palette. Restrained, mostly neutral with semantic
+// accents only where it actually communicates state. Each tone maps to a
+// utility class in toneText() below.
+const CATEGORY_COLORS: Record<string, string> = {
+  Passed: 'gold',
+  'ICP mismatch': 'amber',
+  'Email verification': 'cream',
+  'Person verification': 'neutral',
+  'Company verification': 'neutral',
+  Fabrication: 'burgundy',
+  Other: 'neutral',
+}
+
+const CATEGORY_ORDER = [
+  'ICP mismatch',
+  'Company verification',
+  'Email verification',
+  'Person verification',
+  'Fabrication',
+  'Other',
+  'Passed',
+]
+
+function categorizeScore(s: MinerScore): string {
+  if (!s.failure_reason) return 'Passed'
+  return CATEGORY_FOR_REASON[s.failure_reason] || 'Other'
 }
 
 function truncateHotkey(hotkey: string): string {
@@ -139,80 +241,156 @@ function truncateHotkey(hotkey: string): string {
   return `${hotkey.slice(0, 6)}...${hotkey.slice(-4)}`
 }
 
+function formatDate(dateStr: string): string {
+  if (!dateStr) return ''
+  const d = new Date(dateStr)
+  if (Number.isNaN(d.getTime())) return ''
+  return d.toLocaleString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+
+function formatRelative(dateStr: string | null | undefined): string {
+  if (!dateStr) return ''
+  const d = new Date(dateStr)
+  if (Number.isNaN(d.getTime())) return ''
+  const diff = (Date.now() - d.getTime()) / 1000
+  if (diff < 60) return 'just now'
+  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`
+  if (diff < 86400 * 7) return `${Math.floor(diff / 86400)}d ago`
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+}
+
+function asText(v: unknown): string {
+  if (typeof v === 'string') return v
+  if (Array.isArray(v)) {
+    return v.filter((x) => typeof x === 'string' && x.length > 0).join(', ')
+  }
+  if (v == null) return ''
+  return String(v)
+}
+
+// Deterministic, muted color swatch from hotkey. Low saturation keeps the
+// palette feeling editorial. Every avatar reads as a refined chromatic
+// neutral rather than a vivid Tailwind hue.
+function hotkeySwatch(hotkey: string): { hue: number; hex: string; initials: string } {
+  let h = 0
+  for (let i = 0; i < hotkey.length; i++) {
+    h = (h * 33 + hotkey.charCodeAt(i)) | 0
+  }
+  const hue = Math.abs(h) % 360
+  const initials = hotkey.slice(2, 4).toUpperCase()
+  return { hue, hex: `hsl(${hue}, 22%, 58%)`, initials }
+}
+
+// Smooth count-up animation for premium feel on stat displays
+function CountUp({ value, duration = 600, className }: { value: number; duration?: number; className?: string }) {
+  const [display, setDisplay] = useState(value)
+  const fromRef = useRef(value)
+  useEffect(() => {
+    const from = fromRef.current
+    const to = value
+    if (from === to) return
+    let raf = 0
+    const start = performance.now()
+    const tick = (now: number) => {
+      const t = Math.min(1, (now - start) / duration)
+      const eased = 1 - Math.pow(1 - t, 3)
+      const next = Math.round(from + (to - from) * eased)
+      setDisplay(next)
+      if (t < 1) raf = requestAnimationFrame(tick)
+      else fromRef.current = to
+    }
+    raf = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(raf)
+  }, [value, duration])
+  return <span className={cn('tabular-nums', className)}>{display.toLocaleString()}</span>
+}
+
 function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false)
   return (
     <button
-      className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+      className="inline-flex items-center gap-1 text-[10px] text-slate-500 hover:text-slate-100 transition-colors"
       onClick={(e) => {
         e.stopPropagation()
         navigator.clipboard.writeText(text)
         setCopied(true)
-        setTimeout(() => setCopied(false), 2000)
+        setTimeout(() => setCopied(false), 1500)
       }}
+      title="Copy hotkey"
+      aria-label="Copy hotkey"
     >
       <Copy className="h-3 w-3" />
-      {copied && <span className="text-green-500">Copied</span>}
+      {copied && <span className="text-gold">Copied</span>}
     </button>
   )
-}
-
-function VerificationBadge({ label, passed }: { label: string; passed: boolean }) {
-  return (
-    <Badge variant={passed ? "outline" : "secondary"} className={`text-[10px] gap-0.5 ${passed ? 'text-green-500 border-green-500/30' : 'text-red-400 border-red-500/20'}`}>
-      {passed ? <CheckCircle className="h-2.5 w-2.5" /> : <XCircle className="h-2.5 w-2.5" />}
-      {label}
-    </Badge>
-  )
-}
-
-function RequestStatusBadge({ status }: { status: string }) {
-  switch (status) {
-    case 'pending':
-      return <Badge variant="secondary" className="gap-1"><Clock className="h-3 w-3" />Pending</Badge>
-    case 'open':
-      return <Badge variant="default" className="gap-1 bg-green-600"><Clock className="h-3 w-3" />Open</Badge>
-    case 'continued_open':
-      return <Badge variant="default" className="gap-1 bg-green-600"><Clock className="h-3 w-3" />Open</Badge>
-    case 'commit_closed':
-      return <Badge variant="secondary" className="gap-1"><Package className="h-3 w-3" />Commits Closed</Badge>
-    case 'scoring':
-      return <Badge variant="default" className="gap-1 bg-blue-500"><Target className="h-3 w-3" />Scoring</Badge>
-    case 'fulfilled':
-      return <Badge variant="default" className="gap-1 bg-green-700"><CheckCircle className="h-3 w-3" />Fulfilled</Badge>
-    case 'recycled':
-      return <Badge variant="secondary" className="gap-1"><Recycle className="h-3 w-3" />Recycled</Badge>
-    default:
-      return <Badge variant="secondary">{status}</Badge>
-  }
-}
-
-function formatDate(dateStr: string): string {
-  return new Date(dateStr).toLocaleString('en-US', {
-    month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
-  })
 }
 
 export function Fulfillment() {
   const [data, setData] = useState<FulfillmentData | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [minerSearch, setMinerSearch] = useState('')
-  const [searchedMiner, setSearchedMiner] = useState<string | null>(null)
-  const [expandedRequest, setExpandedRequest] = useState<string | null>(null)
-  const [expandedScore, setExpandedScore] = useState<string | null>(null)
+  const [filter, setFilter] = useState<FilterMode>('all')
+  const [searchQuery, setSearchQuery] = useState('')
+  const [dialogRequest, setDialogRequest] = useState<ActiveRequest | null>(null)
+  const [inspectedMiner, setInspectedMiner] = useState<string | null>(null)
+  const [minerCache, setMinerCache] = useState<
+    Record<
+      string,
+      {
+        scores: MinerScore[]
+        requestMap: Record<string, { icp_details: IcpDetails; num_leads: number; status: string }>
+      }
+    >
+  >({})
+  const [minerLoading, setMinerLoading] = useState<string | null>(null)
+  // Per-miner fetch errors. The MinerDetailDialog reads from this so failures
+  // are visible to the user instead of producing a blank scores panel.
+  const [minerErrors, setMinerErrors] = useState<Record<string, string>>({})
+  const [panelsVisible, setPanelsVisible] = useState(true)
+  const [historyOpen, setHistoryOpen] = useState(false)
+  const [lastSync, setLastSync] = useState<number | null>(null)
+  const [syncPulse, setSyncPulse] = useState(false)
+  const searchInputRef = useRef<HTMLInputElement>(null)
+  // Last ETag we've seen from the API. Sent back as If-None-Match on the
+  // next poll; if the server's data hasn't changed, we get a 304 and skip
+  // both bandwidth and re-render. See route.ts notes for the protocol.
+  const etagRef = useRef<string | null>(null)
 
-  const fetchData = useCallback(async (minerHotkey?: string) => {
+  const fetchData = useCallback(async () => {
     try {
-      const url = minerHotkey
-        ? `/api/fulfillment?minerHotkey=${encodeURIComponent(minerHotkey)}`
-        : '/api/fulfillment'
-      const res = await fetch(url)
+      const headers: Record<string, string> = {}
+      if (etagRef.current) {
+        headers['If-None-Match'] = etagRef.current
+      }
+      const res = await fetch('/api/fulfillment', { headers, cache: 'no-store' })
+
+      // Server tells us nothing changed since our last successful poll.
+      // Keep the existing data, just refresh the sync indicator.
+      if (res.status === 304) {
+        setLastSync(Date.now())
+        setSyncPulse(true)
+        window.setTimeout(() => setSyncPulse(false), 900)
+        return
+      }
       if (!res.ok) throw new Error('Failed to fetch')
+
+      // Remember the server's ETag so subsequent polls can short-circuit.
+      const nextEtag = res.headers.get('etag')
+      if (nextEtag) etagRef.current = nextEtag
+
       const json = await res.json()
       if (json.success) {
         setData(json.data)
         setError(null)
+        setLastSync(Date.now())
+        setSyncPulse(true)
+        window.setTimeout(() => setSyncPulse(false), 900)
       } else {
         setError(json.error || 'Unknown error')
       }
@@ -225,26 +403,263 @@ export function Fulfillment() {
 
   useEffect(() => {
     fetchData()
-    const interval = setInterval(() => fetchData(searchedMiner || undefined), 60000)
+    const interval = setInterval(fetchData, 60000)
     return () => clearInterval(interval)
-  }, [fetchData, searchedMiner])
+  }, [fetchData])
 
-  const handleMinerSearch = () => {
-    const term = minerSearch.trim()
-    if (!term) return
-    setSearchedMiner(term)
-    setLoading(true)
-    fetchData(term)
-  }
+  // Global "/" keyboard shortcut to focus search
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const isTyping =
+        document.activeElement instanceof HTMLInputElement ||
+        document.activeElement instanceof HTMLTextAreaElement
+      if (e.key === '/' && !isTyping && !e.metaKey && !e.ctrlKey) {
+        e.preventDefault()
+        searchInputRef.current?.focus()
+      }
+      if (e.key === 'Escape' && document.activeElement === searchInputRef.current) {
+        searchInputRef.current?.blur()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
+  const filteredRequests = useMemo<CosmosRequest[]>(() => {
+    if (!data) return []
+    return data.activeRequests
+      .filter((r) => {
+        if (filter === 'all') return true
+        if (filter === 'pending') return PENDING_STATUSES.includes(r.status)
+        if (filter === 'completed') return r.status === 'fulfilled'
+        return true
+      })
+      .map((r) => ({
+        request_id: r.request_id,
+        status: r.status,
+        num_leads: r.num_leads,
+        created_at: r.created_at,
+        icp_details: r.icp_details,
+      }))
+  }, [data, filter])
+
+  const filteredLeads = useMemo<CosmosConsensusLead[]>(() => {
+    if (!data) return []
+    const ids = new Set(filteredRequests.map((r) => r.request_id))
+    return data.allConsensus
+      .filter((c) => ids.has(c.request_id))
+      .map((c) => ({
+        request_id: c.request_id,
+        miner_hotkey: c.miner_hotkey,
+        lead_id: c.lead_id,
+        is_winner: c.is_winner,
+        consensus_final_score: c.consensus_final_score,
+      }))
+  }, [data, filteredRequests])
+
+  const { visibleNodeIds, matchedNodeIds, resultCount } = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase()
+    if (!q) {
+      return {
+        visibleNodeIds: null as Set<string> | null,
+        matchedNodeIds: null as Set<string> | null,
+        resultCount: 0,
+      }
+    }
+    const matched = new Set<string>()
+    for (const r of filteredRequests) {
+      const industry = asText(r.icp_details?.industry).toLowerCase()
+      const subIndustry = asText(r.icp_details?.sub_industry).toLowerCase()
+      if (
+        r.request_id.toLowerCase().includes(q) ||
+        industry.includes(q) ||
+        subIndustry.includes(q)
+      ) {
+        matched.add(`req:${r.request_id}`)
+      }
+    }
+    for (const lead of filteredLeads) {
+      if (lead.miner_hotkey.toLowerCase().includes(q)) {
+        matched.add(`mnr:${lead.miner_hotkey}`)
+      }
+    }
+    const visible = new Set<string>(matched)
+    for (const lead of filteredLeads) {
+      const sId = `req:${lead.request_id}`
+      const mId = `mnr:${lead.miner_hotkey}`
+      if (matched.has(sId)) visible.add(mId)
+      if (matched.has(mId)) visible.add(sId)
+    }
+    return { visibleNodeIds: visible, matchedNodeIds: matched, resultCount: matched.size }
+  }, [searchQuery, filteredRequests, filteredLeads])
+
+  const focusedMinerHotkey = useMemo(() => {
+    if (inspectedMiner) return inspectedMiner
+    const q = searchQuery.trim()
+    if (!q) return null
+    if (!data) return null
+    const lower = q.toLowerCase()
+    const hotkeys = new Set<string>()
+    for (const c of data.allConsensus) hotkeys.add(c.miner_hotkey)
+    for (const l of data.leaderboard) hotkeys.add(l.hotkey)
+    for (const h of hotkeys) {
+      if (h.toLowerCase() === lower) return h
+    }
+    const matches = Array.from(hotkeys).filter((h) => h.toLowerCase().includes(lower))
+    return matches.length === 1 ? matches[0] : null
+  }, [inspectedMiner, searchQuery, data])
+
+  const loadMinerScores = useCallback((hotkey: string) => {
+    let cancelled = false
+    setMinerLoading(hotkey)
+    setMinerErrors((prev) => {
+      if (!(hotkey in prev)) return prev
+      const next = { ...prev }
+      delete next[hotkey]
+      return next
+    })
+    fetch(`/api/fulfillment?minerHotkey=${encodeURIComponent(hotkey)}`)
+      .then((r) => {
+        if (!r.ok) throw new Error(`Request failed (${r.status})`)
+        return r.json()
+      })
+      .then((json) => {
+        if (cancelled) return
+        if (json.success && Array.isArray(json.data?.minerScores)) {
+          // The API returns an EXTENDED requestMap that includes any requests
+          // referenced by this miner's scores that weren't already in the base
+          // fetch. Store both so the popup can resolve ICP details for every row.
+          setMinerCache((prev) => ({
+            ...prev,
+            [hotkey]: {
+              scores: json.data.minerScores,
+              requestMap: json.data.requestMap || {},
+            },
+          }))
+        } else {
+          throw new Error(json.error || 'No score data returned')
+        }
+      })
+      .catch((err) => {
+        if (cancelled) return
+        setMinerErrors((prev) => ({
+          ...prev,
+          [hotkey]: err instanceof Error ? err.message : 'Failed to load miner detail',
+        }))
+      })
+      .finally(() => {
+        if (!cancelled) setMinerLoading(null)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!focusedMinerHotkey) return
+    if (minerCache[focusedMinerHotkey]) return
+    if (minerErrors[focusedMinerHotkey]) return // Don't retry automatically
+    const cleanup = loadMinerScores(focusedMinerHotkey)
+    return cleanup
+  }, [focusedMinerHotkey, minerCache, minerErrors, loadMinerScores])
+
+  const focusedMinerScores = focusedMinerHotkey
+    ? minerCache[focusedMinerHotkey]?.scores ?? null
+    : null
+
+  const rejectionView = useMemo(() => {
+    if (focusedMinerHotkey && focusedMinerScores) {
+      const counts: Record<string, number> = {}
+      let passed = 0
+      let failed = 0
+      for (const s of focusedMinerScores) {
+        if (s.failure_reason) {
+          counts[s.failure_reason] = (counts[s.failure_reason] || 0) + 1
+          failed++
+        } else {
+          passed++
+        }
+      }
+      return {
+        reasons: Object.entries(counts)
+          .sort((a, b) => b[1] - a[1])
+          .map(([reason, count]) => ({ reason, count })),
+        passed,
+        failed,
+        scope: 'miner' as const,
+        label: focusedMinerHotkey,
+        loading: false,
+      }
+    }
+    if (focusedMinerHotkey && minerLoading === focusedMinerHotkey) {
+      return {
+        reasons: [] as { reason: string; count: number }[],
+        passed: 0,
+        failed: 0,
+        scope: 'miner' as const,
+        label: focusedMinerHotkey,
+        loading: true,
+      }
+    }
+    return {
+      reasons: data?.rejectionBreakdown || [],
+      passed: data?.scoreTotals?.passed || 0,
+      failed: data?.scoreTotals?.failed || 0,
+      scope: 'global' as const,
+      label: '',
+      loading: false,
+    }
+  }, [focusedMinerHotkey, focusedMinerScores, minerLoading, data])
+
+  const counts = useMemo(() => {
+    if (!data) return { all: 0, pending: 0, completed: 0 }
+    return {
+      all: data.activeRequests.length,
+      pending: data.activeRequests.filter((r) => PENDING_STATUSES.includes(r.status)).length,
+      completed: data.activeRequests.filter((r) => r.status === 'fulfilled').length,
+    }
+  }, [data])
+
+  const topMinerSet = useMemo(() => {
+    if (!data) return new Set<string>()
+    return new Set(data.leaderboard.map((l) => l.hotkey))
+  }, [data])
+
+  const emphasizedNodeIds = useMemo(() => {
+    if (!focusedMinerHotkey) return null
+    return new Set<string>([`mnr:${focusedMinerHotkey}`])
+  }, [focusedMinerHotkey])
+
+  const dialogLeads = useMemo<ConsensusResult[]>(() => {
+    if (!data || !dialogRequest) return []
+    return data.allConsensus
+      .filter((c) => c.request_id === dialogRequest.request_id)
+      .slice()
+      .sort((a, b) => {
+        if (a.is_winner !== b.is_winner) return a.is_winner ? -1 : 1
+        return b.consensus_final_score - a.consensus_final_score
+      })
+  }, [data, dialogRequest])
+
+  const handleRequestActivate = useCallback(
+    (req: CosmosRequest) => {
+      if (!data) return
+      const full = data.activeRequests.find((r) => r.request_id === req.request_id)
+      if (full) setDialogRequest(full)
+    },
+    [data]
+  )
+
+  const handleMinerActivate = useCallback((hotkey: string) => {
+    setSearchQuery(hotkey)
+    setInspectedMiner(hotkey)
+  }, [])
 
   if (loading && !data) {
     return (
-      <div className="space-y-6">
-        <div className="grid gap-4 grid-cols-2 md:grid-cols-4">
-          {[...Array(4)].map((_, i) => (
-            <Card key={i}><CardHeader className="pb-2"><Skeleton className="h-4 w-24" /></CardHeader><CardContent><Skeleton className="h-8 w-16" /></CardContent></Card>
-          ))}
-        </div>
+      <div className="space-y-4">
+        <Skeleton className="h-12 w-full" />
+        <Skeleton className="h-[680px] w-full" />
       </div>
     )
   }
@@ -262,381 +677,1457 @@ export function Fulfillment() {
 
   if (!data) return null
 
-  // Build consensus map: request_id -> all leads (sorted by score desc)
-  const leadsByRequest = new Map<string, ConsensusResult[]>()
-  for (const c of data.allConsensus) {
-    const list = leadsByRequest.get(c.request_id) || []
-    list.push(c)
-    leadsByRequest.set(c.request_id, list)
-  }
-  for (const [, leads] of leadsByRequest) {
-    leads.sort((a, b) => b.consensus_final_score - a.consensus_final_score)
-  }
-
-  // Split requests into pending and completed
-  const pendingRequests = data.activeRequests.filter(r => ['pending', 'open', 'continued_open', 'commit_closed', 'scoring'].includes(r.status))
-  const completedRequests = data.activeRequests.filter(r => r.status === 'fulfilled')
-
-  // Winners from last 2 fulfilled requests only
-  const last2FulfilledIds = new Set(completedRequests.slice(0, 2).map(r => r.request_id))
-  const recentWinnerCount = data.allConsensus.filter(c => c.is_winner && last2FulfilledIds.has(c.request_id)).length
-
   return (
-    <div className="space-y-6">
-      {/* Stats */}
-      <div className="grid gap-4 md:grid-cols-3">
-        <Card className="bg-gradient-to-br from-green-500/10 to-emerald-500/5 border-green-500/20">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Open Requests</CardTitle>
-            <Package className="h-4 w-4 text-green-500" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{pendingRequests.length}</div>
-            <p className="text-xs text-muted-foreground mt-1">awaiting submissions</p>
-          </CardContent>
-        </Card>
-
-        <Card className="bg-gradient-to-br from-yellow-500/10 to-amber-500/5 border-yellow-500/20">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Winning Leads</CardTitle>
-            <Trophy className="h-4 w-4 text-yellow-500" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{recentWinnerCount}</div>
-            <p className="text-xs text-muted-foreground mt-1">from last 2 requests</p>
-          </CardContent>
-        </Card>
-
-        <Card className="bg-gradient-to-br from-purple-500/10 to-violet-500/5 border-purple-500/20">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Fulfilled</CardTitle>
-            <CheckCircle className="h-4 w-4 text-purple-500" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{data.stats.fulfilledCount}</div>
-            <p className="text-xs text-muted-foreground mt-1">
-              {data.stats.recycledCount} recycled
-            </p>
-          </CardContent>
-        </Card>
+    <div>
+      {/* ════════════════════════════════════════════════════════════════
+       *  Mobile (< md): vertical scrollable layout with stat strip,
+       *  filter pills, and stacked sections. The cosmos is hidden
+       *  because pan/zoom doesn't work without touch gestures, and the
+       *  three data panels are what mobile users actually consult.
+       * ════════════════════════════════════════════════════════════════ */}
+      <div className="md:hidden">
+        <FulfillmentMobile
+          activeRequests={data.activeRequests}
+          allConsensus={data.allConsensus}
+          leaderboard={data.leaderboard}
+          leaderboardWindowDays={data.stats.leaderboardWindowDays ?? 30}
+          rejectionBreakdown={data.rejectionBreakdown}
+          scoreTotals={data.scoreTotals}
+          filter={filter}
+          setFilter={setFilter}
+          searchQuery={searchQuery}
+          setSearchQuery={setSearchQuery}
+          focusedMinerHotkey={focusedMinerHotkey}
+          onMinerSelect={handleMinerActivate}
+          onRequestSelect={(req) => setDialogRequest(req)}
+          lastSync={lastSync}
+          syncPulse={syncPulse}
+          onRefresh={fetchData}
+          readableReason={readableReason}
+          readableStatus={readableStatus}
+          truncateHotkey={truncateHotkey}
+          asText={asText}
+          formatDate={formatDate}
+        />
       </div>
 
-      {/* Request History */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Package className="h-5 w-5" />
-            Request History
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-2 max-h-[600px] overflow-y-auto">
-            {data.activeRequests.length === 0 ? (
-              <p className="text-center text-muted-foreground py-8">No requests</p>
+      {/* ════════════════════════════════════════════════════════════════
+       *  Desktop (md+): cosmos + side panels + filter bar.
+       * ════════════════════════════════════════════════════════════════ */}
+      <div className="hidden md:block space-y-4">
+        {/* Top action bar */}
+        <div className="flex flex-col md:flex-row md:items-center gap-3">
+        <div className="inline-flex items-center gap-1 p-1 rounded-lg bg-slate-900/60 border border-slate-700/50 self-start">
+          <FilterButton
+            active={filter === 'all'}
+            onClick={() => setFilter('all')}
+            label="All"
+            count={counts.all}
+            tone="neutral"
+          />
+          <FilterButton
+            active={filter === 'pending'}
+            onClick={() => setFilter('pending')}
+            label="Pending"
+            count={counts.pending}
+            tone="pending"
+          />
+          <FilterButton
+            active={filter === 'completed'}
+            onClick={() => setFilter('completed')}
+            label="Completed"
+            count={counts.completed}
+            tone="completed"
+          />
+        </div>
+
+        <div className="relative md:max-w-md md:flex-1">
+          <input
+            ref={searchInputRef}
+            type="text"
+            value={searchQuery}
+            onChange={(e) => {
+              setSearchQuery(e.target.value)
+              if (!e.target.value.trim()) setInspectedMiner(null)
+            }}
+            placeholder="Search hotkey, request id, or industry"
+            className="w-full pl-3 pr-24 h-9 bg-slate-900/60 border border-slate-700/50 rounded-md text-xs font-mono text-slate-100 placeholder:text-slate-500 outline-none premium-focus transition-colors"
+          />
+          <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-2">
+            {searchQuery.trim() ? (
+              <>
+                <span className="text-[10px] font-mono text-slate-500 tabular-nums">
+                  {resultCount} {resultCount === 1 ? 'match' : 'matches'}
+                </span>
+                <button
+                  onClick={() => {
+                    setSearchQuery('')
+                    setInspectedMiner(null)
+                  }}
+                  className="text-slate-500 hover:text-slate-200 transition-colors"
+                  aria-label="Clear search"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </>
             ) : (
-              data.activeRequests.map((req) => {
-                const icp = req.icp_details
-                const leads = leadsByRequest.get(req.request_id) || []
-                const isFulfilled = req.status === 'fulfilled'
-                const isExpanded = expandedRequest === req.request_id
-                const winnerCount = leads.filter(l => l.is_winner).length
-
-                return (
-                  <div
-                    key={req.request_id}
-                    className={`p-3 rounded-lg border overflow-hidden ${
-                      isFulfilled
-                        ? 'bg-green-500/5 border-green-500/20'
-                        : 'bg-muted/30 border-border/50'
-                    }`}
-                  >
-                    {/* Request header — clickable */}
-                    <div
-                      className="cursor-pointer"
-                      onClick={() => setExpandedRequest(isExpanded ? null : req.request_id)}
-                    >
-                      <div className="flex flex-wrap items-center justify-between gap-1">
-                        <div className="flex items-center gap-1">
-                          <code className="text-[10px] font-mono text-muted-foreground bg-muted px-1 py-0.5 rounded">{req.request_id.slice(0, 8)}</code>
-                          <CopyButton text={req.request_id} />
-                        </div>
-                        <div className="flex items-center gap-1.5">
-                          <span className="text-[10px] text-muted-foreground">{req.num_leads} leads</span>
-                          {isFulfilled && winnerCount > 0 && (
-                            <span className="text-[10px] text-yellow-500">{winnerCount} won</span>
-                          )}
-                          {!isFulfilled && (req.held_count || 0) > 0 && (
-                            <span className="text-[10px] text-blue-500">{req.held_count} approved</span>
-                          )}
-                          <RequestStatusBadge status={req.status} />
-                        </div>
-                      </div>
-                      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 mt-1.5">
-                        <span className="text-sm font-medium">
-                          {[
-                            icp?.industry || 'Not Specified',
-                            icp?.sub_industry,
-                            (icp as IcpDetails & { target_role_types?: string[] })?.target_role_types?.[0],
-                          ].filter(Boolean).join(' / ')}
-                        </span>
-                        {req.window_start && req.window_end && (
-                          <span className="text-xs text-muted-foreground">
-                            {formatDate(req.window_start)} - {formatDate(req.window_end)}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Expanded: show all leads */}
-                    {isExpanded && leads.length > 0 && (
-                      <div className="mt-2 pt-2 border-t border-border/30 space-y-1.5">
-                        {leads.map((lead, idx) => (
-                          <div
-                            key={lead.consensus_id}
-                            className={`flex items-center justify-between py-1 ${idx > 0 ? 'border-t border-border/20' : ''}`}
-                          >
-                            <div className="flex items-center gap-2">
-                              <span className="text-xs text-muted-foreground w-5">#{idx + 1}</span>
-                              {lead.is_winner && <Trophy className="h-3.5 w-3.5 text-yellow-500 shrink-0" />}
-                              <code className="text-xs font-mono">{truncateHotkey(lead.miner_hotkey)}</code>
-                              <CopyButton text={lead.miner_hotkey} />
-                            </div>
-                            <span className={`text-sm font-mono font-bold ${lead.is_winner ? 'text-yellow-500' : lead.consensus_final_score > 0 ? 'text-green-500' : 'text-red-400'}`}>
-                              {lead.consensus_final_score.toFixed(2)}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-
-                    {isExpanded && leads.length === 0 && isFulfilled && (
-                      <div className="mt-2 pt-2 border-t border-border/30">
-                        <span className="text-xs text-muted-foreground">No scored leads</span>
-                      </div>
-                    )}
-                  </div>
-                )
-              })
+              <span className="kbd-chip">/</span>
             )}
           </div>
-        </CardContent>
-      </Card>
+        </div>
 
-      {/* Fulfillment Leaderboard */}
-      {data.leaderboard && data.leaderboard.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Trophy className="h-5 w-5 text-yellow-500" />
-              Fulfillment Leaderboard
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-2">
-              {data.leaderboard.map((entry) => (
-                <div
-                  key={entry.hotkey}
-                  className={`flex flex-col sm:flex-row sm:items-center sm:justify-between p-3 rounded-lg border gap-2 ${
-                    entry.rank === 1 ? 'bg-yellow-500/10 border-yellow-500/30' :
-                    entry.rank === 2 ? 'bg-gray-300/10 border-gray-400/30' :
-                    entry.rank === 3 ? 'bg-amber-700/10 border-amber-700/30' :
-                    'bg-muted/30 border-border/50'
-                  }`}
-                >
-                  <div className="flex items-center gap-2">
-                    <span className={`text-lg font-bold w-7 shrink-0 ${
-                      entry.rank === 1 ? 'text-yellow-500' :
-                      entry.rank === 2 ? 'text-gray-400' :
-                      entry.rank === 3 ? 'text-amber-700' :
-                      'text-muted-foreground'
-                    }`}>
-                      #{entry.rank}
-                    </span>
-                    {entry.rank <= 3 && <Trophy className={`h-4 w-4 shrink-0 ${
-                      entry.rank === 1 ? 'text-yellow-500' :
-                      entry.rank === 2 ? 'text-gray-400' :
-                      'text-amber-700'
-                    }`} />}
-                    <code className="text-sm font-mono truncate">{truncateHotkey(entry.hotkey)}</code>
-                    <CopyButton text={entry.hotkey} />
-                  </div>
-                  <div className="flex items-center gap-3 ml-9 sm:ml-0">
-                    <div className="text-right">
-                      <span className="text-base font-bold">{entry.wins}</span>
-                      <span className="text-xs text-muted-foreground ml-1">wins</span>
-                    </div>
-                    {entry.bonusPct > 0 && (
-                      <Badge variant="outline" className="text-yellow-500 border-yellow-500/30 text-xs">
-                        +{entry.bonusPct}%
-                      </Badge>
-                    )}
-                  </div>
+        <div className="md:ml-auto flex items-center gap-3">
+          <button
+            onClick={() => setHistoryOpen(true)}
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-[11px] font-medium text-slate-300 bg-slate-900/60 border border-slate-700/50 hover:bg-slate-800/60 hover:text-slate-100 hover:border-slate-600 transition-colors"
+            title="Open request history table"
+            aria-label="Open request history"
+          >
+            <span>History</span>
+          </button>
+          <button
+            onClick={() => setPanelsVisible((v) => !v)}
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-[11px] font-medium text-slate-300 bg-slate-900/60 border border-slate-700/50 hover:bg-slate-800/60 hover:text-slate-100 hover:border-slate-600 transition-colors"
+            title={panelsVisible ? 'Hide side panels' : 'Show side panels'}
+            aria-label="Toggle side panels"
+          >
+            <span>{panelsVisible ? 'Hide' : 'Show'}</span>
+          </button>
+          {lastSync !== null && (
+            <div className="flex items-center gap-2 text-[10px] font-mono text-slate-500" title="Auto-syncs every 60s">
+              <span
+                className={cn(
+                  'inline-block w-1.5 h-1.5 rounded-full dot-gold',
+                  syncPulse ? 'live-pulse' : 'opacity-70'
+                )}
+              />
+              <span>
+                Synced <span className="text-slate-300">{formatRelative(new Date(lastSync).toISOString())}</span>
+              </span>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="relative h-[72vh] min-h-[600px]">
+        <FulfillmentCosmos
+          requests={filteredRequests}
+          leads={filteredLeads}
+          topMiners={topMinerSet}
+          visibleNodeIds={visibleNodeIds}
+          forceLabelIds={matchedNodeIds}
+          emphasizedNodeIds={emphasizedNodeIds}
+          onRequestActivate={handleRequestActivate}
+          onMinerActivate={handleMinerActivate}
+        />
+
+        {panelsVisible && data.leaderboard.length > 0 && (
+          <LeaderboardPanel
+            entries={data.leaderboard}
+            focusedHotkey={focusedMinerHotkey}
+            windowDays={data.stats.leaderboardWindowDays ?? 30}
+            onSelect={handleMinerActivate}
+          />
+        )}
+
+        {panelsVisible && <RejectionPanel view={rejectionView} />}
+      </div>
+      </div>
+      {/* End md:block desktop layout */}
+
+      <RequestHistoryDialog
+        open={historyOpen}
+        requests={data.activeRequests}
+        consensus={data.allConsensus}
+        onSelectRequest={(req) => {
+          setHistoryOpen(false)
+          setDialogRequest(req)
+        }}
+        onOpenChange={(open) => !open && setHistoryOpen(false)}
+      />
+
+      <RequestDetailDialog
+        request={dialogRequest}
+        leads={dialogLeads}
+        onOpenChange={(open) => !open && setDialogRequest(null)}
+      />
+
+      <MinerDetailDialog
+        hotkey={inspectedMiner}
+        scores={inspectedMiner ? minerCache[inspectedMiner]?.scores ?? null : null}
+        loading={inspectedMiner !== null && minerLoading === inspectedMiner}
+        error={inspectedMiner ? minerErrors[inspectedMiner] ?? null : null}
+        onRetry={() => {
+          if (inspectedMiner) loadMinerScores(inspectedMiner)
+        }}
+        requestMap={
+          inspectedMiner
+            ? { ...data.requestMap, ...(minerCache[inspectedMiner]?.requestMap || {}) }
+            : data.requestMap
+        }
+        onOpenChange={(open) => {
+          if (!open) {
+            setInspectedMiner(null)
+            setSearchQuery('')
+          }
+        }}
+      />
+    </div>
+  )
+}
+
+/* ============================================================
+ * Leaderboard panel (premium)
+ * ============================================================ */
+function LeaderboardPanel({
+  entries,
+  focusedHotkey,
+  windowDays,
+  onSelect,
+}: {
+  entries: { rank: number; hotkey: string; wins: number; bonusPct: number }[]
+  focusedHotkey: string | null
+  windowDays: number
+  onSelect: (hotkey: string) => void
+}) {
+  return (
+    <div
+      data-keep-open
+      className="absolute top-3 right-3 w-72 max-w-[calc(100%-1.5rem)] bg-slate-950/80 backdrop-blur-md rounded-xl border border-slate-800/80 shadow-2xl shadow-black/40 overflow-hidden animate-in fade-in slide-in-from-right-2 duration-200"
+    >
+      <div className="flex items-center gap-2 px-3.5 py-2.5 border-b border-slate-800/70 bg-gradient-to-b from-slate-900/80 to-slate-900/40">
+        <span className="text-[11px] font-semibold text-slate-100">Top miners</span>
+        <span className="ml-auto text-[10px] text-slate-500 font-mono">last {windowDays}d</span>
+      </div>
+      <div className="divide-y divide-slate-800/60">
+        {entries.map((entry) => {
+          const isFocused = focusedHotkey === entry.hotkey
+          return (
+            <button
+              key={entry.hotkey}
+              onClick={() => onSelect(entry.hotkey)}
+              // Column order: rank · hotkey · bonus% · leads. The bonus column
+              // is fixed-width so the leads column always lands flush with the
+              // right edge of the panel, regardless of whether a row has a %.
+              className={cn(
+                'w-full grid grid-cols-[1.75rem_minmax(0,1fr)_2.75rem_4rem] items-center gap-2.5 px-3.5 py-2 transition-colors text-left',
+                isFocused
+                  ? 'bg-gold-soft'
+                  : 'hover-bg-warm'
+              )}
+              title={`View scores for ${entry.hotkey}`}
+            >
+              <span className="text-[10px] font-mono text-slate-500 text-right tabular-nums">
+                {String(entry.rank).padStart(2, '0')}
+              </span>
+              <code className="text-[11px] font-mono text-slate-200 truncate" title={entry.hotkey}>
+                {truncateHotkey(entry.hotkey)}
+              </code>
+              <span className="text-[10px] font-mono text-amber-warm tabular-nums text-right opacity-90">
+                {entry.bonusPct > 0 ? `+${entry.bonusPct}%` : ''}
+              </span>
+              <div className="flex items-baseline justify-end gap-1">
+                <span className="text-xs font-semibold text-gold tabular-nums">
+                  <CountUp value={entry.wins} />
+                </span>
+                <span className="text-[9px] text-slate-500 uppercase tracking-[0.08em]">leads</span>
+              </div>
+            </button>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+/* ============================================================
+ * Rejection panel (premium)
+ * ============================================================ */
+function RejectionPanel({
+  view,
+}: {
+  view: {
+    reasons: { reason: string; count: number }[]
+    passed: number
+    failed: number
+    scope: 'global' | 'miner'
+    label: string
+    loading: boolean
+  }
+}) {
+  const top = view.reasons.slice(0, 7)
+  const maxCount = Math.max(1, ...top.map((r) => r.count))
+  return (
+    <div
+      data-keep-open
+      className={cn(
+        'absolute bottom-3 right-3 w-80 max-w-[calc(100%-1.5rem)] bg-slate-950/80 backdrop-blur-md rounded-xl border shadow-2xl shadow-black/40 overflow-hidden animate-in fade-in slide-in-from-bottom-2 duration-300',
+        view.scope === 'miner'
+          ? 'border-gold-strong ring-1 ring-gold-soft'
+          : 'border-slate-800/80'
+      )}
+    >
+      <div className="flex items-center gap-2 px-3.5 py-2.5 border-b border-slate-800/70 bg-gradient-to-b from-slate-900/80 to-slate-900/40">
+        <span className="text-[11px] font-semibold text-slate-100">Rejection reasons</span>
+        {view.scope === 'miner' ? (
+          <span
+            className="ml-auto text-[10px] text-gold font-mono bg-gold-soft border border-gold-soft rounded px-1.5 py-0.5"
+            title={view.label}
+          >
+            {truncateHotkey(view.label)}
+          </span>
+        ) : (
+          <span className="ml-auto text-[10px] text-slate-500 font-mono">all miners</span>
+        )}
+      </div>
+
+      <div className="px-3.5 py-2.5 space-y-2 max-h-[320px] overflow-y-auto">
+        {view.loading ? (
+          <div className="flex items-center gap-2 text-xs text-slate-500 py-3">
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            Loading scores...
+          </div>
+        ) : top.length === 0 ? (
+          <div className="text-center py-3 text-xs text-slate-500">
+            {view.scope === 'miner' ? 'No rejections. Clean miner.' : 'No rejection data.'}
+          </div>
+        ) : (
+          top.map(({ reason, count }, idx) => {
+            const pct = (count / maxCount) * 100
+            const ofTotal = view.failed > 0 ? (count / view.failed) * 100 : 0
+            // gradient severity: top entries deeper
+            const severity = 1 - idx / Math.max(1, top.length - 1) * 0.45
+            return (
+              <div key={reason} className="group">
+                <div className="flex items-center justify-between mb-1 text-[10px]">
+                  <span
+                    className="text-slate-200 truncate"
+                    title={readableReason(reason) + ` · ${reason}`}
+                  >
+                    {readableReason(reason)}
+                  </span>
+                  <span className="flex items-center gap-2 text-slate-500 font-mono shrink-0 ml-2 tabular-nums">
+                    <span>{ofTotal.toFixed(0)}%</span>
+                    <span className="text-slate-300 w-6 text-right">{count}</span>
+                  </span>
                 </div>
+                <div className="h-1.5 rounded-full bg-slate-800/60 overflow-hidden">
+                  <div
+                    className="h-full rounded-full"
+                    style={{
+                      // Dusty burgundy. Saturates at the top entries, fades for the tail.
+                      // Was a vivid rose gradient (244/63/94 → 251/113/133); replaced
+                      // with a desaturated maroon to feel editorial rather than alarmist.
+                      width: `${pct}%`,
+                      background: `linear-gradient(90deg, rgba(168, 116, 111, ${0.6 + severity * 0.3}) 0%, rgba(196, 142, 137, ${0.5 + severity * 0.3}) 100%)`,
+                      transition: 'width 320ms cubic-bezier(0.16, 1, 0.3, 1)',
+                    }}
+                  />
+                </div>
+              </div>
+            )
+          })
+        )}
+      </div>
+    </div>
+  )
+}
+
+/* ============================================================
+ * Request detail dialog
+ * ============================================================ */
+/* ============================================================
+ * Request history dialog (table view)
+ * ============================================================ */
+function RequestHistoryDialog({
+  open,
+  requests,
+  consensus,
+  onSelectRequest,
+  onOpenChange,
+}: {
+  open: boolean
+  requests: ActiveRequest[]
+  consensus: ConsensusResult[]
+  onSelectRequest: (req: ActiveRequest) => void
+  onOpenChange: (open: boolean) => void
+}) {
+  const [query, setQuery] = useState('')
+  const [scope, setScope] = useState<FilterMode>('all')
+
+  useEffect(() => {
+    if (!open) {
+      setQuery('')
+      setScope('all')
+    }
+  }, [open])
+
+  // Per-request winner counts (only meaningful for fulfilled requests)
+  const winnersByRequest = useMemo(() => {
+    const m = new Map<string, number>()
+    for (const c of consensus) {
+      if (!c.is_winner) continue
+      m.set(c.request_id, (m.get(c.request_id) || 0) + 1)
+    }
+    return m
+  }, [consensus])
+
+  const counts = useMemo(() => {
+    const all = requests.length
+    const pending = requests.filter((r) => PENDING_STATUSES.includes(r.status)).length
+    const completed = requests.filter((r) => r.status === 'fulfilled').length
+    return { all, pending, completed }
+  }, [requests])
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    return requests
+      .filter((r) => {
+        if (scope === 'pending') return PENDING_STATUSES.includes(r.status)
+        if (scope === 'completed') return r.status === 'fulfilled'
+        return true
+      })
+      .filter((r) => {
+        if (!q) return true
+        const icp = r.icp_details
+        return (
+          r.request_id.toLowerCase().includes(q) ||
+          asText(icp?.industry).toLowerCase().includes(q) ||
+          asText(icp?.sub_industry).toLowerCase().includes(q) ||
+          asText(icp?.country).toLowerCase().includes(q)
+        )
+      })
+      .slice()
+      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+  }, [requests, query, scope])
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:w-[calc(100vw-3rem)] sm:max-w-[1400px] sm:max-h-[90vh] overflow-hidden flex flex-col bg-slate-950 border-slate-800 text-slate-100 p-0 sm:p-0 gap-0">
+        <DialogHeader className="px-5 py-4 border-b border-slate-800/80 space-y-3 text-left">
+          <div className="flex items-center gap-2 pr-8">
+            <DialogTitle className="text-sm font-semibold text-slate-100">
+              Request history
+            </DialogTitle>
+            <span className="ml-auto text-[10px] text-slate-500 font-mono tabular-nums">
+              {counts.all} total · {counts.pending} pending · {counts.completed} completed
+            </span>
+          </div>
+
+          <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+            <div className="inline-flex items-center gap-1 p-1 rounded-lg bg-slate-900/60 border border-slate-700/50 self-start">
+              <HistoryTab active={scope === 'all'} onClick={() => setScope('all')} label="All" count={counts.all} tone="neutral" />
+              <HistoryTab active={scope === 'pending'} onClick={() => setScope('pending')} label="Pending" count={counts.pending} tone="pending" />
+              <HistoryTab active={scope === 'completed'} onClick={() => setScope('completed')} label="Completed" count={counts.completed} tone="completed" />
+            </div>
+            <div className="relative sm:flex-1 sm:max-w-md">
+              <input
+                type="text"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Filter by request id, industry, or country"
+                className="w-full pl-3 pr-20 h-8 bg-slate-900/60 border border-slate-700/50 rounded-md text-[11px] font-mono text-slate-100 placeholder:text-slate-500 outline-none premium-focus transition-colors"
+              />
+              <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-2">
+                {query.trim() ? (
+                  <>
+                    <span className="text-[10px] font-mono text-slate-500 tabular-nums">
+                      {filtered.length}
+                    </span>
+                    <button
+                      onClick={() => setQuery('')}
+                      className="text-slate-500 hover:text-slate-200 transition-colors"
+                      aria-label="Clear search"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </>
+                ) : (
+                  <span className="text-[10px] font-mono text-slate-500 tabular-nums">
+                    {filtered.length}
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+        </DialogHeader>
+
+        <div className="flex-1 overflow-y-auto overflow-x-hidden">
+          {filtered.length === 0 ? (
+            <div className="text-center py-16 text-sm text-slate-500">
+              No requests match the current filter.
+            </div>
+          ) : (
+            <div>
+              <div className="grid grid-cols-[2rem_5.5rem_minmax(0,1fr)_5rem_6rem_7rem] gap-3 px-5 py-2 text-[9px] uppercase tracking-[0.08em] text-slate-500 font-mono border-b border-slate-800/60 sticky top-0 bg-slate-950/95 backdrop-blur-sm z-10">
+                <span>#</span>
+                <span>ID</span>
+                <span>Industry / role</span>
+                <span className="text-right">Leads</span>
+                <span className="text-center">Status</span>
+                <span>Time</span>
+              </div>
+              {filtered.map((req, idx) => (
+                <HistoryRow
+                  key={req.request_id}
+                  index={idx + 1}
+                  request={req}
+                  winners={winnersByRequest.get(req.request_id) || 0}
+                  onSelect={() => onSelectRequest(req)}
+                />
               ))}
             </div>
-          </CardContent>
-        </Card>
-      )}
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
+}
 
-      {/* Rejection Breakdown */}
-      {data.rejectionBreakdown.length > 0 && (() => {
-        const total = data.scoreTotals.passed + data.scoreTotals.failed
-        const top10 = data.rejectionBreakdown.slice(0, 10)
-        const maxCount = Math.max(...top10.map(r => r.count))
+function HistoryTab({
+  active,
+  onClick,
+  label,
+  count,
+  tone,
+}: {
+  active: boolean
+  onClick: () => void
+  label: string
+  count: number
+  tone: 'neutral' | 'pending' | 'completed'
+}) {
+  const activeBg =
+    tone === 'pending'
+      ? 'bg-amber-warm-soft text-amber-warm border-amber-warm-soft'
+      : tone === 'completed'
+        ? 'bg-cream-soft text-cream border-cream-soft'
+        : 'bg-slate-700/60 text-slate-100 border-slate-500/40'
+  return (
+    <button
+      onClick={onClick}
+      className={cn(
+        'flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-medium border transition-all',
+        active
+          ? activeBg
+          : 'bg-transparent text-slate-400 border-transparent hover:text-slate-200 hover:bg-slate-800/40'
+      )}
+    >
+      <span>{label}</span>
+      <span
+        className={cn(
+          'text-[10px] font-mono tabular-nums',
+          active ? 'text-current/70' : 'text-slate-500'
+        )}
+      >
+        {count}
+      </span>
+    </button>
+  )
+}
+
+function HistoryRow({
+  index,
+  request,
+  winners,
+  onSelect,
+}: {
+  index: number
+  request: ActiveRequest
+  winners: number
+  onSelect: () => void
+}) {
+  const isFulfilled = request.status === 'fulfilled'
+  const isPending = PENDING_STATUSES.includes(request.status)
+  const heldCount = request.held_count ?? 0
+  const icp = request.icp_details
+  const industries = [asText(icp?.industry), asText(icp?.sub_industry)]
+    .filter((s) => s.length > 0)
+    .join(' / ')
+  const roles = Array.isArray(icp?.target_roles)
+    ? icp.target_roles.filter((x): x is string => typeof x === 'string' && x.length > 0)
+    : []
+  const roleStr = roles[0]
+  const windowLabel =
+    request.window_start && request.window_end
+      ? `${formatDate(request.window_start)} – ${formatDate(request.window_end)}`
+      : '·'
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      className="w-full grid grid-cols-[2rem_5.5rem_minmax(0,1fr)_5rem_6rem_7rem] gap-3 items-center px-5 py-2.5 text-[11px] text-left border-b border-slate-800/40 hover:bg-slate-900/60 transition-colors focus:outline-none focus-visible:bg-slate-900/60"
+      title={`Open request ${request.request_id}`}
+    >
+      <span className="text-slate-500 font-mono tabular-nums">{index}</span>
+      <div className="flex items-center gap-1.5 min-w-0">
+        <code className="font-mono text-slate-200 truncate" title={request.request_id}>
+          {request.request_id.slice(0, 8)}
+        </code>
+      </div>
+      <div className="min-w-0">
+        <div className="text-slate-200 truncate" title={industries || 'No ICP details'}>
+          {industries || <span className="text-slate-600">·</span>}
+        </div>
+        {roleStr && (
+          <div className="text-[10px] text-slate-500 truncate">{roleStr}</div>
+        )}
+      </div>
+      <div className="text-right font-mono text-slate-200 tabular-nums">
+        <div>
+          <span>{request.num_leads}</span>
+          <span className="text-slate-500 text-[10px]"> leads</span>
+        </div>
+        {isFulfilled ? (
+          winners > 0 && (
+            <div className="text-[10px] text-gold tabular-nums">{winners} won</div>
+          )
+        ) : (
+          heldCount > 0 && (
+            <div className="text-[10px] text-gold tabular-nums">{heldCount} approved</div>
+          )
+        )}
+      </div>
+      <div className="flex justify-center">
+        <StatusPill status={request.status} isPending={isPending} isFulfilled={isFulfilled} />
+      </div>
+      <div
+        className="text-[10px] font-mono tabular-nums leading-tight min-w-0"
+        title={windowLabel}
+      >
+        {request.window_start ? (
+          <span className="text-slate-300 truncate block">
+            {formatDate(request.window_start)}
+          </span>
+        ) : (
+          <span className="text-slate-600">·</span>
+        )}
+      </div>
+    </button>
+  )
+}
+
+function StatusPill({
+  status,
+  isPending,
+  isFulfilled,
+}: {
+  status: string
+  isPending: boolean
+  isFulfilled: boolean
+}) {
+  const label = readableStatus(status)
+  const cls = isFulfilled
+    ? 'bg-cream-soft text-cream border-cream-soft'
+    : isPending
+      ? 'bg-amber-warm-soft text-amber-warm border-amber-warm-soft'
+      : 'bg-slate-700/40 text-slate-300 border-slate-600/40'
+  return (
+    <span className={cn('inline-flex items-center gap-1 text-[10px] rounded px-1.5 py-0.5 border font-medium', cls)}>
+      {isPending && (
+        <span className="inline-block w-1 h-1 rounded-full dot-amber live-pulse" />
+      )}
+      {label}
+    </span>
+  )
+}
+
+function readableStatus(status: string): string {
+  switch (status) {
+    case 'pending':
+      return 'Pending'
+    case 'open':
+    case 'continued_open':
+      return 'Open'
+    case 'commit_closed':
+      return 'Commits closed'
+    case 'scoring':
+      return 'Scoring'
+    case 'fulfilled':
+      return 'Fulfilled'
+    case 'recycled':
+      return 'Recycled'
+    default:
+      return status
+  }
+}
+
+function RequestDetailDialog({
+  request,
+  leads,
+  onOpenChange,
+}: {
+  request: ActiveRequest | null
+  leads: ConsensusResult[]
+  onOpenChange: (open: boolean) => void
+}) {
+  const open = request !== null
+  // Render nothing when there's no request. Dialog handles unmount cleanly.
+  if (!request) return null
+
+  const isFulfilled = request.status === 'fulfilled'
+  const winners = leads.filter((l) => l.is_winner).length
+  const heldCount = request.held_count ?? 0
+  const remaining = Math.max(0, request.num_leads - heldCount)
+  const fillPct =
+    request.num_leads > 0 ? Math.min(100, (heldCount / request.num_leads) * 100) : 0
+  const icp = request.icp_details
+  const targetRoles = Array.isArray(icp?.target_roles)
+    ? icp.target_roles.filter((x): x is string => typeof x === 'string' && x.length > 0)
+    : []
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-3xl sm:w-[calc(100%-2rem)] sm:max-h-[85vh] overflow-hidden flex flex-col bg-slate-950 border-slate-800 text-slate-100 p-0 sm:p-0 gap-0">
+        <DialogHeader className="px-5 py-4 border-b border-slate-800/80 space-y-2 text-left">
+          <div className="flex items-center gap-2 pr-8">
+            <DialogTitle className="text-sm font-mono text-slate-100">
+              {request.request_id.slice(0, 12)}
+            </DialogTitle>
+            <CopyButton text={request.request_id} />
+            <span
+              className={cn(
+                'ml-auto inline-flex items-center gap-1.5 text-[10px] rounded px-1.5 py-0.5 border',
+                isFulfilled
+                  ? 'text-cream border-cream-soft bg-cream-soft'
+                  : 'text-amber-warm border-amber-warm-soft bg-amber-warm-soft'
+              )}
+            >
+              {!isFulfilled && (
+                <span className="inline-block w-1.5 h-1.5 rounded-full dot-amber live-pulse" />
+              )}
+              {readableStatus(request.status)}
+            </span>
+          </div>
+          <div className="text-sm text-slate-200">
+            {[asText(icp?.industry), asText(icp?.sub_industry)]
+              .filter((s) => s.length > 0)
+              .join(' / ') || 'No ICP details'}
+          </div>
+          <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-slate-400 font-mono">
+            <span>
+              <span className="text-slate-500">Requested</span>{' '}
+              <span className="text-slate-200 tabular-nums">{request.num_leads}</span>
+            </span>
+            {isFulfilled ? (
+              <>
+                <span>
+                  <span className="text-slate-500">Submitted</span>{' '}
+                  <span className="text-slate-200 tabular-nums">{leads.length}</span>
+                </span>
+                <span>
+                  <span className="text-slate-500">Won</span>{' '}
+                  <span className="text-gold tabular-nums">{winners}</span>
+                </span>
+              </>
+            ) : (
+              <>
+                <span>
+                  <span className="text-slate-500">Approved</span>{' '}
+                  <span className="text-gold tabular-nums">{heldCount}</span>
+                </span>
+                <span>
+                  <span className="text-slate-500">Remaining</span>{' '}
+                  <span className="text-amber-warm tabular-nums">{remaining}</span>
+                </span>
+              </>
+            )}
+            {request.window_start && request.window_end && (
+              <span>
+                <span className="text-slate-500">Window</span>{' '}
+                {formatDate(request.window_start)} – {formatDate(request.window_end)}
+              </span>
+            )}
+          </div>
+          {(asText(icp?.country) ||
+            asText(icp?.employee_count) ||
+            asText(icp?.target_seniority) ||
+            targetRoles.length > 0) && (
+            <div className="flex flex-wrap gap-1.5 pt-1">
+              {asText(icp?.country) && (
+                <Badge variant="outline" className="text-[9px] border-slate-700/60 text-slate-300">
+                  {asText(icp?.country)}
+                </Badge>
+              )}
+              {asText(icp?.employee_count) && (
+                <Badge variant="outline" className="text-[9px] border-slate-700/60 text-slate-300">
+                  {asText(icp?.employee_count)} employees
+                </Badge>
+              )}
+              {asText(icp?.target_seniority) && (
+                <Badge variant="outline" className="text-[9px] border-slate-700/60 text-slate-300">
+                  {asText(icp?.target_seniority)}
+                </Badge>
+              )}
+              {targetRoles.slice(0, 4).map((r) => (
+                <Badge
+                  key={r}
+                  variant="outline"
+                  className="text-[9px] border-slate-700/60 text-slate-300"
+                >
+                  {r}
+                </Badge>
+              ))}
+            </div>
+          )}
+        </DialogHeader>
+
+        <div className="flex-1 overflow-y-auto px-5 py-3">
+          {!isFulfilled ? (
+            <PendingRequestBody
+              heldCount={heldCount}
+              requested={request.num_leads}
+              remaining={remaining}
+              fillPct={fillPct}
+              status={request.status}
+              leads={leads}
+            />
+          ) : leads.length === 0 ? (
+            <div className="text-center py-12 text-sm text-slate-500">
+              No scored leads for this request.
+            </div>
+          ) : (
+            <div className="space-y-1">
+              <div className="grid grid-cols-[2rem_1fr_5rem_4.5rem_1fr] gap-3 px-2 py-1.5 text-[10px] text-slate-500 font-mono border-b border-slate-800/60">
+                <span>#</span>
+                <span>Hotkey</span>
+                <span className="text-right">Score</span>
+                <span className="text-center">Outcome</span>
+                <span>Checks</span>
+              </div>
+              {leads.map((lead, idx) => (
+                <LeadRow key={lead.consensus_id} lead={lead} rank={idx + 1} />
+              ))}
+            </div>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function PendingRequestBody({
+  heldCount,
+  requested,
+  remaining,
+  fillPct,
+  status,
+  leads,
+}: {
+  heldCount: number
+  requested: number
+  remaining: number
+  fillPct: number
+  status: string
+  leads: ConsensusResult[]
+}) {
+  // Build a per-miner aggregation from anything we know so far (typically empty
+  // for pure pending; non-empty when consensus has partially run, e.g. scoring).
+  const byMiner = new Map<string, number>()
+  for (const c of leads) {
+    byMiner.set(c.miner_hotkey, (byMiner.get(c.miner_hotkey) || 0) + 1)
+  }
+  const participants = Array.from(byMiner.entries()).sort((a, b) => b[1] - a[1])
+
+  const statusHint =
+    status === 'pending'
+      ? 'Waiting for miners to commit leads.'
+      : status === 'open' || status === 'continued_open'
+        ? 'Open for new lead submissions.'
+        : status === 'commit_closed'
+          ? 'No more submissions accepted. Awaiting scoring.'
+          : status === 'scoring'
+            ? 'Validators are scoring submissions.'
+            : 'In progress.'
+
+  return (
+    <div className="space-y-5 py-3">
+      {/* Fulfillment progress hero */}
+      <div className="space-y-2">
+        <div className="flex items-baseline justify-between">
+          <div className="flex items-baseline gap-2">
+            <span className="text-3xl font-semibold text-slate-100 tabular-nums leading-none">
+              <CountUp value={heldCount} />
+            </span>
+            <span className="text-slate-500 font-mono text-sm tabular-nums">/ {requested}</span>
+            <span className="text-[10px] text-slate-500 uppercase tracking-[0.1em] ml-1">
+              approved
+            </span>
+          </div>
+          <span className="text-[11px] text-slate-400 font-mono tabular-nums">
+            <span className="text-gold">{fillPct.toFixed(0)}%</span> fulfilled ·{' '}
+            <span className="text-amber-warm">{remaining}</span> remaining
+          </span>
+        </div>
+        <div className="h-2 rounded-full bg-slate-800/70 overflow-hidden">
+          <div
+            className="h-full"
+            style={{
+              width: `${fillPct}%`,
+              background: 'linear-gradient(90deg, #b89456 0%, #c9a96e 100%)',
+              transition: 'width 480ms cubic-bezier(0.16, 1, 0.3, 1)',
+            }}
+          />
+        </div>
+        <div className="text-[11px] text-slate-400">{statusHint}</div>
+      </div>
+
+      {/* Participants so far (if any) */}
+      <div>
+        <div className="flex items-baseline justify-between mb-2">
+          <span className="text-xs font-semibold text-slate-100">Participating miners</span>
+          <span className="text-[10px] text-slate-500 font-mono tabular-nums">
+            {participants.length} so far
+          </span>
+        </div>
+        {participants.length === 0 ? (
+          <div className="rounded-md border border-dashed border-slate-800/80 px-4 py-6 text-center text-[11px] text-slate-500">
+            No miner submissions recorded yet. Once miners commit leads, they&apos;ll show here.
+          </div>
+        ) : (
+          <div className="rounded-lg border border-slate-800/70 overflow-hidden">
+            <div className="grid grid-cols-[2rem_1fr_5rem] gap-3 px-3 py-1.5 text-[9px] text-slate-500 font-mono uppercase tracking-[0.06em] bg-slate-900/40 border-b border-slate-800/60">
+              <span>#</span>
+              <span>Hotkey</span>
+              <span className="text-right">Submitted</span>
+            </div>
+            {participants.map(([hotkey, count], idx) => (
+              <div
+                key={hotkey}
+                className="grid grid-cols-[2rem_1fr_5rem] gap-3 items-center px-3 py-2 text-[11px] border-t first:border-t-0 border-slate-800/40 hover:bg-slate-900/40 transition-colors"
+              >
+                <span className="text-slate-500 font-mono tabular-nums">{idx + 1}</span>
+                <code className="font-mono text-slate-200 truncate" title={hotkey}>
+                  {truncateHotkey(hotkey)}
+                </code>
+                <span className="text-right font-mono text-slate-200 tabular-nums">{count}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function LeadRow({ lead, rank }: { lead: ConsensusResult; rank: number }) {
+  const score = lead.consensus_final_score
+  const tier2 = lead.consensus_tier2_passed
+  return (
+    <div className="grid grid-cols-[2rem_1fr_5rem_4.5rem_1fr] gap-3 items-center px-2 py-2 text-xs hover:bg-slate-900/60 transition-colors rounded-md">
+      <span className="text-slate-500 font-mono tabular-nums">{rank}</span>
+      <div className="flex items-center gap-2 min-w-0">
+        <code className="font-mono text-slate-200 truncate" title={lead.miner_hotkey}>
+          {truncateHotkey(lead.miner_hotkey)}
+        </code>
+        <CopyButton text={lead.miner_hotkey} />
+      </div>
+      <span
+        className={cn(
+          'font-mono font-semibold text-right tabular-nums',
+          lead.is_winner ? 'text-gold-bright' : score > 0 ? 'text-gold' : 'text-burgundy'
+        )}
+      >
+        {score.toFixed(2)}
+      </span>
+      <span className="text-center">
+        {lead.is_winner ? (
+          <span className="text-[10px] px-1.5 py-0.5 rounded bg-gold-tint text-gold-bright border border-gold-soft font-medium">
+            Winner
+          </span>
+        ) : tier2 ? (
+          <span className="text-[10px] px-1.5 py-0.5 rounded bg-gold-soft text-gold border border-gold-soft font-medium">
+            Passed
+          </span>
+        ) : (
+          <span className="text-[10px] px-1.5 py-0.5 rounded bg-burgundy-soft text-burgundy border border-burgundy-soft font-medium">
+            Rejected
+          </span>
+        )}
+      </span>
+      <div className="flex flex-wrap gap-1">
+        <CheckChip label="email" passed={lead.consensus_email_verified} />
+        <CheckChip label="person" passed={lead.consensus_person_verified} />
+        <CheckChip label="company" passed={lead.consensus_company_verified} />
+        {lead.any_fabricated && (
+          <span className="text-[9px] px-1 py-0.5 rounded bg-burgundy-soft text-burgundy border border-burgundy-soft font-medium">
+            fabricated
+          </span>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function CheckChip({ label, passed }: { label: string; passed: boolean }) {
+  return (
+    <span
+      className={cn(
+        'text-[9px] px-1 py-0.5 rounded font-medium',
+        passed
+          ? 'bg-gold-soft text-gold border border-gold-soft'
+          : 'bg-slate-700/30 text-slate-400 border border-slate-700/40'
+      )}
+    >
+      {label}
+    </span>
+  )
+}
+
+/* ============================================================
+ * Miner detail dialog (profile-style)
+ * ============================================================ */
+function MinerDetailDialog({
+  hotkey,
+  scores,
+  loading,
+  error,
+  onRetry,
+  requestMap,
+  onOpenChange,
+}: {
+  hotkey: string | null
+  scores: MinerScore[] | null
+  loading: boolean
+  error?: string | null
+  onRetry?: () => void
+  requestMap: Record<string, { icp_details: IcpDetails; num_leads: number; status: string }>
+  onOpenChange: (open: boolean) => void
+}) {
+  const [expandedScoreId, setExpandedScoreId] = useState<string | null>(null)
+  const [collapsedCategories, setCollapsedCategories] = useState<Set<string>>(new Set())
+  const [requestFilter, setRequestFilter] = useState('')
+  const open = hotkey !== null
+
+  // Clear the in-dialog filter whenever the dialog closes or switches miner
+  useEffect(() => {
+    if (!open) {
+      setRequestFilter('')
+      setExpandedScoreId(null)
+      setCollapsedCategories(new Set())
+    }
+  }, [open, hotkey])
+
+  if (!hotkey) {
+    return (
+      <DialogPrimitive.Root open={false} onOpenChange={onOpenChange}>
+        <DialogPrimitive.Portal>
+          <DialogPrimitive.Content aria-describedby={undefined} />
+        </DialogPrimitive.Portal>
+      </DialogPrimitive.Root>
+    )
+  }
+
+  const list = scores || []
+  // Overall stats are always computed from the full list (not filtered)
+  const passed = list.filter((s) => !s.failure_reason).length
+  const passRate = list.length > 0 ? (passed / list.length) * 100 : 0
+  const avgScore =
+    list.length > 0 ? list.reduce((sum, s) => sum + (s.final_score || 0), 0) / list.length : 0
+  const lastActive = list.length > 0 ? list[0].scored_at : null
+
+  // In-dialog filter: narrow to a specific request id / industry / sub-industry / country
+  const q = requestFilter.trim().toLowerCase()
+  const filteredList = q
+    ? list.filter((s) => {
+        const req = requestMap[s.request_id]
+        const icp = req?.icp_details as IcpDetails | undefined
         return (
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <AlertCircle className="h-5 w-5" />
-                Rejection Reasons
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-3">
-                {top10.map(({ reason, count }) => {
-                  const barPct = maxCount > 0 ? (count / maxCount) * 100 : 0
-                  const ofTotal = total > 0 ? ((count / total) * 100).toFixed(1) : '0'
+          s.request_id.toLowerCase().includes(q) ||
+          asText(icp?.industry).toLowerCase().includes(q) ||
+          asText(icp?.sub_industry).toLowerCase().includes(q) ||
+          asText(icp?.country).toLowerCase().includes(q)
+        )
+      })
+    : list
+
+  // Unique matching requests, surfaces what the user is currently scoped to
+  const matchingRequestIds = new Set(filteredList.map((s) => s.request_id))
+
+  const grouped: { category: string; items: MinerScore[] }[] = []
+  const byCat = new Map<string, MinerScore[]>()
+  for (const s of filteredList) {
+    const cat = categorizeScore(s)
+    const arr = byCat.get(cat) || []
+    arr.push(s)
+    byCat.set(cat, arr)
+  }
+  for (const cat of CATEGORY_ORDER) {
+    const items = byCat.get(cat)
+    if (items && items.length > 0) grouped.push({ category: cat, items })
+  }
+
+  const swatch = hotkeySwatch(hotkey)
+
+  const toggleCategory = (cat: string) => {
+    setCollapsedCategories((prev) => {
+      const next = new Set(prev)
+      if (next.has(cat)) next.delete(cat)
+      else next.add(cat)
+      return next
+    })
+  }
+
+  return (
+    <DialogPrimitive.Root open={open} onOpenChange={onOpenChange}>
+      <DialogPrimitive.Portal>
+        <DialogPrimitive.Overlay
+          className={cn(
+            'fixed inset-0 z-40 bg-slate-950/70 backdrop-blur-[2px]',
+            'data-[state=open]:animate-in data-[state=closed]:animate-out',
+            'data-[state=open]:fade-in-0 data-[state=closed]:fade-out-0',
+            'duration-200'
+          )}
+        />
+        <DialogPrimitive.Content
+          onOpenAutoFocus={(e) => e.preventDefault()}
+          aria-describedby={undefined}
+          className={cn(
+            'fixed z-50 bg-slate-950 border-slate-800 text-slate-100 shadow-2xl shadow-black/60',
+            'overflow-hidden flex flex-col p-0 outline-none',
+            'data-[state=open]:animate-in data-[state=closed]:animate-out',
+            'duration-200',
+            // Mobile: bottom sheet
+            'inset-x-0 bottom-0 w-full max-w-full max-h-[92vh] rounded-t-2xl border-t border-x',
+            'data-[state=open]:slide-in-from-bottom data-[state=closed]:slide-out-to-bottom',
+            // Desktop: centered modal
+            'sm:inset-x-auto sm:bottom-auto sm:top-[50%] sm:left-[50%]',
+            'sm:translate-x-[-50%] sm:translate-y-[-50%]',
+            'sm:max-w-3xl sm:w-[calc(100%-2rem)] sm:max-h-[85vh] sm:rounded-xl sm:border',
+            'sm:data-[state=open]:slide-in-from-bottom-0 sm:data-[state=closed]:slide-out-to-bottom-0',
+            'sm:data-[state=open]:fade-in-0 sm:data-[state=closed]:fade-out-0',
+            'sm:data-[state=open]:zoom-in-95 sm:data-[state=closed]:zoom-out-95'
+          )}
+        >
+          {/* Profile-style header */}
+          <div className="px-6 py-5 border-b border-slate-800/80 bg-gradient-to-b from-slate-900/60 to-transparent">
+            <DialogPrimitive.Title className="sr-only">Miner profile</DialogPrimitive.Title>
+            <div className="flex items-center gap-3 pr-10">
+              <div
+                className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold text-slate-950 shadow-lg"
+                style={{
+                  // Muted dual-stop gradient derived from the hotkey hue but kept at
+                  // 22% saturation so each avatar reads as a chromatic neutral rather
+                  // than a vivid swatch.
+                  background: `linear-gradient(135deg, hsl(${swatch.hue}, 22%, 66%), hsl(${swatch.hue}, 22%, 46%))`,
+                  boxShadow: `0 0 0 1px hsl(${swatch.hue}, 22%, 58%, 0.35), 0 8px 24px -8px hsl(${swatch.hue}, 22%, 38%, 0.45)`,
+                }}
+                aria-hidden
+              >
+                {swatch.initials}
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <code className="text-sm font-mono text-slate-100 truncate" title={hotkey}>
+                    {truncateHotkey(hotkey)}
+                  </code>
+                  <CopyButton text={hotkey} />
+                </div>
+                <div className="text-[11px] text-slate-500 mt-0.5">
+                  {lastActive ? `Last active ${formatRelative(lastActive)}` : 'No activity'}
+                </div>
+              </div>
+            </div>
+
+            {/* KPI stat blocks */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 sm:gap-3 mt-4">
+              <StatBlock label="Pass rate" value={`${passRate.toFixed(0)}%`} tone="gold" />
+              <StatBlock label="Scored" value={list.length} tone="slate" />
+              <StatBlock label="Passed" value={passed} tone="gold" muted />
+              <StatBlock label="Avg score" value={avgScore.toFixed(2)} tone="slate" />
+            </div>
+          </div>
+
+          {/* In-dialog request filter */}
+          {!loading && list.length > 0 && (
+            <div className="px-6 pt-3 pb-2 border-b border-slate-800/60">
+              <div className="relative">
+                <input
+                  type="text"
+                  value={requestFilter}
+                  onChange={(e) => setRequestFilter(e.target.value)}
+                  placeholder="Filter by request id, industry, or country"
+                  className="w-full pl-3 pr-24 h-8 bg-slate-900/60 border border-slate-700/50 rounded-md text-[11px] font-mono text-slate-100 placeholder:text-slate-500 outline-none premium-focus transition-colors"
+                />
+                <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-2">
+                  {requestFilter.trim() ? (
+                    <>
+                      <span className="text-[10px] font-mono text-slate-500 tabular-nums">
+                        {filteredList.length} of {list.length}
+                      </span>
+                      <button
+                        onClick={() => setRequestFilter('')}
+                        className="text-slate-500 hover:text-slate-200 transition-colors"
+                        aria-label="Clear filter"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    </>
+                  ) : (
+                    <span className="text-[10px] font-mono text-slate-500 tabular-nums">
+                      {matchingRequestIds.size} {matchingRequestIds.size === 1 ? 'request' : 'requests'}
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Grouped score list */}
+          <div className="flex-1 overflow-y-auto px-6 py-4">
+            {loading ? (
+              <div className="flex items-center justify-center gap-2 py-16 text-sm text-slate-400">
+                <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                Loading miner scores...
+              </div>
+            ) : error ? (
+              <div className="flex flex-col items-center justify-center gap-3 py-12 text-center">
+                <p className="text-sm text-burgundy">Couldn&apos;t load miner detail</p>
+                <p className="text-[11px] text-slate-500 font-mono max-w-md">{error}</p>
+                {onRetry && (
+                  <button
+                    type="button"
+                    onClick={onRetry}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium text-slate-200 bg-slate-800/60 border border-slate-700/50 hover:bg-slate-700/60 hover:border-slate-600 transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-[color:var(--brand)]"
+                  >
+                    Try again
+                  </button>
+                )}
+              </div>
+            ) : list.length === 0 ? (
+              <div className="text-center py-12 text-sm text-slate-500">
+                No scored leads found for this miner.
+              </div>
+            ) : filteredList.length === 0 ? (
+              <div className="text-center py-12 text-sm text-slate-500">
+                No leads match{' '}
+                <code className="font-mono text-slate-300 bg-slate-900/60 px-1.5 py-0.5 rounded">
+                  {requestFilter}
+                </code>
+                . Try a shorter prefix or a different request.
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {grouped.map(({ category, items }) => {
+                  const collapsed = collapsedCategories.has(category)
+                  const tone = CATEGORY_COLORS[category] || 'slate'
                   return (
-                    <div key={reason}>
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="text-xs font-medium">{readableReason(reason)}</span>
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs text-muted-foreground">{ofTotal}%</span>
-                          <span className="text-xs font-mono font-semibold w-6 text-right">{count}</span>
-                        </div>
-                      </div>
-                      <div className="bg-muted/50 rounded-full h-2.5 overflow-hidden">
-                        <div
-                          className="h-full rounded-full bg-gradient-to-r from-red-500 to-red-400 transition-all duration-500"
-                          style={{ width: `${barPct}%` }}
+                    <section key={category}>
+                      <button
+                        onClick={() => toggleCategory(category)}
+                        className="w-full flex items-center gap-2 text-left hover:bg-slate-900/40 -mx-2 px-2 py-1.5 rounded-md transition-colors"
+                      >
+                        <ChevronRight
+                          className={cn(
+                            'h-3.5 w-3.5 text-slate-500 transition-transform',
+                            !collapsed && 'rotate-90'
+                          )}
                         />
-                      </div>
-                    </div>
+                        <span className={cn('text-xs font-semibold', toneText(tone))}>
+                          {category}
+                        </span>
+                        <span className="text-[11px] text-slate-500 tabular-nums">
+                          {items.length}
+                        </span>
+                      </button>
+                      {!collapsed && (
+                        <div className="mt-1.5 rounded-lg border border-slate-800/70 overflow-hidden">
+                          <div className="grid grid-cols-[1fr_5rem_5rem_1.5fr] gap-3 px-3 py-1.5 text-[9px] text-slate-500 font-mono uppercase tracking-[0.06em] bg-slate-900/40 border-b border-slate-800/60">
+                            <span>Reason</span>
+                            <span className="text-right">Score</span>
+                            <span className="text-right">Rep</span>
+                            <span>Context</span>
+                          </div>
+                          {items.map((score) => (
+                            <ScoreTableRow
+                              key={score.score_id}
+                              score={score}
+                              requestMap={requestMap}
+                              expanded={expandedScoreId === score.score_id}
+                              onToggle={() =>
+                                score.failure_detail &&
+                                setExpandedScoreId((cur) =>
+                                  cur === score.score_id ? null : score.score_id
+                                )
+                              }
+                            />
+                          ))}
+                        </div>
+                      )}
+                    </section>
                   )
                 })}
               </div>
-            </CardContent>
-          </Card>
-        )
-      })()}
-
-      {/* Miner Score Lookup */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Search className="h-5 w-5" />
-            Miner Score Lookup
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="flex gap-2 mb-4">
-            <input
-              type="text"
-              placeholder="Enter miner hotkey to see scores and rejection reasons..."
-              className="flex-1 px-3 py-2 text-sm bg-muted/50 border border-border rounded-md font-mono"
-              value={minerSearch}
-              onChange={(e) => setMinerSearch(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleMinerSearch()}
-            />
-            <button
-              className="px-4 py-2 text-sm bg-primary text-primary-foreground rounded-md hover:bg-primary/90 transition-colors disabled:opacity-50"
-              onClick={handleMinerSearch}
-              disabled={!minerSearch.trim()}
-            >
-              Search
-            </button>
+            )}
           </div>
 
-          {searchedMiner && data.minerScores && (
-            <div className="space-y-2 max-h-[400px] overflow-y-auto">
-              {data.minerScores.length === 0 ? (
-                <p className="text-center text-muted-foreground py-8">No scores found for this miner</p>
-              ) : (
-                <>
-                  <div className="flex items-center justify-between mb-3 text-sm">
-                    <span className="text-muted-foreground">
-                      {data.minerScores.length} scores for <code className="font-mono">{truncateHotkey(searchedMiner)}</code>
-                    </span>
-                    <div className="flex gap-3 text-xs">
-                      <span className="text-green-500">
-                        {data.minerScores.filter(s => !s.failure_reason).length} passed
-                      </span>
-                      <span className="text-red-500">
-                        {data.minerScores.filter(s => s.failure_reason).length} rejected
-                      </span>
-                    </div>
-                  </div>
-                  {data.minerScores.map((score) => {
-                    const req = data.requestMap[score.request_id]
-                    const icp = req?.icp_details as IcpDetails | undefined
-                    return (
-                      <div
-                        key={score.score_id}
-                        className={`p-3 rounded-lg border ${
-                          score.failure_reason
-                            ? 'bg-red-500/5 border-red-500/20'
-                            : 'bg-green-500/5 border-green-500/20'
-                        } ${score.failure_detail ? 'cursor-pointer' : ''}`}
-                        onClick={() => score.failure_detail && setExpandedScore(expandedScore === score.score_id ? null : score.score_id)}
-                      >
-                        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1">
-                          <div className="flex items-center gap-2">
-                            {score.failure_reason ? (
-                              <XCircle className="h-4 w-4 text-red-500 shrink-0" />
-                            ) : (
-                              <CheckCircle className="h-4 w-4 text-green-500 shrink-0" />
-                            )}
-                            <span className="text-sm font-medium">
-                              {score.failure_reason
-                                ? readableReason(score.failure_reason)
-                                : 'Passed all tiers'}
-                            </span>
-                          </div>
-                          <span className={`text-sm font-mono font-bold ${score.final_score > 0 ? 'text-green-500' : 'text-red-400'}`}>
-                            {score.final_score.toFixed(2)}
-                          </span>
-                        </div>
-                        {expandedScore === score.score_id && score.failure_detail && (
-                          <div className="mt-2 p-2 bg-muted/50 rounded text-xs text-muted-foreground border-l-2 border-red-400">
-                            {score.failure_detail}
-                          </div>
-                        )}
-                        <div className="flex flex-wrap gap-2 mt-2 text-xs text-muted-foreground">
-                          {icp?.industry && <span>{icp.industry}</span>}
-                          {icp?.country && <span>| {icp.country}</span>}
-                          <span>| Rep: {score.rep_score.toFixed(1)}</span>
-                          <span>| {formatDate(score.scored_at)}</span>
-                          {score.failure_detail && <span className="text-blue-400">| tap for details</span>}
-                        </div>
-                        <div className="flex flex-wrap gap-1.5 mt-2">
-                          {score.tier1_passed ? (
-                            <Badge variant="outline" className="text-[10px] text-green-500 border-green-500/30">Tier 1</Badge>
-                          ) : (
-                            <Badge variant="secondary" className="text-[10px] text-red-400 border-red-500/20">Tier 1 Failed</Badge>
-                          )}
-                          {score.tier2_passed ? (
-                            <Badge variant="outline" className="text-[10px] text-green-500 border-green-500/30">Tier 2</Badge>
-                          ) : (
-                            <Badge variant="secondary" className="text-[10px] text-red-400 border-red-500/20">Tier 2 Failed</Badge>
-                          )}
-                          <VerificationBadge label="Email" passed={score.email_verified} />
-                          <VerificationBadge label="Person" passed={score.person_verified} />
-                          <VerificationBadge label="Company" passed={score.company_verified} />
-                          {score.all_fabricated && (
-                            <Badge variant="destructive" className="text-[10px] gap-0.5">
-                              <AlertCircle className="h-2.5 w-2.5" />Fabricated
-                            </Badge>
-                          )}
-                        </div>
-                      </div>
-                    )
-                  })}
-                </>
-              )}
-            </div>
-          )}
-        </CardContent>
-      </Card>
+          <DialogPrimitive.Close
+            className="absolute top-3 right-3 rounded p-1.5 text-slate-400 hover:text-slate-100 hover:bg-slate-800/80 transition-colors outline-none focus-visible:ring-1 focus-visible:ring-slate-500"
+            aria-label="Close"
+          >
+            <X className="h-4 w-4" />
+          </DialogPrimitive.Close>
+        </DialogPrimitive.Content>
+      </DialogPrimitive.Portal>
+    </DialogPrimitive.Root>
+  )
+}
+
+function StatBlock({
+  label,
+  value,
+  tone,
+  muted,
+}: {
+  label: string
+  value: string | number
+  tone: 'slate' | 'gold' | 'amber' | 'burgundy'
+  muted?: boolean
+}) {
+  const valueColor =
+    tone === 'gold'
+      ? muted
+        ? 'text-gold opacity-80'
+        : 'text-gold'
+      : tone === 'amber'
+        ? 'text-amber-warm'
+        : tone === 'burgundy'
+          ? 'text-burgundy'
+          : 'text-slate-100'
+  return (
+    <div className="rounded-lg border border-slate-800/70 bg-slate-900/30 px-3 py-2">
+      <div className="text-[9px] text-slate-500 uppercase tracking-[0.1em] font-medium">{label}</div>
+      <div className={cn('text-lg font-semibold tabular-nums leading-tight mt-0.5', valueColor)}>
+        {typeof value === 'number' ? <CountUp value={value} /> : value}
+      </div>
     </div>
+  )
+}
+
+function toneText(tone: string): string {
+  switch (tone) {
+    case 'gold':
+      return 'text-gold'
+    case 'amber':
+      return 'text-amber-warm'
+    case 'cream':
+      return 'text-cream'
+    case 'burgundy':
+      return 'text-burgundy'
+    default:
+      return 'text-slate-300'
+  }
+}
+
+function ScoreTableRow({
+  score,
+  requestMap,
+  expanded,
+  onToggle,
+}: {
+  score: MinerScore
+  requestMap: Record<string, { icp_details: IcpDetails; num_leads: number; status: string }>
+  expanded: boolean
+  onToggle: () => void
+}) {
+  const req = requestMap[score.request_id]
+  const icp = req?.icp_details as IcpDetails | undefined
+  const canExpand = Boolean(score.failure_detail)
+  const passed = !score.failure_reason
+  return (
+    <div
+      className={cn(
+        'grid grid-cols-[1fr_5rem_5rem_1.5fr] gap-3 px-3 py-2 text-[11px] border-t first:border-t-0 border-slate-800/40 transition-colors',
+        passed ? 'hover-bg-warm' : 'hover:bg-slate-900/40',
+        canExpand && 'cursor-pointer'
+      )}
+      onClick={canExpand ? onToggle : undefined}
+    >
+      <div className="flex items-center gap-2 min-w-0">
+        <span
+          className={cn(
+            'w-1 h-3 rounded-full shrink-0',
+            passed ? 'dot-gold' : 'bg-[#a8746f]'
+          )}
+        />
+        <span
+          className={cn('truncate', passed ? 'text-gold' : 'text-slate-200')}
+          title={score.failure_reason ? readableReason(score.failure_reason) : 'Passed all tiers'}
+        >
+          {score.failure_reason ? readableReason(score.failure_reason) : 'Passed all tiers'}
+        </span>
+        {canExpand && (
+          <span className="text-[9px] text-cream shrink-0 opacity-80">details</span>
+        )}
+      </div>
+      <span
+        className={cn(
+          'font-mono font-semibold text-right tabular-nums',
+          score.final_score > 0 ? 'text-gold' : 'text-burgundy'
+        )}
+      >
+        {score.final_score.toFixed(2)}
+      </span>
+      <span className="font-mono text-slate-400 text-right tabular-nums">
+        {score.rep_score.toFixed(1)}
+      </span>
+      <div className="flex items-center gap-2 text-slate-500 font-mono text-[10px] min-w-0">
+        <span className="truncate" title={[asText(icp?.industry), asText(icp?.country)].filter(Boolean).join(' · ')}>
+          {asText(icp?.industry) || '·'}
+          {asText(icp?.country) && <span className="text-slate-600"> · {asText(icp?.country)}</span>}
+        </span>
+        <span className="ml-auto shrink-0 text-slate-600 tabular-nums">{formatRelative(score.scored_at)}</span>
+      </div>
+      {expanded && score.failure_detail && (
+        <div className="col-span-4 mt-2 mb-1 p-2.5 rounded-md bg-slate-900/80 border-l-2 border-burgundy-soft text-[10px] text-slate-300 leading-relaxed font-mono">
+          {score.failure_detail}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/* ============================================================
+ * Filter button (segmented control pill)
+ * ============================================================ */
+function FilterButton({
+  active,
+  onClick,
+  label,
+  count,
+  tone,
+}: {
+  active: boolean
+  onClick: () => void
+  label: string
+  count: number
+  tone: 'neutral' | 'pending' | 'completed'
+}) {
+  const activeBg =
+    tone === 'pending'
+      ? 'bg-amber-warm-soft text-amber-warm border-amber-warm-soft'
+      : tone === 'completed'
+        ? 'bg-cream-soft text-cream border-cream-soft'
+        : 'bg-slate-700/60 text-slate-100 border-slate-500/40'
+  return (
+    <button
+      onClick={onClick}
+      className={cn(
+        'flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium border transition-all',
+        active
+          ? activeBg
+          : 'bg-transparent text-slate-400 border-transparent hover:text-slate-200 hover:bg-slate-800/40'
+      )}
+    >
+      <span>{label}</span>
+      <span
+        className={cn(
+          'text-[10px] font-mono tabular-nums',
+          active ? 'text-current/70' : 'text-slate-500'
+        )}
+      >
+        {count}
+      </span>
+    </button>
   )
 }

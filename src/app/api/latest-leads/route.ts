@@ -3,6 +3,8 @@ import { fetchMetagraph } from '@/lib/metagraph'
 import { supabase } from '@/lib/supabase'
 import { cleanRejectionReason } from '@/lib/utils-rejection'
 
+export const dynamic = 'force-dynamic'
+
 // Normalize decision values
 function normalizeDecision(decision: string | undefined): 'ACCEPTED' | 'REJECTED' | 'PENDING' {
   if (!decision) return 'PENDING'

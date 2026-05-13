@@ -364,7 +364,7 @@ export async function searchLeads(filters: {
     }
   }
 
-  // Step 3: Merge results — match by lead_id first, then email_hash
+  // Step 3: Merge results. Match by lead_id first, then email_hash.
   const leads: LeadSearchResult[] = []
   const seenLeadIds = new Set<string>()
   for (const c of consensusData) {

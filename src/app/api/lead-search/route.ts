@@ -3,6 +3,8 @@ import { supabase } from '@/lib/supabase'
 import { fetchMetagraph } from '@/lib/metagraph'
 import { cleanRejectionReason } from '@/lib/utils-rejection'
 
+export const dynamic = 'force-dynamic'
+
 // Request coalescing: track in-flight searches to prevent duplicate DB queries
 // Key = search params string, Value = promise of the search
 const inFlightSearches = new Map<string, Promise<SearchResult[]>>()
@@ -166,7 +168,7 @@ async function performSearch(
         }
       }
 
-      // Build results — match consensus by lead_id first
+      // Build results. Match consensus by lead_id first.
       for (const sub of allSubs) {
         const uidVal = hotkeyToUid[sub.hotkey]
         if (uidVal === undefined) continue // Skip inactive miners
@@ -278,7 +280,7 @@ async function performSearch(
       const uidVal = parseInt(uid, 10)
       for (const sub of allSubs) {
         // If submission has a lead_id, only match consensus for that specific lead_id
-        // (don't fall back to email_hash — that would pick up old rejections from prior submissions)
+        // (don't fall back to email_hash; that would pick up old rejections from prior submissions)
         const cons = sub.lead_id
           ? consensusByLeadId.get(sub.lead_id) ?? null
           : consensusByHash.get(sub.email_hash) ?? null
@@ -302,7 +304,6 @@ async function performSearch(
     } else if (leadId && leadId.trim()) {
       // LEAD ID / EMAIL HASH SEARCH: Query SUBMISSION by lead_id OR email_hash with batched fetching
       const searchTerm = leadId.trim()
-      const BATCH_SIZE = 1000
       const seenLeadIds = new Set<string>()
       const allSubs: { email_hash: string, actor_hotkey: string, payload: unknown, ts: string }[] = []
 
@@ -390,14 +391,14 @@ async function performSearch(
         }
       }
 
-      // Build results (don't skip inactive miners for lead_id searches — user is looking up a specific lead)
+      // Build results (don't skip inactive miners for lead_id searches; user is looking up a specific lead)
       for (const sub of allSubs) {
         const uidVal = hotkeyToUid[sub.actor_hotkey] ?? null
 
         const payload = sub.payload as { lead_id?: string }
         // Match consensus by lead_id first, fall back to email_hash
         // If submission has a lead_id, only match consensus for that specific lead_id
-        // (don't fall back to email_hash — that would pick up old rejections from prior submissions)
+        // (don't fall back to email_hash; that would pick up old rejections from prior submissions)
         const cons = payload?.lead_id
           ? consensusByLeadId.get(payload.lead_id) ?? null
           : consensusByHash.get(sub.email_hash) ?? null
@@ -499,7 +500,7 @@ async function performSearch(
         if (uidVal === undefined) continue // Skip inactive miners
 
         // If submission has a lead_id, only match consensus for that specific lead_id
-        // (don't fall back to email_hash — that would pick up old rejections from prior submissions)
+        // (don't fall back to email_hash; that would pick up old rejections from prior submissions)
         const cons = sub.lead_id
           ? consensusByLeadId.get(sub.lead_id) ?? null
           : consensusByHash.get(sub.email_hash) ?? null

@@ -1,9 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
-import { Skeleton } from '@/components/ui/skeleton'
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -12,22 +9,36 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import {
-  Trophy,
-  Clock,
-  Zap,
-  Users,
-  CheckCircle,
-  XCircle,
   Loader2,
-  Send,
-  Crown,
   Code,
   Eye,
   Lock,
-  ExternalLink,
   Copy,
   Check,
+  ChevronRight,
+  AlertTriangle,
 } from 'lucide-react'
+import { cn } from '@/lib/utils'
+
+// =================================================================
+//  Model Competition. Premium editorial redesign.
+//
+//  Visual language matches Fulfillment: warm off-black canvas, single
+//  gold accent (#c9a96e), cream for completed, amber-warm for in-flight,
+//  burgundy for negative. No vivid Tailwind hues.
+// =================================================================
+
+/**
+ * The score margin a new model must exceed to dethrone the current champion.
+ * Sourced from env so it can be tuned without a code change. Defaults to 5%
+ * which matches the subnet's published qualification spec.
+ */
+const CHALLENGE_THRESHOLD_PCT = Number(
+  process.env.NEXT_PUBLIC_CHALLENGE_THRESHOLD_PCT ?? '5'
+)
+
+/** Lifetime of code-visibility lock after submission/champion event. */
+const CODE_UNLOCK_HOURS = 24
 
 // Types for champion history data
 interface ChampionHistoryEntry {
@@ -194,83 +205,193 @@ function formatDuration(interval: string | null): string {
   }
 }
 
-// Helper to truncate hotkey
+// Helper to truncate hotkey. Matches the Fulfillment convention
+// (6 chars · ellipsis · 4 chars) so the same identity reads identically
+// on both tabs.
 function truncateHotkey(hotkey: string): string {
-  if (!hotkey || hotkey.length < 12) return hotkey
-  return `${hotkey.slice(0, 6)}..${hotkey.slice(-4)}`
+  if (!hotkey || hotkey.length <= 12) return hotkey
+  return `${hotkey.slice(0, 6)}...${hotkey.slice(-4)}`
 }
 
-// Status badge component
+/**
+ * Format a duration in seconds as a live reign counter.
+ * - <60s   → "47s"
+ * - <1h    → "12m 47s"
+ * - <1d    → "4h 12m"
+ * - >=1d   → "9d 14h"
+ *
+ * Designed to read naturally next to a champion title; updates every second.
+ */
+function formatLiveDuration(seconds: number): string {
+  if (seconds < 0) seconds = 0
+  if (seconds < 60) return `${Math.floor(seconds)}s`
+  const m = Math.floor(seconds / 60)
+  if (m < 60) return `${m}m ${Math.floor(seconds % 60)}s`
+  const h = Math.floor(m / 60)
+  if (h < 24) return `${h}h ${m % 60}m`
+  const d = Math.floor(h / 24)
+  return `${d}d ${h % 24}h`
+}
+
+/**
+ * Format a positive seconds value as a countdown (e.g. "23h 14m" or "4m 12s").
+ * Returns null if the deadline has passed.
+ */
+function formatCountdown(secondsRemaining: number): string | null {
+  if (secondsRemaining <= 0) return null
+  if (secondsRemaining < 60) return `${Math.floor(secondsRemaining)}s`
+  const m = Math.floor(secondsRemaining / 60)
+  if (m < 60) return `${m}m ${Math.floor(secondsRemaining % 60)}s`
+  const h = Math.floor(m / 60)
+  if (h < 24) return `${h}h ${m % 60}m`
+  const d = Math.floor(h / 24)
+  return `${d}d ${h % 24}h`
+}
+
+/**
+ * Deterministic, muted color swatch from hotkey. Matches the Fulfillment
+ * avatar convention. 22% saturation so each badge reads as a chromatic
+ * neutral rather than a vivid Tailwind hue.
+ */
+function hotkeySwatch(hotkey: string): { hue: number; hex: string; initials: string } {
+  let h = 0
+  for (let i = 0; i < hotkey.length; i++) {
+    h = (h * 33 + hotkey.charCodeAt(i)) | 0
+  }
+  const hue = Math.abs(h) % 360
+  const initials = hotkey.slice(2, 4).toUpperCase()
+  return { hue, hex: `hsl(${hue}, 22%, 58%)`, initials }
+}
+
+/**
+ * Smooth count-up animation for premium stat displays. Lifted from Fulfillment
+ * so both tabs share the same easing curve and tabular-num behavior.
+ */
+function CountUp({
+  value,
+  duration = 600,
+  decimals = 0,
+  className,
+}: {
+  value: number
+  duration?: number
+  decimals?: number
+  className?: string
+}) {
+  const [display, setDisplay] = useState(value)
+  const fromRef = useRef(value)
+  useEffect(() => {
+    const from = fromRef.current
+    const to = value
+    if (from === to) return
+    let raf = 0
+    const start = performance.now()
+    const tick = (now: number) => {
+      const t = Math.min(1, (now - start) / duration)
+      const eased = 1 - Math.pow(1 - t, 3)
+      const next = from + (to - from) * eased
+      setDisplay(next)
+      if (t < 1) raf = requestAnimationFrame(tick)
+      else fromRef.current = to
+    }
+    raf = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(raf)
+  }, [value, duration])
+  const shown = decimals > 0
+    ? display.toFixed(decimals)
+    : Math.round(display).toLocaleString()
+  return <span className={cn('tabular-nums', className)}>{shown}</span>
+}
+
+/**
+ * Live ticker. Re-renders once per second. Used for reign counter and
+ * code-unlock countdown so they stay accurate without a parent poll.
+ */
+function useTick(intervalMs = 1000): number {
+  const [tick, setTick] = useState(0)
+  useEffect(() => {
+    const id = window.setInterval(() => setTick((t) => t + 1), intervalMs)
+    return () => window.clearInterval(id)
+  }, [intervalMs])
+  return tick
+}
+
+// Status pill. Editorial palette, no Tailwind defaults.
 function StatusBadge({ status }: { status: string }) {
   const statusLower = status.toLowerCase()
 
   switch (statusLower) {
     case 'submitted':
       return (
-        <Badge variant="secondary" className="gap-1">
-          <Send className="h-3 w-3" />
+        <span className="inline-flex items-center gap-1 text-[10px] rounded px-1.5 py-0.5 border font-medium bg-slate-700/40 text-slate-300 border-slate-600/40">
+          <span className="inline-block w-1 h-1 rounded-full dot-amber pending-breath" aria-hidden />
           Submitted
-        </Badge>
+        </span>
       )
     case 'evaluating':
       return (
-        <Badge variant="default" className="gap-1 bg-blue-500">
-          <Loader2 className="h-3 w-3 animate-spin" />
+        <span className="inline-flex items-center gap-1 text-[10px] rounded px-1.5 py-0.5 border font-medium bg-amber-warm-soft text-amber-warm border-amber-warm-soft">
+          <Loader2 className="h-2.5 w-2.5 animate-spin" aria-hidden />
           Evaluating
-        </Badge>
+        </span>
       )
     case 'evaluated':
       return (
-        <Badge variant="default" className="gap-1 bg-green-600">
-          <CheckCircle className="h-3 w-3" />
+        <span className="inline-flex items-center gap-1 text-[10px] rounded px-1.5 py-0.5 border font-medium bg-cream-soft text-cream border-cream-soft">
           Evaluated
-        </Badge>
+        </span>
       )
     case 'failed':
       return (
-        <Badge variant="destructive" className="gap-1">
-          <XCircle className="h-3 w-3" />
+        <span className="inline-flex items-center gap-1 text-[10px] rounded px-1.5 py-0.5 border font-medium bg-burgundy-soft text-burgundy border-burgundy-soft">
           Failed
-        </Badge>
+        </span>
       )
     default:
-      return <Badge variant="outline">{status}</Badge>
+      return (
+        <span className="inline-flex items-center gap-1 text-[10px] rounded px-1.5 py-0.5 border font-medium bg-slate-700/40 text-slate-300 border-slate-600/40">
+          {status}
+        </span>
+      )
   }
 }
 
-// Copy button component
-function CopyButton({ text, label }: { text: string; label?: string }) {
+// Compact, editorial copy button. Matches Fulfillment's inline CopyButton.
+function CopyButton({ text, label, ariaLabel }: { text: string; label?: string; ariaLabel?: string }) {
   const [copied, setCopied] = useState(false)
 
-  const handleCopy = async () => {
+  const handleCopy = async (e: React.MouseEvent) => {
+    e.stopPropagation()
     await navigator.clipboard.writeText(text)
     setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
+    setTimeout(() => setCopied(false), 1500)
   }
 
   return (
-    <Button
-      variant="ghost"
-      size="sm"
-      className="h-6 px-2 text-xs"
+    <button
+      type="button"
       onClick={handleCopy}
+      aria-label={ariaLabel || `Copy ${label || 'value'}`}
+      className="inline-flex items-center gap-1 text-[10px] text-slate-500 hover:text-slate-100 transition-colors"
     >
       {copied ? (
         <>
-          <Check className="h-3 w-3 mr-1" />
-          Copied
+          <Check className="h-3 w-3" aria-hidden />
+          <span className="text-gold">Copied</span>
         </>
       ) : (
         <>
-          <Copy className="h-3 w-3 mr-1" />
-          {label || 'Copy'}
+          <Copy className="h-3 w-3" aria-hidden />
+          {label && <span>{label}</span>}
         </>
       )}
-    </Button>
+    </button>
   )
 }
 
-// Score Breakdown Tab Component
+// Score Breakdown. Refined to the editorial palette and now surfaces
+// integrity signals (fabrication rate, integrity multiplier, early stop) that
+// were previously hidden in the API but never rendered.
 function ScoreBreakdownTab({ breakdown, score }: { breakdown: ScoreBreakdown | null | undefined; score: number | null }) {
   const [copied, setCopied] = useState(false)
 
@@ -284,191 +405,297 @@ function ScoreBreakdownTab({ breakdown, score }: { breakdown: ScoreBreakdown | n
   if (!breakdown || !breakdown.evaluation_summary) {
     return (
       <div className="p-8 text-center">
-        <p className="text-sm text-muted-foreground">Score breakdown not available</p>
+        <p className="text-sm text-slate-500">Score breakdown not available</p>
       </div>
     )
   }
 
   const summary = breakdown.evaluation_summary
+  const successRate = summary.total_icps > 0
+    ? ((summary.icps_scored ?? 0) / summary.total_icps) * 100
+    : 0
 
   return (
-    <div className="space-y-4">
-      {/* Copy Button */}
+    <div className="space-y-5">
+      {/* Top row: copy action */}
       <div className="flex justify-end">
         <Button
           variant="outline"
           size="sm"
-          className="gap-2"
+          className="gap-2 h-7 text-[11px] border-slate-700/50 bg-slate-900/40 hover:bg-slate-800/60 text-slate-300 hover:text-slate-100"
           onClick={handleCopyBreakdown}
         >
           {copied ? (
             <>
-              <Check className="h-4 w-4" />
-              Copied!
+              <Check className="h-3.5 w-3.5" aria-hidden />
+              Copied
             </>
           ) : (
             <>
-              <Copy className="h-4 w-4" />
-              Copy Full Breakdown
+              <Copy className="h-3.5 w-3.5" aria-hidden />
+              Copy full breakdown
             </>
           )}
         </Button>
       </div>
 
-      {/* Evaluation Summary */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-        <div className="bg-muted/30 rounded-lg p-3">
-          <p className="text-xs text-muted-foreground">Final Score</p>
-          <p className="text-xl font-bold text-yellow-500">{(score ?? 0).toFixed(2)}</p>
-        </div>
-        <div className="bg-muted/30 rounded-lg p-3">
-          <p className="text-xs text-muted-foreground">ICPs Tested</p>
-          <p className="text-xl font-bold">{summary.total_icps ?? 0}</p>
-        </div>
-        <div className="bg-muted/30 rounded-lg p-3">
-          <p className="text-xs text-muted-foreground">Success Rate</p>
-          <p className="text-xl font-bold text-green-500">
-            {summary.total_icps > 0 ? (((summary.icps_scored ?? 0) / summary.total_icps) * 100).toFixed(1) : '0.0'}%
-          </p>
-        </div>
-        <div className="bg-muted/30 rounded-lg p-3">
-          <p className="text-xs text-muted-foreground">Total Cost</p>
-          <p className="text-lg font-mono">${(summary.total_cost_usd ?? 0).toFixed(4)}</p>
-        </div>
-        <div className="bg-muted/30 rounded-lg p-3">
-          <p className="text-xs text-muted-foreground">Total Time</p>
-          <p className="text-lg font-mono">{Math.round(summary.total_time_seconds ?? 0)}s</p>
-        </div>
-        <div className="bg-muted/30 rounded-lg p-3">
-          <p className="text-xs text-muted-foreground">Leads Scored 0</p>
-          <p className="text-xl font-bold text-red-500">{breakdown.zero_score_count ?? 0}</p>
-        </div>
+      {/* Evaluation summary: six tiles in the StatBlock pattern */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+        <StatTile label="Final score" value={`${(score ?? 0).toFixed(2)}`} tone="gold" />
+        <StatTile label="ICPs tested" value={`${summary.total_icps ?? 0}`} tone="slate" />
+        <StatTile
+          label="Success rate"
+          value={`${successRate.toFixed(1)}%`}
+          tone="gold"
+          muted
+        />
+        <StatTile label="Total cost" value={`$${(summary.total_cost_usd ?? 0).toFixed(4)}`} tone="slate" mono />
+        <StatTile label="Total time" value={`${Math.round(summary.total_time_seconds ?? 0)}s`} tone="slate" mono />
+        <StatTile
+          label="Scored 0"
+          value={`${breakdown.zero_score_count ?? 0}`}
+          tone={(breakdown.zero_score_count ?? 0) > 0 ? 'burgundy' : 'slate'}
+        />
       </div>
+
+      {/* Integrity signals: the trust block. Hidden if no integrity data. */}
+      {(summary.fabrication_rate !== undefined ||
+        summary.integrity_multiplier !== undefined ||
+        summary.stopped_early !== undefined) && (
+        <section>
+          <h4 className="font-medium text-[11px] mb-2 text-slate-300 uppercase tracking-[0.1em]">
+            Integrity
+          </h4>
+          <div className="rounded-lg border border-slate-800/70 overflow-hidden divide-y divide-slate-800/60">
+            {summary.fabrication_rate !== undefined && (
+              <IntegrityRow
+                label="Fabrication rate"
+                hint={summary.fabrication_count !== undefined ? `${summary.fabrication_count} fabricated` : null}
+                pct={(summary.fabrication_rate ?? 0) * 100}
+                negative
+              />
+            )}
+            {summary.integrity_multiplier !== undefined && (
+              <IntegrityRow
+                label="Integrity multiplier"
+                hint={null}
+                pct={(summary.integrity_multiplier ?? 1) * 100}
+              />
+            )}
+            {summary.stopped_early !== undefined && (
+              <div className="px-3 py-2.5 flex items-center gap-3 text-[11px]">
+                <span className="text-slate-300">Evaluation</span>
+                <span className="ml-auto font-mono text-slate-400">
+                  {summary.stopped_early
+                    ? <>Stopped early <span className="text-burgundy ml-1">{summary.stopped_reason ?? 'unknown reason'}</span></>
+                    : <span className="text-gold">Completed in full</span>
+                  }
+                </span>
+              </div>
+            )}
+          </div>
+        </section>
+      )}
 
       {/* Top 5 Leads */}
       {breakdown.top_5_leads && breakdown.top_5_leads.length > 0 && (
-        <div>
-          <h4 className="font-medium text-sm mb-2 flex items-center gap-2 text-green-500">
-            <CheckCircle className="h-4 w-4" />
-            Top 5 Leads
+        <section>
+          <h4 className="font-medium text-[11px] mb-2 flex items-center gap-2 text-gold uppercase tracking-[0.1em]">
+            Top leads
           </h4>
           <div className="space-y-2">
-            {breakdown.top_5_leads.map((lead, idx) => (
-              <div key={idx} className="bg-muted/20 rounded-lg p-3 text-sm border border-green-500/20">
-                <div className="flex justify-between items-start mb-2">
-                  <div className="flex-1">
-                    <span className="text-xs text-muted-foreground">#{lead.rank}</span>
-                    {lead.lead && (
-                      <p className="font-medium">
-                        {lead.lead.role} at {lead.lead.business}
-                      </p>
-                    )}
-                  </div>
-                  <span className="text-lg font-bold text-green-500 ml-2 flex-shrink-0">{(lead.final_score ?? 0).toFixed(1)}</span>
-                </div>
-                <p className="text-xs text-muted-foreground mb-2">
-                  <span className="font-medium text-foreground">ICP:</span> {lead.icp_prompt}
-                </p>
-                {lead.lead && (
-                  <div className="text-xs text-muted-foreground mb-2">
-                    <span className="font-medium text-foreground">Location:</span> {lead.lead.city}, {lead.lead.state}, {lead.lead.country} |
-                    <span className="font-medium text-foreground ml-1">Industry:</span> {lead.lead.industry} ({lead.lead.sub_industry})
-                  </div>
-                )}
-                {lead.score_components && (
-                  <div className="flex flex-wrap gap-2 text-xs">
-                    <span className="bg-blue-500/20 text-blue-400 px-2 py-0.5 rounded">
-                      ICP Fit: {(lead.score_components.icp_fit ?? 0).toFixed(1)}
-                    </span>
-                    <span className="bg-purple-500/20 text-purple-400 px-2 py-0.5 rounded">
-                      Decision Maker: {(lead.score_components.decision_maker ?? 0).toFixed(1)}
-                    </span>
-                    <span className="bg-cyan-500/20 text-cyan-400 px-2 py-0.5 rounded">
-                      Intent: {(lead.score_components.intent_signal_final ?? 0).toFixed(1)}
-                    </span>
-                    <span className="bg-red-500/20 text-red-400 px-2 py-0.5 rounded">
-                      Time Penalty: {(lead.score_components.time_penalty ?? 0).toFixed(1)}
-                    </span>
-                  </div>
-                )}
-              </div>
+            {breakdown.top_5_leads.map((lead) => (
+              <LeadResultCard key={`top-${lead.rank}`} lead={lead} tone="positive" />
             ))}
           </div>
-        </div>
+        </section>
       )}
 
       {/* Bottom 5 Leads */}
       {breakdown.bottom_5_leads && breakdown.bottom_5_leads.length > 0 && (
-        <div>
-          <h4 className="font-medium text-sm mb-2 flex items-center gap-2 text-red-500">
-            <XCircle className="h-4 w-4" />
-            Bottom 5 Leads
+        <section>
+          <h4 className="font-medium text-[11px] mb-2 flex items-center gap-2 text-burgundy uppercase tracking-[0.1em]">
+            Bottom leads
           </h4>
           <div className="space-y-2">
-            {breakdown.bottom_5_leads.map((lead, idx) => (
-              <div key={idx} className="bg-muted/20 rounded-lg p-3 text-sm border border-red-500/20">
-                <div className="flex justify-between items-start mb-2">
-                  <div className="flex-1">
-                    <span className="text-xs text-muted-foreground">#{lead.rank}</span>
-                    {lead.lead ? (
-                      <p className="font-medium">
-                        {lead.lead.role} at {lead.lead.business}
-                      </p>
-                    ) : (
-                      <p className="font-medium text-red-400">No lead returned</p>
-                    )}
-                  </div>
-                  <span className="text-lg font-bold text-red-500 ml-2 flex-shrink-0">{(lead.final_score ?? 0).toFixed(1)}</span>
-                </div>
-                <p className="text-xs text-muted-foreground mb-2">
-                  <span className="font-medium text-foreground">ICP:</span> {lead.icp_prompt}
-                </p>
-                {lead.lead && (
-                  <div className="text-xs text-muted-foreground mb-2">
-                    <span className="font-medium text-foreground">Location:</span> {lead.lead.city}, {lead.lead.state}, {lead.lead.country} |
-                    <span className="font-medium text-foreground ml-1">Industry:</span> {lead.lead.industry} ({lead.lead.sub_industry})
-                  </div>
-                )}
-                {lead.failure_reason && (
-                  <p className="text-xs text-red-400 mb-2">
-                    <span className="font-medium">Failure Reason:</span> {lead.failure_reason}
-                  </p>
-                )}
-                {lead.score_components && (
-                  <div className="flex flex-wrap gap-2 text-xs">
-                    <span className="bg-blue-500/20 text-blue-400 px-2 py-0.5 rounded">
-                      ICP Fit: {(lead.score_components.icp_fit ?? 0).toFixed(1)}
-                    </span>
-                    <span className="bg-purple-500/20 text-purple-400 px-2 py-0.5 rounded">
-                      Decision Maker: {(lead.score_components.decision_maker ?? 0).toFixed(1)}
-                    </span>
-                    <span className="bg-cyan-500/20 text-cyan-400 px-2 py-0.5 rounded">
-                      Intent: {(lead.score_components.intent_signal_final ?? 0).toFixed(1)}
-                    </span>
-                    <span className="bg-red-500/20 text-red-400 px-2 py-0.5 rounded">
-                      Time Penalty: {(lead.score_components.time_penalty ?? 0).toFixed(1)}
-                    </span>
-                  </div>
-                )}
-              </div>
+            {breakdown.bottom_5_leads.map((lead) => (
+              <LeadResultCard key={`bot-${lead.rank}`} lead={lead} tone="negative" />
             ))}
           </div>
+        </section>
+      )}
+    </div>
+  )
+}
+
+/* ============================================================
+ * StatTile. Small KPI cell whose palette mirrors Fulfillment's StatBlock.
+ * ============================================================ */
+function StatTile({
+  label,
+  value,
+  tone,
+  muted,
+  mono,
+}: {
+  label: string
+  value: string
+  tone: 'slate' | 'gold' | 'amber' | 'burgundy'
+  muted?: boolean
+  mono?: boolean
+}) {
+  const valueColor =
+    tone === 'gold'
+      ? muted ? 'text-gold opacity-80' : 'text-gold'
+      : tone === 'amber'
+        ? 'text-amber-warm'
+        : tone === 'burgundy'
+          ? 'text-burgundy'
+          : 'text-slate-100'
+  return (
+    <div className="rounded-lg border border-slate-800/70 bg-slate-900/30 px-3 py-2">
+      <div className="text-[9px] text-slate-500 uppercase tracking-[0.1em] font-medium">{label}</div>
+      <div className={cn(
+        'text-lg font-semibold tabular-nums leading-tight mt-0.5',
+        mono && 'font-mono',
+        valueColor
+      )}>
+        {value}
+      </div>
+    </div>
+  )
+}
+
+/* ============================================================
+ * IntegrityRow. Percentage bar showing a trust-signal value.
+ * - negative=true: dusty burgundy (worse = more)
+ * - negative=false: warm gold (more = better)
+ * ============================================================ */
+function IntegrityRow({
+  label,
+  hint,
+  pct,
+  negative,
+}: {
+  label: string
+  hint: string | null
+  pct: number
+  negative?: boolean
+}) {
+  const clamped = Math.min(100, Math.max(0, pct))
+  return (
+    <div className="px-3 py-2.5 text-[11px]">
+      <div className="flex items-center justify-between mb-1">
+        <span className="text-slate-300">{label}</span>
+        <span className="font-mono text-slate-400 tabular-nums">
+          {hint && <span className="text-slate-500 mr-2">{hint}</span>}
+          {pct.toFixed(1)}%
+        </span>
+      </div>
+      <div className="h-1.5 rounded-full bg-slate-800/60 overflow-hidden">
+        <div
+          className="h-full rounded-full"
+          style={{
+            width: `${clamped}%`,
+            background: negative
+              ? 'linear-gradient(90deg, rgba(168, 116, 111, 0.85) 0%, rgba(196, 142, 137, 0.85) 100%)'
+              : 'linear-gradient(90deg, #b89456 0%, #c9a96e 100%)',
+            transition: 'width 320ms cubic-bezier(0.16, 1, 0.3, 1)',
+          }}
+        />
+      </div>
+    </div>
+  )
+}
+
+/* ============================================================
+ * LeadResultCard. Single lead row in top/bottom breakdown lists.
+ * Editorial palette, restrained component-score chips.
+ * ============================================================ */
+function LeadResultCard({ lead, tone }: { lead: LeadResult; tone: 'positive' | 'negative' }) {
+  const scoreColor = tone === 'positive' ? 'text-gold' : 'text-burgundy'
+  return (
+    <div className={cn(
+      'rounded-lg p-3 text-sm border bg-slate-900/30',
+      tone === 'positive' ? 'border-gold-soft' : 'border-burgundy-soft'
+    )}>
+      <div className="flex justify-between items-start mb-2 gap-3">
+        <div className="flex-1 min-w-0">
+          <span className="text-[10px] text-slate-500 font-mono">#{lead.rank}</span>
+          {lead.lead ? (
+            <p className="font-medium text-slate-100 text-[13px] truncate">
+              {lead.lead.role} at {lead.lead.business}
+            </p>
+          ) : (
+            <p className="font-medium text-burgundy text-[13px]">No lead returned</p>
+          )}
+        </div>
+        <span className={cn('text-lg font-bold tabular-nums shrink-0', scoreColor)}>
+          {(lead.final_score ?? 0).toFixed(1)}
+        </span>
+      </div>
+      <p className="text-[11px] text-slate-400 mb-2">
+        <span className="text-slate-500">ICP · </span>{lead.icp_prompt}
+      </p>
+      {lead.lead && (
+        <div className="text-[11px] text-slate-500 mb-2 font-mono">
+          {[lead.lead.city, lead.lead.state, lead.lead.country].filter(Boolean).join(', ')}
+          {lead.lead.industry && (
+            <>
+              {' · '}
+              <span className="text-slate-400">{lead.lead.industry}</span>
+              {lead.lead.sub_industry && <span className="text-slate-600"> ({lead.lead.sub_industry})</span>}
+            </>
+          )}
+        </div>
+      )}
+      {lead.failure_reason && (
+        <p className="text-[11px] text-burgundy mb-2">
+          <span className="text-slate-500">Failure · </span>{lead.failure_reason}
+        </p>
+      )}
+      {lead.score_components && (
+        <div className="flex flex-wrap gap-1.5 text-[10px]">
+          <ScoreChip label="ICP fit" value={lead.score_components.icp_fit} />
+          <ScoreChip label="Decision maker" value={lead.score_components.decision_maker} />
+          <ScoreChip label="Intent" value={lead.score_components.intent_signal_final} />
+          <ScoreChip
+            label="Time penalty"
+            value={lead.score_components.time_penalty}
+            negative
+          />
         </div>
       )}
     </div>
   )
 }
 
-// Champion Code Tab Component
-function ChampionCodeTab({
-  champion,
+function ScoreChip({ label, value, negative }: { label: string; value: number; negative?: boolean }) {
+  const cls = negative
+    ? 'bg-burgundy-soft text-burgundy border-burgundy-soft'
+    : 'bg-slate-800/50 text-slate-300 border-slate-700/50'
+  return (
+    <span className={cn(
+      'px-1.5 py-0.5 rounded border font-mono tabular-nums',
+      cls
+    )}>
+      <span className="text-slate-500 mr-1">{label}</span>
+      {(value ?? 0).toFixed(1)}
+    </span>
+  )
+}
+
+// Code viewer. Warm off-black surface (matches canvas), gold accent on
+// active file pill. No GitHub colors. Shared by both ChampionDetailDialog
+// and SubmissionDetailDialog so we don't have to fake a champion object
+// to render submission code.
+function CodeViewer({
   codeContent,
   loadingCode,
   codeError,
   activeFile,
-  setActiveFile
+  setActiveFile,
 }: {
-  champion: ChampionHistoryEntry
   codeContent: Record<string, string> | null
   loadingCode: boolean
   codeError: string | null
@@ -478,8 +705,8 @@ function ChampionCodeTab({
   if (loadingCode) {
     return (
       <div className="p-8 text-center">
-        <Loader2 className="h-6 w-6 animate-spin mx-auto mb-2" />
-        <p className="text-sm text-muted-foreground">Loading code...</p>
+        <Loader2 className="h-6 w-6 animate-spin mx-auto mb-2 text-gold" aria-hidden />
+        <p className="text-sm text-slate-500">Loading code...</p>
       </div>
     )
   }
@@ -487,8 +714,8 @@ function ChampionCodeTab({
   if (codeError) {
     return (
       <div className="p-8 text-center">
-        <Lock className="h-6 w-6 text-yellow-500 mx-auto mb-2" />
-        <p className="text-sm text-muted-foreground">{codeError}</p>
+        <Lock className="h-6 w-6 text-amber-warm mx-auto mb-2" aria-hidden />
+        <p className="text-sm text-slate-400">{codeError}</p>
       </div>
     )
   }
@@ -496,41 +723,45 @@ function ChampionCodeTab({
   if (!codeContent || !activeFile) {
     return (
       <div className="p-8 text-center">
-        <p className="text-sm text-muted-foreground">No code files found</p>
+        <p className="text-sm text-slate-500">No code files found</p>
       </div>
     )
   }
 
   return (
-    <div>
-      {/* File tabs */}
-      <div className="flex flex-wrap gap-1 p-2 bg-muted/30 border-b overflow-x-auto">
+    <div className="rounded-md overflow-hidden border border-slate-800/70">
+      {/* File tabs row */}
+      <div className="flex flex-wrap gap-1 p-1.5 bg-slate-900/60 border-b border-slate-800/70 overflow-x-auto">
         {Object.keys(codeContent).map(filename => (
-          <Button
+          <button
             key={filename}
-            variant={activeFile === filename ? 'default' : 'ghost'}
-            size="sm"
-            className="h-7 text-xs font-mono"
+            type="button"
             onClick={() => setActiveFile(filename)}
+            className={cn(
+              'h-7 text-[11px] font-mono px-2.5 rounded transition-colors',
+              activeFile === filename
+                ? 'bg-gold-soft text-gold border border-gold-soft'
+                : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800/40'
+            )}
           >
             {filename}
-          </Button>
+          </button>
         ))}
       </div>
-      {/* Code content */}
+      {/* Code body */}
       <div>
-        <div className="flex justify-end p-2 bg-[#0d1117] border-b border-gray-700">
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-7 text-xs text-gray-300 hover:text-white hover:bg-gray-700"
+        <div className="flex justify-end px-2 py-1.5 bg-[#0a0a0c] border-b border-slate-800/70">
+          <button
+            type="button"
             onClick={() => navigator.clipboard.writeText(codeContent[activeFile])}
+            aria-label="Copy code"
+            className="h-6 text-[10px] text-slate-400 hover:text-slate-100 transition-colors inline-flex items-center gap-1 px-2"
           >
-            <Copy className="h-3 w-3 mr-1" />
+            <Copy className="h-3 w-3" aria-hidden />
             Copy
-          </Button>
+          </button>
         </div>
-        <pre className="p-4 text-xs font-mono overflow-x-auto max-h-[300px] overflow-y-auto bg-[#0d1117] text-[#c9d1d9]">
+        <pre className="p-4 text-[11px] font-mono overflow-x-auto max-h-[320px] overflow-y-auto bg-[#0a0a0c] text-[color:var(--text-primary)] leading-relaxed">
           <code>{codeContent[activeFile]}</code>
         </pre>
       </div>
@@ -599,95 +830,87 @@ function ChampionDetailDialog({
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
-        <DialogHeader className="flex-shrink-0">
-          <DialogTitle className="flex items-center gap-2">
-            <Trophy className="h-5 w-5 text-yellow-500" />
-            <span className="font-mono">{truncateHotkey(champion.minerHotkey)}</span>
+      <DialogContent
+        className={cn(
+          'bg-slate-950 border-slate-800 text-slate-100 shadow-2xl shadow-black/60',
+          'overflow-hidden flex flex-col p-0 outline-none gap-0',
+          // Mobile bottom-sheet, desktop centered modal. Matches Fulfillment.
+          'inset-x-0 bottom-0 w-full max-w-full max-h-[92vh] rounded-t-2xl border-t border-x',
+          'data-[state=open]:slide-in-from-bottom data-[state=closed]:slide-out-to-bottom',
+          'sm:inset-x-auto sm:bottom-auto sm:top-[50%] sm:left-[50%]',
+          'sm:translate-x-[-50%] sm:translate-y-[-50%]',
+          'sm:max-w-4xl sm:w-[calc(100%-2rem)] sm:max-h-[88vh] sm:rounded-xl sm:border'
+        )}
+      >
+        <DialogHeader className="px-5 py-4 border-b border-slate-800/80 space-y-2 text-left">
+          <DialogTitle className="flex items-center gap-2 pr-8">
+            <span className="text-sm font-mono text-slate-100">{truncateHotkey(champion.minerHotkey)}</span>
+            <CopyButton text={champion.minerHotkey} ariaLabel="Copy hotkey" />
             {isCurrentChampion && (
-              <Badge variant="outline" className="border-yellow-500/50 text-yellow-500 ml-2">
-                <Crown className="h-3 w-3 mr-1" />
-                Current Champion
-              </Badge>
+              <span className="ml-auto inline-flex items-center gap-1.5 text-[10px] rounded px-1.5 py-0.5 border bg-gold-soft text-gold border-gold-strong">
+                Current champion
+              </span>
+            )}
+            {!isCurrentChampion && (
+              <span className="ml-auto inline-flex items-center text-[10px] rounded px-1.5 py-0.5 border bg-slate-900/60 text-slate-400 border-slate-700/50">
+                Former champion
+              </span>
             )}
           </DialogTitle>
+
+          {/* Stat row */}
+          <div className="flex items-baseline justify-between gap-4 flex-wrap pt-1">
+            <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-slate-400 font-mono">
+              <span>
+                <span className="text-slate-500">Champion since</span>{' '}
+                <span className="text-slate-200">{formatDate(champion.championAt)}</span>
+              </span>
+              {champion.dethronedAt && champion.dethronedAt !== 'stale' && (
+                <span>
+                  <span className="text-slate-500">Dethroned</span>{' '}
+                  <span className="text-slate-200">{formatDate(champion.dethronedAt)}</span>
+                </span>
+              )}
+              {champion.reignDuration && (
+                <span>
+                  <span className="text-slate-500">Reign</span>{' '}
+                  <span className="text-gold tabular-nums">{formatDuration(champion.reignDuration)}</span>
+                </span>
+              )}
+            </div>
+            <div className="text-right">
+              <span className="text-3xl font-bold text-gold tabular-nums">{champion.score.toFixed(2)}</span>
+              <span className="text-slate-500 ml-1 text-sm">/ 100</span>
+            </div>
+          </div>
         </DialogHeader>
 
-        {/* Score Row */}
-        <div className="flex items-center justify-between flex-wrap gap-4 pb-2">
-          <Badge variant={isCurrentChampion ? "default" : "secondary"} className={isCurrentChampion ? "bg-green-600" : ""}>
-            {isCurrentChampion ? 'Active' : 'Former Champion'}
-          </Badge>
-          <div className="text-right">
-            <span className="text-3xl font-bold text-yellow-500">{champion.score.toFixed(2)}</span>
-            <span className="text-muted-foreground ml-1">/ 100</span>
-          </div>
-        </div>
-
-        {/* Champion Info */}
-        <div className="text-sm space-y-2 pb-3 border-b">
-          <div className="flex items-center gap-2 flex-wrap">
-            <code className="text-xs bg-muted px-2 py-1 rounded font-mono">
-              {champion.minerHotkey.slice(0, 8)}...{champion.minerHotkey.slice(-6)}
-            </code>
-            <CopyButton text={champion.minerHotkey} label="Copy Hotkey" />
-          </div>
-          <div className="flex gap-4 text-xs text-muted-foreground flex-wrap">
-            <span>Champion since: {formatDate(champion.championAt)}</span>
-            {champion.dethronedAt && (
-              <span>Dethroned: {formatDate(champion.dethronedAt)}</span>
-            )}
-            {champion.reignDuration && (
-              <span>Reign: {formatDuration(champion.reignDuration)}</span>
-            )}
-          </div>
-        </div>
-
         {/* Tabs */}
-        <div className="flex gap-2 border-b">
-          <button
-            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-              activeTab === 'score'
-                ? 'border-yellow-500 text-yellow-500'
-                : 'border-transparent text-muted-foreground hover:text-foreground'
-            }`}
+        <div className="flex gap-1 border-b border-slate-800/70 px-3" role="tablist">
+          <DialogTab
+            active={activeTab === 'score'}
             onClick={() => setActiveTab('score')}
-          >
-            <CheckCircle className="h-4 w-4 inline mr-1.5" />
-            Score Breakdown
-          </button>
-          <button
-            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-              activeTab === 'code'
-                ? 'border-cyan-500 text-cyan-500'
-                : 'border-transparent text-muted-foreground hover:text-foreground'
-            }`}
+            label="Score breakdown"
+          />
+          <DialogTab
+            active={activeTab === 'code'}
             onClick={() => setActiveTab('code')}
-          >
-            <Code className="h-4 w-4 inline mr-1.5" />
-            Model Code
-            {!champion.canShowCode && <Lock className="h-3 w-3 inline ml-1.5 text-muted-foreground" />}
-          </button>
+            label="Model code"
+            locked={!champion.canShowCode}
+          />
         </div>
 
-        {/* Tab Content */}
-        <div className="flex-1 overflow-y-auto pr-2 pt-4">
+        {/* Tab content */}
+        <div className="flex-1 overflow-y-auto px-5 py-4">
           {activeTab === 'score' ? (
             <ScoreBreakdownTab breakdown={scoreBreakdown} score={champion.score} />
           ) : !champion.canShowCode ? (
-            <div className="flex flex-col items-center justify-center py-12 text-center">
-              <Lock className="h-12 w-12 text-muted-foreground mb-4" />
-              <p className="text-lg font-medium">Code Hidden</p>
-              <p className="text-sm text-muted-foreground mt-1">
-                Code is available 24 hours after becoming champion
-              </p>
-              <p className="text-xs text-muted-foreground mt-2">
-                Available: {formatDate(new Date(new Date(champion.championAt).getTime() + 24 * 60 * 60 * 1000).toISOString())}
-              </p>
-            </div>
+            <CodeLockedState
+              unlockAt={new Date(new Date(champion.championAt).getTime() + CODE_UNLOCK_HOURS * 60 * 60 * 1000).toISOString()}
+              context="champion"
+            />
           ) : hasCode && codeContent && activeFile ? (
-            <ChampionCodeTab
-              champion={champion}
+            <CodeViewer
               codeContent={codeContent}
               loadingCode={loadingCode}
               codeError={codeError}
@@ -696,13 +919,114 @@ function ChampionDetailDialog({
             />
           ) : (
             <div className="flex flex-col items-center justify-center py-12 text-center">
-              <Code className="h-12 w-12 text-muted-foreground mb-4" />
-              <p className="text-sm text-muted-foreground">No code available</p>
+              <Code className="h-10 w-10 text-slate-600 mb-3" aria-hidden />
+              <p className="text-sm text-slate-500">No code available</p>
             </div>
           )}
         </div>
       </DialogContent>
     </Dialog>
+  )
+}
+
+/* ============================================================
+ * DialogTab. Accessible tab pill used in both detail dialogs.
+ * Uses role=tab + aria-selected for screen-reader correctness.
+ * ============================================================ */
+function DialogTab({
+  active,
+  onClick,
+  label,
+  locked,
+}: {
+  active: boolean
+  onClick: () => void
+  label: string
+  locked?: boolean
+}) {
+  return (
+    <button
+      type="button"
+      role="tab"
+      aria-selected={active}
+      onClick={onClick}
+      className={cn(
+        'relative inline-flex items-center gap-1.5 px-3 py-2 text-[12px] font-medium transition-colors',
+        active
+          ? 'text-gold'
+          : 'text-slate-400 hover:text-slate-100'
+      )}
+    >
+      {label}
+      {locked && <Lock className="h-3 w-3 opacity-70" aria-label="Locked" />}
+      {active && (
+        <span
+          className="absolute left-2 right-2 -bottom-px h-px rounded-full"
+          style={{ background: '#c9a96e' }}
+          aria-hidden
+        />
+      )}
+    </button>
+  )
+}
+
+/* ============================================================
+ * CodeLockedState. Premium "Code unlocks in …" panel.
+ * Replaces the generic lucide-Lock illustration with a circular
+ * countdown progress + human countdown.
+ * ============================================================ */
+function CodeLockedState({
+  unlockAt,
+  context,
+}: {
+  unlockAt: string
+  context: 'champion' | 'submission'
+}) {
+  // Tick once per second for a live countdown
+  useTick(1000)
+  const now = Date.now()
+  const target = new Date(unlockAt).getTime()
+  const remaining = Math.max(0, Math.floor((target - now) / 1000))
+  const totalWindow = CODE_UNLOCK_HOURS * 3600
+  const elapsed = totalWindow - remaining
+  const pct = Math.min(100, Math.max(0, (elapsed / totalWindow) * 100))
+  const countdown = formatCountdown(remaining)
+
+  // Circular progress geometry
+  const R = 28
+  const C = 2 * Math.PI * R
+  const dash = (C * pct) / 100
+
+  return (
+    <div className="flex flex-col items-center justify-center py-10 text-center">
+      <div className="relative w-20 h-20 mb-4">
+        <svg width="80" height="80" viewBox="0 0 80 80" aria-hidden>
+          <circle cx="40" cy="40" r={R} fill="none" stroke="rgba(245,240,232,0.12)" strokeWidth="3" />
+          <circle
+            cx="40"
+            cy="40"
+            r={R}
+            fill="none"
+            stroke="#c9a96e"
+            strokeWidth="3"
+            strokeLinecap="round"
+            strokeDasharray={`${dash} ${C - dash}`}
+            transform="rotate(-90 40 40)"
+            style={{ transition: 'stroke-dasharray 320ms cubic-bezier(0.16, 1, 0.3, 1)' }}
+          />
+        </svg>
+        <Lock className="absolute inset-0 m-auto h-6 w-6 text-gold" aria-hidden />
+      </div>
+      <p className="text-sm font-medium text-slate-100">Code unlocks in {countdown ?? 'moments'}</p>
+      <p className="text-[11px] text-slate-500 mt-1">
+        {context === 'champion'
+          ? 'Champion code is released 24 hours after taking the crown.'
+          : 'Submission code is released 24 hours after submission.'}
+      </p>
+      <p className="text-[10px] text-slate-600 mt-2 font-mono">
+        Available {formatDate(unlockAt)}
+      </p>
+    </div>
   )
 }
 
@@ -776,131 +1100,94 @@ function SubmissionDetailDialog({
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
-        <DialogHeader className="flex-shrink-0">
-          <DialogTitle className="flex items-center gap-2">
-            <span className="font-mono">{truncateHotkey(submission.minerHotkey)}</span>
+      <DialogContent
+        className={cn(
+          'bg-slate-950 border-slate-800 text-slate-100 shadow-2xl shadow-black/60',
+          'overflow-hidden flex flex-col p-0 outline-none gap-0',
+          // Mobile bottom-sheet, desktop centered modal. Matches Fulfillment.
+          'inset-x-0 bottom-0 w-full max-w-full max-h-[92vh] rounded-t-2xl border-t border-x',
+          'data-[state=open]:slide-in-from-bottom data-[state=closed]:slide-out-to-bottom',
+          'sm:inset-x-auto sm:bottom-auto sm:top-[50%] sm:left-[50%]',
+          'sm:translate-x-[-50%] sm:translate-y-[-50%]',
+          'sm:max-w-4xl sm:w-[calc(100%-2rem)] sm:max-h-[88vh] sm:rounded-xl sm:border'
+        )}
+      >
+        <DialogHeader className="px-5 py-4 border-b border-slate-800/80 space-y-2 text-left">
+          <DialogTitle className="flex items-center gap-2 pr-8">
+            <span className="text-sm font-mono text-slate-100">{truncateHotkey(submission.minerHotkey)}</span>
+            <CopyButton text={submission.minerHotkey} ariaLabel="Copy hotkey" />
             {submission.isChampion && (
-              <Badge variant="outline" className="border-yellow-500/50 text-yellow-500 ml-2">
-                <Crown className="h-3 w-3 mr-1" />
+              <span className="ml-auto inline-flex items-center gap-1.5 text-[10px] rounded px-1.5 py-0.5 border bg-gold-soft text-gold border-gold-strong">
                 Champion
-              </Badge>
+              </span>
+            )}
+            {!submission.isChampion && (
+              <span className="ml-auto">
+                <StatusBadge status={submission.status} />
+              </span>
             )}
           </DialogTitle>
+
+          {/* Stat row */}
+          <div className="flex items-baseline justify-between gap-4 flex-wrap pt-1">
+            <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-slate-400 font-mono">
+              <span>
+                <span className="text-slate-500">Submitted</span>{' '}
+                <span className="text-slate-200">{formatDate(submission.createdAt)}</span>
+              </span>
+              {submission.evaluatedAt && (
+                <span>
+                  <span className="text-slate-500">Evaluated</span>{' '}
+                  <span className="text-slate-200">{formatDate(submission.evaluatedAt)}</span>
+                </span>
+              )}
+            </div>
+            {submission.score !== null && (
+              <div className="text-right">
+                <span className="text-3xl font-bold text-gold tabular-nums">{submission.score.toFixed(2)}</span>
+                <span className="text-slate-500 ml-1 text-sm">/ 100</span>
+              </div>
+            )}
+          </div>
         </DialogHeader>
 
-        {/* Score and Status Row */}
-        <div className="flex items-center justify-between flex-wrap gap-4 pb-2">
-          <StatusBadge status={submission.status} />
-          <div className="text-right">
-            {submission.score !== null && (
-              <>
-                <span className="text-3xl font-bold text-yellow-500">{submission.score.toFixed(2)}</span>
-                <span className="text-muted-foreground ml-1">/ 100</span>
-              </>
-            )}
-          </div>
-        </div>
-
-        {/* Submission Info */}
-        <div className="text-sm space-y-2 pb-3 border-b">
-          <div className="flex items-center gap-2 flex-wrap">
-            <code className="text-xs bg-muted px-2 py-1 rounded font-mono">
-              {submission.minerHotkey.slice(0, 8)}...{submission.minerHotkey.slice(-6)}
-            </code>
-            <CopyButton text={submission.minerHotkey} label="Copy Hotkey" />
-          </div>
-          <div className="flex gap-4 text-xs text-muted-foreground flex-wrap">
-            <span>Submitted: {formatDate(submission.createdAt)}</span>
-            {submission.evaluatedAt && (
-              <span>Evaluated: {formatDate(submission.evaluatedAt)}</span>
-            )}
-          </div>
-        </div>
-
         {/* Tabs */}
-        <div className="flex gap-2 border-b">
-          <button
-            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-              activeTab === 'score'
-                ? 'border-yellow-500 text-yellow-500'
-                : 'border-transparent text-muted-foreground hover:text-foreground'
-            }`}
+        <div className="flex gap-1 border-b border-slate-800/70 px-3" role="tablist">
+          <DialogTab
+            active={activeTab === 'score'}
             onClick={() => setActiveTab('score')}
-          >
-            <CheckCircle className="h-4 w-4 inline mr-1.5" />
-            Score Breakdown
-          </button>
-          <button
-            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-              activeTab === 'code'
-                ? 'border-cyan-500 text-cyan-500'
-                : 'border-transparent text-muted-foreground hover:text-foreground'
-            }`}
+            label="Score breakdown"
+          />
+          <DialogTab
+            active={activeTab === 'code'}
             onClick={() => setActiveTab('code')}
-          >
-            <Code className="h-4 w-4 inline mr-1.5" />
-            Model Code
-            {!canShowCode && <Lock className="h-3 w-3 inline ml-1.5 text-muted-foreground" />}
-          </button>
+            label="Model code"
+            locked={!canShowCode}
+          />
         </div>
 
-        {/* Tab Content */}
-        <div className="flex-1 overflow-y-auto pr-2 pt-4">
+        {/* Tab content */}
+        <div className="flex-1 overflow-y-auto px-5 py-4">
           {activeTab === 'score' ? (
             <ScoreBreakdownTab breakdown={scoreBreakdown} score={submission.score} />
           ) : hasCode && codeContent && activeFile ? (
-            <div>
-              {/* File tabs */}
-              <div className="flex flex-wrap gap-1 p-2 bg-muted/30 border-b overflow-x-auto">
-                {Object.keys(codeContent).map(filename => (
-                  <Button
-                    key={filename}
-                    variant={activeFile === filename ? 'default' : 'ghost'}
-                    size="sm"
-                    className="h-7 text-xs font-mono"
-                    onClick={() => setActiveFile(filename)}
-                  >
-                    {filename}
-                  </Button>
-                ))}
-              </div>
-              {/* Code content */}
-              <div>
-                <div className="flex justify-end p-2 bg-[#0d1117] border-b border-gray-700">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-7 text-xs text-gray-300 hover:text-white hover:bg-gray-700"
-                    onClick={() => navigator.clipboard.writeText(codeContent[activeFile])}
-                  >
-                    <Copy className="h-3 w-3 mr-1" />
-                    Copy
-                  </Button>
-                </div>
-                <pre className="p-4 text-xs font-mono overflow-x-auto max-h-[300px] overflow-y-auto bg-[#0d1117] text-[#c9d1d9]">
-                  <code>{codeContent[activeFile]}</code>
-                </pre>
-              </div>
-            </div>
+            <CodeViewer
+              codeContent={codeContent}
+              loadingCode={false}
+              codeError={null}
+              activeFile={activeFile}
+              setActiveFile={setActiveFile}
+            />
           ) : !canShowCode ? (
-            <div className="flex flex-col items-center justify-center py-12 text-center">
-              <Lock className="h-12 w-12 text-muted-foreground mb-4" />
-              <p className="text-lg font-medium">Code Hidden</p>
-              <p className="text-sm text-muted-foreground mt-1">
-                Code is available 24 hours after submission
-              </p>
-              <p className="text-xs text-muted-foreground mt-2">
-                Available: {formatDate(new Date(new Date(submission.createdAt).getTime() + 24 * 60 * 60 * 1000).toISOString())}
-              </p>
-            </div>
+            <CodeLockedState
+              unlockAt={new Date(new Date(submission.createdAt).getTime() + CODE_UNLOCK_HOURS * 60 * 60 * 1000).toISOString()}
+              context="submission"
+            />
           ) : (
             <div className="flex flex-col items-center justify-center py-12 text-center">
-              <Code className="h-12 w-12 text-muted-foreground mb-4" />
-              <p className="text-lg font-medium">No Code Available</p>
-              <p className="text-sm text-muted-foreground mt-1">
-                Code is not available for this submission
-              </p>
+              <Code className="h-10 w-10 text-slate-600 mb-3" aria-hidden />
+              <p className="text-sm font-medium text-slate-100">No code available</p>
+              <p className="text-xs text-slate-500 mt-1">Code is not available for this submission.</p>
             </div>
           )}
         </div>
@@ -917,8 +1204,10 @@ export function ModelCompetition() {
   const [isDetailOpen, setIsDetailOpen] = useState(false)
   const [selectedSubmission, setSelectedSubmission] = useState<Submission | null>(null)
   const [isSubmissionDetailOpen, setIsSubmissionDetailOpen] = useState(false)
+  const [lastSync, setLastSync] = useState<number | null>(null)
+  const [syncPulse, setSyncPulse] = useState(false)
 
-  // Fetch data function
+  // Fetch data + track sync state for the live indicator chip.
   const fetchData = useCallback(async () => {
     try {
       const res = await fetch(`/api/model-competition?t=${Date.now()}`)
@@ -927,6 +1216,10 @@ export function ModelCompetition() {
       if (json.success) {
         setData(json.data)
         setError(null)
+        setLastSync(Date.now())
+        setSyncPulse(true)
+        // 900ms matches the Fulfillment sync chip pulse, so both tabs feel the same.
+        window.setTimeout(() => setSyncPulse(false), 900)
       } else {
         setError(json.error || 'Unknown error')
       }
@@ -938,261 +1231,244 @@ export function ModelCompetition() {
     }
   }, [])
 
-  // Initial fetch + polling every 60 seconds
+  // Initial fetch + polling every 60 seconds. Server also refreshes the
+  // upstream cache on the same cadence, so 60s here keeps the two in sync.
   useEffect(() => {
     fetchData()
     const interval = setInterval(fetchData, 60000)
     return () => clearInterval(interval)
   }, [fetchData])
 
+  // ---------- Derived data ----------
+  const currentChampion = useMemo(
+    () =>
+      data?.championHistory.find((c) => !c.dethronedAt || c.dethronedAt === 'stale') ?? null,
+    [data]
+  )
+  const pastChampions = useMemo(
+    () =>
+      data?.championHistory.filter((c) => c.dethronedAt && c.dethronedAt !== 'stale') ?? [],
+    [data]
+  )
+
+  const previousChampionScore = pastChampions[0]?.score ?? null
+  const championDelta =
+    currentChampion && previousChampionScore !== null
+      ? currentChampion.score - previousChampionScore
+      : null
+
+  // Threshold: a new model must beat the champion by CHALLENGE_THRESHOLD_PCT
+  // to take the crown. We surface the exact target so miners know the number.
+  const beatToWin = currentChampion
+    ? currentChampion.score * (1 + CHALLENGE_THRESHOLD_PCT / 100)
+    : 10 * (1 + CHALLENGE_THRESHOLD_PCT / 100) // No champion → baseline 10
+
+  // Today's challengers, excluding the current champion row.
+  const challengers = useMemo(
+    () => data?.recentSubmissions.filter((s) => !s.isChampion) ?? [],
+    [data]
+  )
+  const evaluatingSubmissions = useMemo(
+    () => challengers.filter((s) => s.status === 'evaluating'),
+    [challengers]
+  )
+
+  const handleChampionOpen = useCallback(() => {
+    if (!currentChampion) return
+    const championSubmission = data?.recentSubmissions.find((s) => s.isChampion)
+    if (championSubmission) {
+      setSelectedSubmission(championSubmission)
+      setIsSubmissionDetailOpen(true)
+    } else {
+      setSelectedChampion(currentChampion)
+      setIsDetailOpen(true)
+    }
+  }, [currentChampion, data])
+
+  // ---------- Loading / error ----------
   if (loading) {
-    return (
-      <div className="space-y-6">
-        <div className="grid gap-4 md:grid-cols-3">
-          {[...Array(3)].map((_, i) => (
-            <Card key={i}>
-              <CardHeader className="pb-2">
-                <Skeleton className="h-4 w-24" />
-              </CardHeader>
-              <CardContent>
-                <Skeleton className="h-8 w-16" />
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-        <Card>
-          <CardHeader>
-            <Skeleton className="h-6 w-32" />
-          </CardHeader>
-          <CardContent>
-            <Skeleton className="h-48 w-full" />
-          </CardContent>
-        </Card>
-      </div>
-    )
+    return <ModelCompetitionSkeleton />
   }
 
-  if (error || !data) {
+  // Only replace the whole tab when we have no usable data at all.
+  // A transient poll failure should not blank a previously loaded page.
+  if (!data) {
     return (
-      <Card className="border-destructive">
-        <CardContent className="pt-6">
-          <p className="text-destructive">Error: {error || 'No data available'}</p>
-        </CardContent>
-      </Card>
+      <div
+        role="alert"
+        className="rounded-xl border border-burgundy-soft bg-slate-900/40 p-6 text-center"
+      >
+        <AlertTriangle className="h-6 w-6 text-burgundy mx-auto mb-2" aria-hidden />
+        <p className="text-sm text-slate-300">{error || 'No data available'}</p>
+        <button
+          type="button"
+          onClick={fetchData}
+          className="mt-3 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium text-slate-200 bg-slate-800/60 border border-slate-700/50 hover:bg-slate-700/60 hover:border-slate-600 transition-colors"
+        >
+          Try again
+        </button>
+      </div>
     )
   }
 
   return (
-    <div className="space-y-6">
-      {/* Stats Cards */}
-      <div className="grid gap-4 md:grid-cols-3">
-        {/* Total Submissions Today */}
-        <Card className="bg-gradient-to-br from-cyan-500/10 to-blue-500/5 border-cyan-500/20">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Submissions</CardTitle>
-            <Send className="h-4 w-4 text-cyan-500" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{data.stats.totalSubmissions}</div>
-            <p className="text-xs text-muted-foreground mt-1">
-              submitted today
-            </p>
-          </CardContent>
-        </Card>
-
-        {/* Evaluated */}
-        <Card className="bg-gradient-to-br from-green-500/10 to-emerald-500/5 border-green-500/20">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Evaluated</CardTitle>
-            <CheckCircle className="h-4 w-4 text-green-500" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{data.stats.statusCounts.evaluated}</div>
-            <p className="text-xs text-muted-foreground mt-1">
-              {data.stats.statusCounts.evaluating > 0 && (
-                <span className="text-blue-500">{data.stats.statusCounts.evaluating} evaluating · </span>
-              )}
-              {data.stats.statusCounts.submitted} pending
-            </p>
-          </CardContent>
-        </Card>
-
-        {/* Unique Miners */}
-        <Card className="bg-gradient-to-br from-purple-500/10 to-violet-500/5 border-purple-500/20">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Unique Miners</CardTitle>
-            <Users className="h-4 w-4 text-purple-500" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{data.stats.uniqueMiners}</div>
-            <p className="text-xs text-muted-foreground mt-1">
-              competing today
-            </p>
-          </CardContent>
-        </Card>
+    <div className="space-y-5">
+      {/* ════════════════════════════════════════════════════════════
+          Top bar: title + live sync chip.
+          ════════════════════════════════════════════════════════════ */}
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="text-[10px] uppercase tracking-[0.16em] text-slate-500 font-medium">
+          Model competition · {data.stats.uniqueMiners} miner{data.stats.uniqueMiners === 1 ? '' : 's'} competing today
+        </div>
+        {lastSync !== null && (
+          <div className="flex items-center gap-3">
+            {error && (
+              <button
+                type="button"
+                onClick={fetchData}
+                className="text-[10px] font-mono text-burgundy hover:text-slate-200 transition-colors"
+                title={error}
+              >
+                Refresh failed. Retry
+              </button>
+            )}
+            <div
+              className="flex items-center gap-2 text-[10px] font-mono text-slate-500"
+              title="Auto-syncs every 60s"
+            >
+              <span
+                className={cn(
+                  'inline-block w-1.5 h-1.5 rounded-full dot-gold',
+                  syncPulse ? 'live-pulse' : 'opacity-70'
+                )}
+                aria-hidden
+              />
+              <span>
+                Synced{' '}
+                <span className="text-slate-300">
+                  {getRelativeTime(new Date(lastSync).toISOString())}
+                </span>
+              </span>
+            </div>
+          </div>
+        )}
       </div>
 
-      {/* Current Champion */}
-      {data.championHistory.filter(c => !c.dethronedAt)[0] && (() => {
-        const currentChampion = data.championHistory.filter(c => !c.dethronedAt)[0]
-        // Find matching submission in recentSubmissions for score breakdown
-        const championSubmission = data.recentSubmissions.find(s => s.isChampion)
-        return (
-          <Card
-            className="bg-gradient-to-br from-yellow-500/10 to-amber-500/5 border-yellow-500/30 cursor-pointer hover:bg-yellow-500/15 transition-colors"
-            onClick={() => {
-              if (championSubmission) {
-                // Use submission dialog if we have score breakdown
-                setSelectedSubmission(championSubmission)
-                setIsSubmissionDetailOpen(true)
-              } else {
-                // Fall back to champion dialog
-                setSelectedChampion(currentChampion)
-                setIsDetailOpen(true)
-              }
+      {/* ════════════════════════════════════════════════════════════
+          HERO: dominant champion block (or vacant throne).
+          The whole page is framed around who's winning.
+          ════════════════════════════════════════════════════════════ */}
+      {currentChampion ? (
+        <ChampionHero
+          champion={currentChampion}
+          championDelta={championDelta}
+          beatToWin={beatToWin}
+          onOpen={handleChampionOpen}
+        />
+      ) : (
+        <VacantThrone beatToWin={beatToWin} />
+      )}
+
+      {/* ════════════════════════════════════════════════════════════
+          LINEAGE: sparkline of past champions (if any).
+          ════════════════════════════════════════════════════════════ */}
+      {pastChampions.length > 0 && (
+        <ChampionLineageStrip
+          history={data.championHistory.filter((c) => c.dethronedAt !== 'stale')}
+          currentChampion={currentChampion}
+          onSelect={(champ) => {
+            setSelectedChampion(champ)
+            setIsDetailOpen(true)
+          }}
+        />
+      )}
+
+      {/* ════════════════════════════════════════════════════════════
+          KPI strip: three editorial stat tiles.
+          ════════════════════════════════════════════════════════════ */}
+      <div className="grid gap-3 grid-cols-3">
+        <KpiTile
+          label="Submissions today"
+          value={data.stats.totalSubmissions}
+          subline={data.stats.totalSubmissions === 0 ? 'awaiting first entry' : 'across all miners'}
+        />
+        <KpiTile
+          label="Evaluated"
+          value={data.stats.statusCounts.evaluated}
+          subline={
+            data.stats.statusCounts.evaluating > 0
+              ? `${data.stats.statusCounts.evaluating} evaluating · ${data.stats.statusCounts.submitted} pending`
+              : `${data.stats.statusCounts.submitted} pending`
+          }
+          tone="gold"
+        />
+        <KpiTile
+          label="Miners competing"
+          value={data.stats.uniqueMiners}
+          subline="today"
+        />
+      </div>
+
+      {/* ════════════════════════════════════════════════════════════
+          Challengers + Live-eval floating panel.
+          Mirrors the Fulfillment cosmos + leaderboard composition:
+          a hero board with a fixed side panel for live activity.
+          ════════════════════════════════════════════════════════════ */}
+      <div className="relative">
+        <ChallengersBoard
+          challengers={challengers}
+          onSelect={(s) => {
+            setSelectedSubmission(s)
+            setIsSubmissionDetailOpen(true)
+          }}
+        />
+        {evaluatingSubmissions.length > 0 && (
+          <LiveEvaluatingPanel
+            submissions={evaluatingSubmissions}
+            onSelect={(s) => {
+              setSelectedSubmission(s)
+              setIsSubmissionDetailOpen(true)
             }}
-          >
-            <CardHeader className="pb-2">
-              <CardTitle className="flex items-center gap-2">
-                <Crown className="h-5 w-5 text-yellow-500" />
-                Current Champion
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="flex items-center justify-between">
-                <div>
-                  <code className="text-sm font-mono bg-muted/50 px-2 py-1 rounded">
-                    {truncateHotkey(currentChampion.minerHotkey)}
-                  </code>
-                  <p className="text-xs text-muted-foreground mt-2">
-                    Champion since {formatDate(currentChampion.championAt)}
-                  </p>
-                </div>
-                <div className="text-right">
-                  <span className="text-3xl font-bold text-yellow-500">{currentChampion.score.toFixed(2)}</span>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    {currentChampion.canShowCode ? (
-                      <span className="flex items-center gap-1 justify-end"><Eye className="h-3 w-3 text-green-500" /> Code available</span>
-                    ) : (
-                      <span className="flex items-center gap-1 justify-end"><Lock className="h-3 w-3" /> Code in 24h</span>
-                    )}
-                  </p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        )
-      })()}
+          />
+        )}
+      </div>
 
-      {/* Today's Evaluations */}
-      <Card className="overflow-hidden">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Clock className="h-5 w-5" />
-            Today&apos;s Evaluations
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-3 max-h-[400px] overflow-y-auto">
-            {data.recentSubmissions.filter(s => !s.isChampion).length === 0 ? (
-              <p className="text-center text-muted-foreground py-8">
-                No submissions today
-              </p>
-            ) : (
-              <>
-                {data.recentSubmissions.filter(s => !s.isChampion).map((submission) => (
-                  <div
-                    key={submission.id}
-                    className="p-2.5 sm:p-3 rounded-lg cursor-pointer transition-colors bg-muted/30 border border-border/50 hover:bg-muted/50"
-                    onClick={() => {
-                      setSelectedSubmission(submission)
-                      setIsSubmissionDetailOpen(true)
-                    }}
-                  >
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-1.5">
-                        <span className="text-sm font-medium font-mono">
-                          {truncateHotkey(submission.minerHotkey)}
-                        </span>
-                        {submission.status === 'evaluated' && (
-                          submission.canShowCode ? (
-                            <Eye className="h-3 w-3 text-green-500 flex-shrink-0" />
-                          ) : (
-                            <Lock className="h-3 w-3 text-muted-foreground flex-shrink-0" />
-                          )
-                        )}
-                      </div>
-                      {submission.score !== null && (
-                        <span className="text-sm font-mono font-bold">
-                          {submission.score.toFixed(2)}
-                        </span>
-                      )}
-                    </div>
-                    <div className="flex items-center justify-between mt-1.5">
-                      <span className="text-xs text-muted-foreground">{getRelativeTime(submission.createdAt)}</span>
-                      <StatusBadge status={submission.status} />
-                    </div>
-                  </div>
-                ))}
-              </>
-            )}
+      {/* ════════════════════════════════════════════════════════════
+          Past champions: compact table-style list below the fold.
+          Hero already tells the "current" story; this is for archive.
+          ════════════════════════════════════════════════════════════ */}
+      {pastChampions.length > 0 && (
+        <section className="rounded-xl border border-slate-800/70 bg-slate-950/50 overflow-hidden">
+          <header className="flex items-center gap-2 px-4 py-2.5 border-b border-slate-800/70 bg-gradient-to-b from-slate-900/80 to-slate-900/40">
+            <span className="text-[11px] font-semibold text-slate-100 uppercase tracking-[0.1em]">
+              Past champions
+            </span>
+            <span className="ml-auto text-[10px] text-slate-500 font-mono tabular-nums">
+              {pastChampions.length} {pastChampions.length === 1 ? 'reign' : 'reigns'}
+            </span>
+          </header>
+          <div className="max-h-[420px] overflow-y-auto divide-y divide-slate-800/60">
+            {pastChampions.map((champion, idx) => (
+              <PastChampionRow
+                key={champion.modelId}
+                rank={idx + 1}
+                champion={champion}
+                onSelect={() => {
+                  setSelectedChampion(champion)
+                  setIsDetailOpen(true)
+                }}
+              />
+            ))}
           </div>
-        </CardContent>
-      </Card>
+        </section>
+      )}
 
-      {/* Champion History (past champions only) */}
-      <Card className="overflow-hidden">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Trophy className="h-5 w-5" />
-            Champion History
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-3 max-h-[500px] overflow-y-auto">
-            {data.championHistory.filter(c => c.dethronedAt).length === 0 ? (
-              <p className="text-center text-muted-foreground py-8">
-                No past champions yet
-              </p>
-            ) : (
-              <>
-                {data.championHistory.filter(c => c.dethronedAt).map((champion) => (
-                    <div
-                      key={champion.modelId}
-                      className="p-3 rounded-lg cursor-pointer transition-colors bg-muted/30 border border-border/50 hover:bg-muted/50"
-                      onClick={() => {
-                        setSelectedChampion(champion)
-                        setIsDetailOpen(true)
-                      }}
-                    >
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <span className="text-sm font-medium font-mono">
-                            {truncateHotkey(champion.minerHotkey)}
-                          </span>
-                          {champion.canShowCode ? (
-                            <Eye className="h-3 w-3 text-green-500" />
-                          ) : (
-                            <Lock className="h-3 w-3 text-muted-foreground" />
-                          )}
-                        </div>
-                        <span className="text-sm font-mono font-bold">
-                          {champion.score.toFixed(2)}
-                        </span>
-                      </div>
-                      <div className="flex items-center justify-between mt-2 text-xs text-muted-foreground">
-                        <span>{formatDate(champion.championAt)}</span>
-                        <span>Reign: {formatDuration(champion.reignDuration)}</span>
-                      </div>
-                    </div>
-                ))}
-              </>
-            )}
-          </div>
-        </CardContent>
-      </Card>
+      {/* ════════════════════════════════════════════════════════════
+          How to challenge: actionable checklist with real values.
+          ════════════════════════════════════════════════════════════ */}
+      <HowToChallenge currentChampionScore={currentChampion?.score ?? null} />
 
-      {/* Champion Detail Dialog */}
+      {/* Dialogs */}
       <ChampionDetailDialog
         champion={selectedChampion}
         isOpen={isDetailOpen}
@@ -1201,8 +1477,6 @@ export function ModelCompetition() {
           setSelectedChampion(null)
         }}
       />
-
-      {/* Submission Detail Dialog */}
       <SubmissionDetailDialog
         submission={selectedSubmission}
         isOpen={isSubmissionDetailOpen}
@@ -1211,57 +1485,712 @@ export function ModelCompetition() {
           setSelectedSubmission(null)
         }}
       />
+    </div>
+  )
+}
 
-      {/* Submission Instructions */}
-      <Card className="border-dashed">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Zap className="h-5 w-5 text-cyan-500" />
-            How to Submit
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="grid gap-4 md:grid-cols-3">
-            <div className="space-y-2">
-              <div className="flex items-center gap-2 text-sm font-medium">
-                <span className="flex h-6 w-6 items-center justify-center rounded-full bg-cyan-500/10 text-cyan-500 text-xs">1</span>
-                Pay Submission Fee
-              </div>
-              <p className="text-xs text-muted-foreground pl-8">
-                Send $5 worth of TAO to the Leadpoet wallet
-              </p>
+/* ============================================================
+ * Skeleton. Matches Fulfillment shimmer aesthetic.
+ * ============================================================ */
+function ModelCompetitionSkeleton() {
+  return (
+    <div className="space-y-5">
+      <div className="h-3 w-48 shimmer rounded" />
+      <div className="rounded-2xl border border-slate-800/70 bg-slate-900/30 h-[260px] shimmer" />
+      <div className="grid grid-cols-3 gap-3">
+        {[...Array(3)].map((_, i) => (
+          <div key={i} className="rounded-xl border border-slate-800/70 bg-slate-900/30 h-20 shimmer" />
+        ))}
+      </div>
+      <div className="rounded-xl border border-slate-800/70 bg-slate-900/30 h-[360px] shimmer" />
+    </div>
+  )
+}
+
+/* ============================================================
+ * ChampionHero. Dominant block that frames the entire page.
+ *
+ * Layout (desktop):
+ *  ┌──────────────────────────────────────────────────────────┐
+ *  │  CURRENT CHAMPION                          [Reign live]  │
+ *  │  ●avatar  hotkey · model           SCORE       34.14     │
+ *  │                                    /100      ↑ +2.86     │
+ *  │  Code unlocks in 14h 22m                                 │
+ *  │                              BEAT TO WIN     35.85       │
+ *  │  [ View score breakdown → ]                              │
+ *  └──────────────────────────────────────────────────────────┘
+ * ============================================================ */
+function ChampionHero({
+  champion,
+  championDelta,
+  beatToWin,
+  onOpen,
+}: {
+  champion: ChampionHistoryEntry
+  championDelta: number | null
+  beatToWin: number
+  onOpen: () => void
+}) {
+  useTick(1000) // re-render for live reign counter
+  const swatch = hotkeySwatch(champion.minerHotkey)
+  const reignSeconds = Math.max(
+    0,
+    Math.floor((Date.now() - new Date(champion.championAt).getTime()) / 1000)
+  )
+  const unlockTarget = new Date(champion.championAt).getTime() + CODE_UNLOCK_HOURS * 60 * 60 * 1000
+  const unlockRemaining = Math.max(0, Math.floor((unlockTarget - Date.now()) / 1000))
+  const codeUnlocked = unlockRemaining === 0
+
+  return (
+    <section
+      aria-label="Current champion"
+      className="relative rounded-2xl border border-gold-soft bg-gradient-to-b from-[rgba(201,169,110,0.05)] to-transparent overflow-hidden"
+    >
+      {/* Subtle gold accent line at top */}
+      <span
+        className="absolute top-0 left-0 right-0 h-px"
+        style={{ background: 'linear-gradient(90deg, transparent, #c9a96e 50%, transparent)' }}
+        aria-hidden
+      />
+
+      <div className="px-5 sm:px-7 py-5 sm:py-6">
+        {/* Header: small label + live reign on the right */}
+        <div className="flex items-center justify-between mb-4">
+          <div className="text-[10px] uppercase tracking-[0.18em] text-gold font-semibold">
+            Current champion
+          </div>
+          <div className="text-[10px] font-mono text-slate-400 tabular-nums">
+            <span className="text-slate-500">Reigning for </span>
+            <span className="text-gold">{formatLiveDuration(reignSeconds)}</span>
+          </div>
+        </div>
+
+        {/* Body: avatar + identity on the left, score on the right */}
+        <div className="flex items-center gap-4 sm:gap-6 flex-wrap">
+          {/* Avatar */}
+          <div
+            className="w-14 h-14 sm:w-16 sm:h-16 rounded-full flex items-center justify-center text-base font-bold text-slate-950 shadow-lg shrink-0"
+            style={{
+              background: `linear-gradient(135deg, hsl(${swatch.hue}, 22%, 66%), hsl(${swatch.hue}, 22%, 46%))`,
+              boxShadow: `0 0 0 1px hsl(${swatch.hue}, 22%, 58%, 0.4), 0 12px 32px -10px hsl(${swatch.hue}, 22%, 36%, 0.55)`,
+            }}
+            aria-hidden
+          >
+            {swatch.initials}
+          </div>
+
+          {/* Identity */}
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <code className="text-sm sm:text-base font-mono text-slate-100 truncate" title={champion.minerHotkey}>
+                {truncateHotkey(champion.minerHotkey)}
+              </code>
+              <CopyButton text={champion.minerHotkey} ariaLabel="Copy champion hotkey" />
             </div>
-            <div className="space-y-2">
-              <div className="flex items-center gap-2 text-sm font-medium">
-                <span className="flex h-6 w-6 items-center justify-center rounded-full bg-cyan-500/10 text-cyan-500 text-xs">2</span>
-                Upload Model Code
+            {champion.modelName && (
+              <div className="text-[12px] text-slate-400 mt-0.5 font-mono truncate">
+                {champion.modelName}
               </div>
-              <p className="text-xs text-muted-foreground pl-8">
-                Submit your model via the qualification API
-              </p>
-            </div>
-            <div className="space-y-2">
-              <div className="flex items-center gap-2 text-sm font-medium">
-                <span className="flex h-6 w-6 items-center justify-center rounded-full bg-cyan-500/10 text-cyan-500 text-xs">3</span>
-                Get Evaluated
-              </div>
-              <p className="text-xs text-muted-foreground pl-8">
-                Validators benchmark against 100 ICPs
-              </p>
+            )}
+            <div className="text-[11px] text-slate-500 mt-1.5">
+              Champion since <span className="text-slate-300">{formatDate(champion.championAt)}</span>
             </div>
           </div>
-          <div className="mt-4 pt-4 border-t">
-            <p className="text-xs text-muted-foreground">
-              See the <a href="https://github.com/leadpoet/leadpoet" target="_blank" rel="noopener noreferrer" className="text-cyan-500 hover:underline">documentation</a> for full submission guide.
-              {data.stats.currentChampionScore > 0 ? (
-                <> Beat the champion score of <span className="font-bold text-yellow-500">{data.stats.currentChampionScore.toFixed(2)}</span> by the specified threshold to become the new champion!</>
-              ) : (
-                <> Beat the score of <span className="font-bold text-yellow-500">10.00</span> by the specified threshold to become the champion!</>
-              )}
-            </p>
+
+          {/* Score block */}
+          <div className="text-right">
+            <div className="text-[10px] text-slate-500 uppercase tracking-[0.12em] font-medium">
+              Score
+            </div>
+            <div className="flex items-baseline gap-1 justify-end mt-0.5">
+              <CountUp
+                value={champion.score}
+                decimals={2}
+                className="text-4xl sm:text-5xl font-semibold text-gold leading-none"
+              />
+              <span className="text-slate-500 text-sm">/ 100</span>
+            </div>
+            {championDelta !== null && (
+              <div
+                className={cn(
+                  'text-[10px] font-mono tabular-nums mt-1',
+                  championDelta >= 0 ? 'text-gold' : 'text-burgundy'
+                )}
+              >
+                {championDelta >= 0 ? '↑' : '↓'} {Math.abs(championDelta).toFixed(2)} vs previous champ
+              </div>
+            )}
           </div>
-        </CardContent>
-      </Card>
+        </div>
+
+        {/* Bottom strip: code unlock + beat-to-win + CTA */}
+        <div className="mt-5 pt-4 border-t border-slate-800/60 flex items-center gap-4 sm:gap-6 flex-wrap">
+          {/* Code unlock countdown */}
+          <div className="flex items-center gap-2 text-[11px] text-slate-400">
+            {codeUnlocked ? (
+              <>
+                <Eye className="h-3.5 w-3.5 text-gold" aria-hidden />
+                <span>Code available, view in breakdown</span>
+              </>
+            ) : (
+              <>
+                <Lock className="h-3.5 w-3.5 text-slate-500" aria-hidden />
+                <span>
+                  Code unlocks in{' '}
+                  <span className="text-gold tabular-nums font-mono">
+                    {formatCountdown(unlockRemaining) ?? 'moments'}
+                  </span>
+                </span>
+              </>
+            )}
+          </div>
+
+          {/* Beat to win */}
+          <div className="ml-auto flex items-center gap-2 text-[11px]">
+            <span className="text-[10px] text-slate-500 uppercase tracking-[0.1em] font-medium">
+              Beat to win
+            </span>
+            <span className="text-base font-mono font-semibold text-gold-bright tabular-nums">
+              {beatToWin.toFixed(2)}
+            </span>
+            <span className="text-[10px] text-slate-500">
+              (+{CHALLENGE_THRESHOLD_PCT}%)
+            </span>
+          </div>
+
+          {/* CTA */}
+          <button
+            type="button"
+            onClick={onOpen}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[11px] font-medium text-slate-100 bg-slate-900/70 border border-slate-700/50 hover:bg-slate-800/80 hover:border-slate-600 transition-colors"
+          >
+            View score breakdown
+            <ChevronRight className="h-3.5 w-3.5" aria-hidden />
+          </button>
+        </div>
+      </div>
+    </section>
+  )
+}
+
+/* ============================================================
+ * VacantThrone. Shown when championHistory has no active champion.
+ * ============================================================ */
+function VacantThrone({ beatToWin }: { beatToWin: number }) {
+  return (
+    <section
+      aria-label="No current champion"
+      className="rounded-2xl border border-slate-800/70 bg-slate-900/30 p-7 text-center"
+    >
+      <h3 className="text-sm font-semibold text-slate-100">The throne is empty</h3>
+      <p className="text-[12px] text-slate-400 mt-1.5 max-w-md mx-auto">
+        No active champion right now. The first model to score{' '}
+        <span className="text-gold tabular-nums font-mono">{beatToWin.toFixed(2)}</span>{' '}
+        or higher takes the crown.
+      </p>
+    </section>
+  )
+}
+
+/* ============================================================
+ * ChampionLineageStrip. Horizontal sparkline of champion scores
+ * over time. Each champion is a dot at (championAt, score), linked
+ * by a thin warm-gold line. Current champion gets a pulsing dot.
+ *
+ * IMPORTANT: we draw at 1:1 pixel scale (no preserveAspectRatio="none")
+ * so circles stay round. A previous version stretched the viewBox to
+ * the container width, which turned the pulsing ring around the current
+ * champion into a wide ellipse on big screens.
+ * ============================================================ */
+function ChampionLineageStrip({
+  history,
+  currentChampion,
+  onSelect,
+}: {
+  history: ChampionHistoryEntry[]
+  currentChampion: ChampionHistoryEntry | null
+  onSelect: (champion: ChampionHistoryEntry) => void
+}) {
+  const containerRef = useRef<HTMLDivElement>(null)
+  const [width, setWidth] = useState(800)
+  const H = 90
+  const PADDING_X = 24
+  const PADDING_Y = 16
+
+  // Track the real rendered width so the SVG can draw 1px-to-1px (no scale).
+  useEffect(() => {
+    const el = containerRef.current
+    if (!el) return
+    const update = () => {
+      if (el) setWidth(el.clientWidth)
+    }
+    update()
+    const ro = new ResizeObserver(update)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+
+  // Sort ascending by championAt so the line reads left-to-right (oldest → newest)
+  const points = useMemo(() => {
+    const sorted = [...history].sort(
+      (a, b) => new Date(a.championAt).getTime() - new Date(b.championAt).getTime()
+    )
+    if (sorted.length === 0) return [] as Array<{ x: number; y: number; champ: ChampionHistoryEntry }>
+    const minT = new Date(sorted[0].championAt).getTime()
+    const maxT = currentChampion
+      ? Date.now()
+      : new Date(sorted[sorted.length - 1].championAt).getTime()
+    const tSpan = Math.max(1, maxT - minT)
+    const scores = sorted.map((s) => s.score)
+    const minS = Math.min(...scores)
+    const maxS = Math.max(...scores)
+    const sSpan = Math.max(1, maxS - minS)
+    return sorted.map((c) => {
+      const t = new Date(c.championAt).getTime()
+      const x = PADDING_X + ((t - minT) / tSpan) * (width - 2 * PADDING_X)
+      const y = H - PADDING_Y - ((c.score - minS) / sSpan) * (H - 2 * PADDING_Y)
+      return { x, y, champ: c }
+    })
+  }, [history, currentChampion, width])
+
+  if (points.length < 2) return null
+
+  const pathD = points
+    .map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`)
+    .join(' ')
+
+  const minScore = Math.min(...points.map((p) => p.champ.score))
+  const maxScore = Math.max(...points.map((p) => p.champ.score))
+
+  return (
+    <section className="rounded-xl border border-slate-800/70 bg-slate-950/40 overflow-hidden">
+      <header className="flex items-center gap-2 px-4 py-2 border-b border-slate-800/70 bg-gradient-to-b from-slate-900/80 to-slate-900/40">
+        <span className="text-[10px] font-semibold text-slate-300 uppercase tracking-[0.12em]">
+          Champion lineage
+        </span>
+        <span className="ml-auto text-[10px] text-slate-500 font-mono tabular-nums">
+          {history.length} {history.length === 1 ? 'reign' : 'reigns'}
+        </span>
+      </header>
+      <div ref={containerRef} className="relative px-2 py-3">
+        <svg
+          width={width}
+          height={H}
+          className="block"
+          role="img"
+          aria-label="Champion score trajectory over time"
+        >
+          {/* Subtle axis baseline */}
+          <line
+            x1={PADDING_X}
+            y1={H - PADDING_Y}
+            x2={width - PADDING_X}
+            y2={H - PADDING_Y}
+            stroke="rgba(245,240,232,0.06)"
+            strokeWidth="1"
+          />
+          {/* Trajectory line */}
+          <path
+            d={pathD}
+            fill="none"
+            stroke="#c9a96e"
+            strokeOpacity="0.55"
+            strokeWidth="1.4"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+          {/* Dots: each champion is keyboard-focusable with an expanded
+              hit target (14×14 transparent circle) so taps and screen
+              reader gestures land reliably. */}
+          {points.map((p, i) => {
+            const isCurrent =
+              currentChampion && p.champ.modelId === currentChampion.modelId
+            const label = `${truncateHotkey(p.champ.minerHotkey)} · ${p.champ.score.toFixed(2)} · ${formatDate(p.champ.championAt)}${
+              i === points.length - 1 && isCurrent ? ' (current)' : ''
+            }`
+            return (
+              <g
+                key={p.champ.modelId}
+                style={{ cursor: 'pointer' }}
+                role="button"
+                tabIndex={0}
+                aria-label={label}
+                onClick={() => onSelect(p.champ)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault()
+                    onSelect(p.champ)
+                  }
+                }}
+              >
+                {/* Expanded transparent hit target (touch / focus ring) */}
+                <circle
+                  cx={p.x}
+                  cy={p.y}
+                  r={12}
+                  fill="transparent"
+                  className="outline-none focus-visible:[stroke:#c9a96e]"
+                  style={{ pointerEvents: 'all' }}
+                />
+                {isCurrent && (
+                  <circle
+                    cx={p.x}
+                    cy={p.y}
+                    r={6}
+                    fill="none"
+                    stroke="#e8c987"
+                    strokeOpacity="0.5"
+                    strokeWidth="1.4"
+                    className="live-pulse"
+                    // SVG quirk: CSS `transform: scale()` from `.live-pulse`
+                    // defaults to the SVG root as origin, which slides the
+                    // ring across the chart at every animation step. These
+                    // two properties make the transform respect the circle's
+                    // own bounding box, so the ring pulses in place.
+                    style={{
+                      transformBox: 'fill-box',
+                      transformOrigin: 'center',
+                    }}
+                  />
+                )}
+                <circle
+                  cx={p.x}
+                  cy={p.y}
+                  r={isCurrent ? 3.5 : 2.5}
+                  fill={isCurrent ? '#e8c987' : '#c9a96e'}
+                  stroke="rgba(8,8,10,0.9)"
+                  strokeWidth="0.8"
+                >
+                  <title>{label}</title>
+                </circle>
+              </g>
+            )
+          })}
+        </svg>
+        {/* Range hints */}
+        <div className="absolute left-3 top-2 text-[9px] font-mono text-slate-600 tabular-nums">
+          {maxScore.toFixed(1)}
+        </div>
+        <div className="absolute left-3 bottom-1 text-[9px] font-mono text-slate-600 tabular-nums">
+          {minScore.toFixed(1)}
+        </div>
+      </div>
+    </section>
+  )
+}
+
+/* ============================================================
+ * KpiTile. Compact stat. Matches the StatBlock typography &
+ * border treatment from Fulfillment for a cohesive feel.
+ * ============================================================ */
+function KpiTile({
+  label,
+  value,
+  subline,
+  tone = 'slate',
+}: {
+  label: string
+  value: number
+  subline: string
+  tone?: 'slate' | 'gold'
+}) {
+  const valueColor = tone === 'gold' ? 'text-gold' : 'text-slate-100'
+  return (
+    <div className="rounded-xl border border-slate-800/70 bg-slate-900/30 px-4 py-3">
+      <div className="text-[9px] text-slate-500 uppercase tracking-[0.1em] font-medium">
+        {label}
+      </div>
+      <div className={cn('text-xl sm:text-2xl font-semibold tabular-nums leading-tight mt-0.5', valueColor)}>
+        <CountUp value={value} />
+      </div>
+      <p className="text-[10px] text-slate-500 mt-1">{subline}</p>
+    </div>
+  )
+}
+
+/* ============================================================
+ * ChallengersBoard. Leaderboard-style list of today's submissions.
+ * ============================================================ */
+function ChallengersBoard({
+  challengers,
+  onSelect,
+}: {
+  challengers: Submission[]
+  onSelect: (s: Submission) => void
+}) {
+  if (challengers.length === 0) {
+    return (
+      <section className="rounded-xl border border-slate-800/70 bg-slate-950/50 px-5 py-8 text-center">
+        <p className="text-sm text-slate-400">No submissions today.</p>
+        <p className="text-[11px] text-slate-500 mt-1">
+          The first model to submit gets ranked here.
+        </p>
+      </section>
+    )
+  }
+
+  return (
+    <section className="rounded-xl border border-slate-800/70 bg-slate-950/50 overflow-hidden">
+      <header className="flex items-center gap-2 px-4 py-2.5 border-b border-slate-800/70 bg-gradient-to-b from-slate-900/80 to-slate-900/40">
+        <span className="text-[11px] font-semibold text-slate-100 uppercase tracking-[0.1em]">
+          Today&apos;s challengers
+        </span>
+        <span className="ml-auto text-[10px] text-slate-500 font-mono tabular-nums">
+          {challengers.length}
+        </span>
+      </header>
+      {/* Column header */}
+      <div className="hidden md:grid grid-cols-[2rem_1fr_minmax(0,1.2fr)_4.5rem_4rem_6rem] gap-3 px-4 py-1.5 text-[9px] text-slate-500 font-mono uppercase tracking-[0.06em] bg-slate-900/40 border-b border-slate-800/60">
+        <span className="text-right">#</span>
+        <span>Hotkey</span>
+        <span>Model</span>
+        <span className="text-right">Score</span>
+        <span className="text-right">Time</span>
+        <span>Status</span>
+      </div>
+      <div className="max-h-[420px] overflow-y-auto divide-y divide-slate-800/60">
+        {challengers.map((s, idx) => (
+          <ChallengerRow key={s.id} rank={idx + 1} submission={s} onSelect={() => onSelect(s)} />
+        ))}
+      </div>
+    </section>
+  )
+}
+
+/* ============================================================
+ * ChallengerRow. Single row in the leaderboard.
+ * Buttons (not divs) for keyboard/SR correctness; subtle hover.
+ * ============================================================ */
+function ChallengerRow({
+  rank,
+  submission,
+  onSelect,
+}: {
+  rank: number
+  submission: Submission
+  onSelect: () => void
+}) {
+  const isEvaluating = submission.status === 'evaluating'
+  const isSubmitted = submission.status === 'submitted'
+  const isEvaluated = submission.status === 'evaluated'
+
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      className={cn(
+        'w-full grid grid-cols-[2rem_minmax(0,1fr)_4.5rem] md:grid-cols-[2rem_1fr_minmax(0,1.2fr)_4.5rem_4rem_6rem] gap-2 md:gap-3 items-center px-4 py-3 md:py-2.5 text-[11px] text-left transition-colors',
+        'hover-bg-warm focus:outline-none focus:bg-slate-800/40',
+        isEvaluating && 'pending-breath'
+      )}
+      title={`View submission ${submission.minerHotkey}`}
+    >
+      <span className="text-[10px] font-mono text-slate-500 text-right tabular-nums">
+        {String(rank).padStart(2, '0')}
+      </span>
+      <div className="flex items-center gap-2 min-w-0">
+        <code className="font-mono text-slate-200 truncate" title={submission.minerHotkey}>
+          {truncateHotkey(submission.minerHotkey)}
+        </code>
+        {isEvaluated && (
+          submission.canShowCode ? (
+            <Eye className="h-3 w-3 text-gold shrink-0" aria-label="Code available" />
+          ) : (
+            <Lock className="h-3 w-3 text-slate-500 shrink-0" aria-label="Code locked" />
+          )
+        )}
+      </div>
+      <span className="font-mono text-slate-400 truncate text-[10px] col-start-2 col-span-2 md:col-start-auto md:col-span-1" title={submission.modelName}>
+        {submission.modelName || <span className="text-slate-600">·</span>}
+      </span>
+      <span
+        className={cn(
+          'font-mono font-semibold text-right tabular-nums',
+          submission.score !== null ? 'text-gold' : 'text-slate-600'
+        )}
+      >
+        {submission.score !== null ? submission.score.toFixed(2) : '·'}
+      </span>
+      <span className="font-mono text-slate-500 tabular-nums text-[10px] col-start-2 md:col-start-auto md:text-right">
+        {getRelativeTime(submission.createdAt)}
+      </span>
+      <span className="flex items-center justify-end md:justify-start gap-1.5 col-start-3 md:col-start-auto">
+        {isSubmitted && (
+          <span className="inline-block w-1 h-1 rounded-full dot-amber pending-breath" aria-hidden />
+        )}
+        <StatusBadge status={submission.status} />
+      </span>
+    </button>
+  )
+}
+
+/* ============================================================
+ * LiveEvaluatingPanel. Floating side panel mirroring Fulfillment's
+ * Leaderboard placement (top-right of the relative container).
+ * ============================================================ */
+function LiveEvaluatingPanel({
+  submissions,
+  onSelect,
+}: {
+  submissions: Submission[]
+  onSelect: (s: Submission) => void
+}) {
+  return (
+    <aside
+      aria-label="Currently evaluating models"
+      // Hidden on small screens. The floating panel would overlay the
+      // challengers leaderboard and obscure content. On mobile, the
+      // pending-breath + Evaluating badge on each row already communicates
+      // live activity, so the floating overlay is redundant.
+      className="hidden md:flex md:flex-col absolute top-3 right-3 w-64 max-w-[calc(100%-1.5rem)] bg-slate-950/85 backdrop-blur-md rounded-xl border border-amber-warm-soft shadow-2xl shadow-black/40 overflow-hidden animate-in fade-in slide-in-from-right-2 duration-200"
+    >
+      <header className="flex items-center gap-2 px-3.5 py-2.5 border-b border-slate-800/70 bg-gradient-to-b from-slate-900/80 to-slate-900/40">
+        <Loader2 className="h-3 w-3 text-amber-warm animate-spin" aria-hidden />
+        <span className="text-[11px] font-semibold text-slate-100">Evaluating now</span>
+        <span className="ml-auto text-[10px] text-amber-warm font-mono tabular-nums">
+          {submissions.length} live
+        </span>
+      </header>
+      <div className="divide-y divide-slate-800/60 max-h-[220px] overflow-y-auto">
+        {submissions.map((s) => (
+          <button
+            key={s.id}
+            type="button"
+            onClick={() => onSelect(s)}
+            className="w-full px-3.5 py-2 text-left hover-bg-warm transition-colors"
+            title={`View ${s.minerHotkey}`}
+          >
+            <div className="flex items-center gap-2">
+              <code className="text-[11px] font-mono text-slate-200 truncate flex-1" title={s.minerHotkey}>
+                {truncateHotkey(s.minerHotkey)}
+              </code>
+              <span className="inline-block w-1.5 h-1.5 rounded-full dot-amber live-pulse" aria-hidden />
+            </div>
+            <div className="text-[10px] text-slate-500 font-mono tabular-nums mt-0.5">
+              Started {getRelativeTime(s.createdAt)}
+            </div>
+          </button>
+        ))}
+      </div>
+    </aside>
+  )
+}
+
+/* ============================================================
+ * PastChampionRow. Compact, table-style row for past champions.
+ * ============================================================ */
+function PastChampionRow({
+  rank,
+  champion,
+  onSelect,
+}: {
+  rank: number
+  champion: ChampionHistoryEntry
+  onSelect: () => void
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      className="w-full grid grid-cols-[2rem_minmax(0,1fr)_4.5rem] md:grid-cols-[2rem_1fr_5rem_minmax(0,1fr)_6rem] gap-2 md:gap-3 items-center px-4 py-3 md:py-2.5 text-[11px] text-left hover-bg-warm focus:outline-none focus:bg-slate-800/40 transition-colors"
+      title={`View ${champion.minerHotkey}`}
+    >
+      <span className="text-[10px] font-mono text-slate-500 text-right tabular-nums">
+        {String(rank).padStart(2, '0')}
+      </span>
+      <div className="flex items-center gap-2 min-w-0">
+        <code className="font-mono text-slate-200 truncate" title={champion.minerHotkey}>
+          {truncateHotkey(champion.minerHotkey)}
+        </code>
+        {champion.canShowCode ? (
+          <Eye className="h-3 w-3 text-gold shrink-0" aria-label="Code available" />
+        ) : (
+          <Lock className="h-3 w-3 text-slate-500 shrink-0" aria-label="Code locked" />
+        )}
+      </div>
+      <span className="font-mono font-semibold text-right tabular-nums text-gold">
+        {champion.score.toFixed(2)}
+      </span>
+      <span className="font-mono text-slate-500 text-[10px] tabular-nums truncate col-start-2 col-span-2 md:col-start-auto md:col-span-1">
+        {formatDate(champion.championAt)}
+      </span>
+      <span className="font-mono text-slate-400 text-[10px] tabular-nums col-start-2 col-span-2 md:col-start-auto md:col-span-1 md:text-right">
+        Reign · <span className="text-slate-200">{formatDuration(champion.reignDuration)}</span>
+      </span>
+    </button>
+  )
+}
+
+/* ============================================================
+ * HowToChallenge. Three numbered steps explaining how to enter
+ * the model competition. No right-side values or copy buttons.
+ * The steps stand on their own.
+ * ============================================================ */
+function HowToChallenge({
+  currentChampionScore,
+}: {
+  currentChampionScore: number | null
+}) {
+  return (
+    <section className="rounded-xl border border-slate-800/70 bg-slate-950/40 overflow-hidden">
+      <header className="flex items-center gap-2 px-4 py-2.5 border-b border-slate-800/70 bg-gradient-to-b from-slate-900/80 to-slate-900/40">
+        <span className="text-[11px] font-semibold text-slate-100 uppercase tracking-[0.1em]">
+          How to challenge
+        </span>
+        <a
+          href="https://github.com/leadpoet/leadpoet"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="ml-auto text-[10px] text-slate-400 hover:text-gold inline-flex items-center gap-1 transition-colors"
+        >
+          Full docs
+          <ChevronRight className="h-3 w-3" aria-hidden />
+        </a>
+      </header>
+
+      <div className="divide-y divide-slate-800/60">
+        <ChallengeStep
+          num={1}
+          title="Pay submission fee"
+          description="Send $5 worth of TAO to enter the competition."
+        />
+        <ChallengeStep
+          num={2}
+          title="Submit your model"
+          description="Validators benchmark it against the current champion on the same 100 ICPs."
+        />
+        <ChallengeStep
+          num={3}
+          title="Beat the threshold"
+          description={
+            currentChampionScore !== null
+              ? `Current champion scores ${currentChampionScore.toFixed(2)} / 100. Beat it by ${CHALLENGE_THRESHOLD_PCT}% to take the crown.`
+              : 'The throne is empty. The first model to clear the floor takes the crown.'
+          }
+        />
+      </div>
+    </section>
+  )
+}
+
+function ChallengeStep({
+  num,
+  title,
+  description,
+}: {
+  num: number
+  title: string
+  description: string
+}) {
+  return (
+    <div className="px-4 py-3 grid gap-3 grid-cols-[2rem_minmax(0,1fr)] items-center">
+      <div className="flex h-6 w-6 items-center justify-center rounded-full bg-slate-900/80 text-slate-300 text-[11px] font-mono border border-slate-700/50">
+        {num}
+      </div>
+      <div className="min-w-0">
+        <div className="text-[12px] font-medium text-slate-100">{title}</div>
+        <p className="text-[11px] text-slate-500 mt-0.5">{description}</p>
+      </div>
     </div>
   )
 }

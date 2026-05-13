@@ -5,10 +5,6 @@ const nextConfig = {
   // Enable compression
   compress: true,
 
-  // Enable instrumentation for cache warm-up
-  experimental: {
-    instrumentationHook: true,
-  },
 };
 
 export default nextConfig;

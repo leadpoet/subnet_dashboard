@@ -343,16 +343,41 @@ async function fetchModelCompetitionData(): Promise<unknown> {
 
   // Map champions to the expected format
   // (twentyFourHoursAgo already declared above for submissions)
-  // code_content is now directly in qualification_champion_history
-  // Build a lookup map of score_breakdown from qualification_leaderboard by model_id
+  //
+  // Build a score_breakdown lookup from TWO sources, in this order of
+  // preference:
+  //   1. qualification_models. Persistent source of truth, has every
+  //      historic model. This is the one that matters for past champions.
+  //   2. qualification_leaderboard. Today's evaluations only; used as a
+  //      fallback for models that don't show up in (1) for any reason.
+  //
+  // Previously we only built the map from (2), which is a today-only,
+  // 500-row working set, so past champions almost always missed their
+  // breakdown and the detail dialog showed "Score breakdown not available."
   const scoreBreakdownMap = new Map<string, unknown>()
-  for (const m of models) {
-    if ((m as { model_id: string; score_breakdown: unknown }).score_breakdown) {
-      scoreBreakdownMap.set(
-        (m as { model_id: string }).model_id,
-        (m as { score_breakdown: unknown }).score_breakdown
-      )
+  const championModelIds = champions
+    .map((c: { model_id: string }) => c.model_id)
+    .filter((id: string) => Boolean(id))
+  if (championModelIds.length > 0) {
+    const { data: pastChampModels, error: pastChampError } = await supabase
+      .from('qualification_models')
+      .select('id, score_breakdown')
+      .in('id', championModelIds)
+    if (pastChampError) {
+      console.error('[Cache] Error fetching qualification_models for champions:', pastChampError)
     }
+    for (const row of (pastChampModels || []) as Array<{ id: string; score_breakdown: unknown }>) {
+      if (row.score_breakdown) {
+        scoreBreakdownMap.set(row.id, row.score_breakdown)
+      }
+    }
+  }
+  // Fallback: anything not found above, try the today-only leaderboard.
+  for (const m of models) {
+    const mid = (m as { model_id: string }).model_id
+    if (!mid || scoreBreakdownMap.has(mid)) continue
+    const sb = (m as { score_breakdown: unknown }).score_breakdown
+    if (sb) scoreBreakdownMap.set(mid, sb)
   }
 
   const championsList = champions.map((c: {
@@ -402,7 +427,7 @@ async function fetchModelCompetitionData(): Promise<unknown> {
   if (champModel) {
     const champEntry = championsList.find((c: { modelId: string }) => c.modelId === champModel.id)
     if (champEntry) {
-      // Override history — qualification_models says this is champion
+      // Override history. qualification_models says this is champion.
       champEntry.dethronedAt = null
       champEntry.scoreBreakdown = champModel.score_breakdown || champEntry.scoreBreakdown
       // Parse and set code from qualification_models if available
@@ -416,7 +441,7 @@ async function fetchModelCompetitionData(): Promise<unknown> {
         } catch { /* keep existing */ }
       }
     } else {
-      // Champion not in history yet — add it directly from qualification_models
+      // Champion not in history yet. Add it directly from qualification_models.
       let parsedCode: Record<string, string> | null = null
       if (champModel.code_content) {
         try {

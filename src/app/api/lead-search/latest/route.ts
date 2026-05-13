@@ -3,6 +3,8 @@ import { getCachedLatestLeads } from '@/lib/db-precalc'
 import { fetchMetagraph } from '@/lib/metagraph'
 import { cleanRejectionReason } from '@/lib/utils-rejection'
 
+export const dynamic = 'force-dynamic'
+
 export async function GET(request: NextRequest) {
   try {
     const startTime = Date.now()

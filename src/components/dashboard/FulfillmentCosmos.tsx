@@ -1,0 +1,1004 @@
+'use client'
+
+import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
+
+export interface CosmosConsensusLead {
+  request_id: string
+  miner_hotkey: string
+  lead_id: string
+  is_winner: boolean
+  consensus_final_score?: number
+}
+
+export interface CosmosRequest {
+  request_id: string
+  status: string
+  num_leads: number
+  created_at: string
+  icp_details?: {
+    industry?: string
+    sub_industry?: string
+    target_roles?: string[]
+  }
+}
+
+interface GraphNode {
+  id: string
+  type: 'request' | 'miner'
+  x: number
+  y: number
+  vx: number
+  vy: number
+  label: string
+  request?: CosmosRequest
+  hotkey?: string
+  leadCount: number
+  winCount: number
+  requestCount: number
+  industry?: string
+  isPending?: boolean
+  /** Anchor (industry centroid) to keep cluster cohesion during relaxation. */
+  ax?: number
+  ay?: number
+  fixed?: boolean
+}
+
+interface GraphEdge {
+  sourceId: string
+  targetId: string
+  count: number
+  winCount: number
+}
+
+interface IndustryCluster {
+  key: string
+  label: string
+  cx: number
+  cy: number
+  radius: number
+  requestIds: string[]
+}
+
+interface LayoutResult {
+  nodes: GraphNode[]
+  edges: GraphEdge[]
+  nodeById: Map<string, GraphNode>
+  clusters: IndustryCluster[]
+}
+
+const REQUEST_RADIUS = 9
+const MINER_RADIUS = 3.2
+const PENDING_COMPLETED_BUFFER = 72
+
+// Editorial palette. Warm off-whites, dusty amber, brand gold.
+// Cyan/emerald/rose stocks from Tailwind defaults have been retired here.
+const COLOR_WIN_EDGE = '#c9a96e'                      // warm gold for winning leads
+const COLOR_LOSS_EDGE = 'rgba(245, 240, 232, 0.18)'   // faint warm gray for submitted-only
+const COLOR_REQUEST_PENDING = '#cf9d61'               // dusty amber
+const COLOR_REQUEST_COMPLETED = '#e8e1d4'             // warm cream, finalized
+const COLOR_MINER = '#5e5a52'                         // warm gray, neutral miner
+const COLOR_MINER_WINNING = '#b89868'                 // muted gold, miner with wins
+const COLOR_TOP_RING = '#e8c987'                      // brighter gold, top miner ring
+
+const PENDING_STATUSES = new Set(['pending', 'open', 'continued_open', 'commit_closed', 'scoring'])
+
+function asText(v: unknown): string {
+  if (typeof v === 'string') return v
+  if (Array.isArray(v)) {
+    return v.filter((x) => typeof x === 'string' && x.length > 0).join(', ')
+  }
+  if (v == null) return ''
+  return String(v)
+}
+
+/**
+ * Smart truncation for industry-like labels. Handles strings, arrays, and
+ * arbitrary length. Keeps the first `maxItems` items, then appends "+N more",
+ * and finally caps the whole result at `maxChars` with a trailing ellipsis.
+ */
+function industryLabel(v: unknown, maxItems = 2, maxChars = 30): string {
+  let raw: string
+  if (typeof v === 'string') {
+    raw = v
+  } else if (Array.isArray(v)) {
+    const items = v.filter((x): x is string => typeof x === 'string' && x.length > 0)
+    if (items.length === 0) return ''
+    const shown = items.slice(0, maxItems).join(', ')
+    raw = items.length > maxItems ? `${shown} +${items.length - maxItems}` : shown
+  } else if (v == null) {
+    return ''
+  } else {
+    raw = String(v)
+  }
+  if (raw.length > maxChars) return raw.slice(0, maxChars - 1).trimEnd() + '…'
+  return raw
+}
+
+function primaryIndustry(req: CosmosRequest): string {
+  const ind = req.icp_details?.industry
+  if (typeof ind === 'string' && ind.length > 0) return ind
+  if (Array.isArray(ind)) {
+    for (const v of ind) if (typeof v === 'string' && v.length > 0) return v
+  }
+  return 'Other'
+}
+
+function simpleHash(str: string): number {
+  let h = 0
+  for (let i = 0; i < str.length; i++) {
+    h = (h * 31 + str.charCodeAt(i)) | 0
+  }
+  return Math.abs(h)
+}
+
+function truncateHotkey(h: string): string {
+  if (h.length <= 12) return h
+  return `${h.slice(0, 6)}...${h.slice(-4)}`
+}
+
+function renderedNodeRadius(n: GraphNode): number {
+  return n.type === 'request'
+    ? REQUEST_RADIUS + Math.min(8, Math.log2(1 + (n.leadCount || 1)) * 2)
+    : MINER_RADIUS + Math.min(3, (n.winCount || 0) * 0.5)
+}
+
+function computeLayout(requests: CosmosRequest[], leads: CosmosConsensusLead[]): LayoutResult {
+  const nodeById = new Map<string, GraphNode>()
+  const edges: GraphEdge[] = []
+  const clusters: IndustryCluster[] = []
+
+  // === 1. Split requests into pending + completed (or other) ===
+  const pendingRequests: CosmosRequest[] = []
+  const completedRequests: CosmosRequest[] = []
+  for (const r of requests) {
+    if (PENDING_STATUSES.has(r.status)) pendingRequests.push(r)
+    else completedRequests.push(r)
+  }
+
+  // === 2. Build industry clusters for completed requests ===
+  const industryGroups = new Map<string, CosmosRequest[]>()
+  for (const r of completedRequests) {
+    const key = primaryIndustry(r)
+    const arr = industryGroups.get(key) || []
+    arr.push(r)
+    industryGroups.set(key, arr)
+  }
+
+  const sortedIndustries = Array.from(industryGroups.entries()).sort(
+    (a, b) => b[1].length - a[1].length
+  )
+
+  // Place each industry cluster on a sunflower spiral
+  const golden = Math.PI * (3 - Math.sqrt(5))
+  const clusterSpacing = 220
+
+  sortedIndustries.forEach(([key, group], i) => {
+    const r = clusterSpacing * Math.sqrt(i + 1)
+    const a = i * golden
+    const cx = r * Math.cos(a)
+    const cy = r * Math.sin(a)
+    const clusterRadius = 40 + Math.sqrt(group.length) * 22
+
+    clusters.push({
+      key,
+      label: key,
+      cx,
+      cy,
+      radius: clusterRadius,
+      requestIds: group.map((g) => g.request_id),
+    })
+
+    // Place each request in the cluster as a sunflower
+    group.forEach((req, j) => {
+      const r2 = clusterRadius * 0.55 * Math.sqrt((j + 1) / Math.max(1, group.length))
+      const a2 = j * golden
+      const px = cx + r2 * Math.cos(a2)
+      const py = cy + r2 * Math.sin(a2)
+      nodeById.set(`req:${req.request_id}`, {
+        id: `req:${req.request_id}`,
+        type: 'request',
+        x: px,
+        y: py,
+        vx: 0,
+        vy: 0,
+        label: req.request_id,
+        request: req,
+        leadCount: 0,
+        winCount: 0,
+        requestCount: 1,
+        industry: key,
+        ax: cx,
+        ay: cy,
+      })
+    })
+  })
+
+  // === 3. Pending requests are placed AFTER force relaxation (step 8) so
+  // their orbit reflects the cluster's actual post-relaxation footprint.
+  // Placing them here, before relaxation expands the cluster, would push
+  // them way out into empty space. ===
+
+  // === 4. Aggregate edges: one per (miner, request) pair with count + winCount ===
+  const relevantRequestIds = new Set(requests.map((r) => r.request_id))
+  const pairAgg = new Map<string, { count: number; winCount: number }>()
+  const minerInfo = new Map<
+    string,
+    { totalLeads: number; totalWins: number; requestIds: Set<string> }
+  >()
+
+  for (const lead of leads) {
+    if (!relevantRequestIds.has(lead.request_id)) continue
+    const key = `${lead.request_id}|${lead.miner_hotkey}`
+    const cur = pairAgg.get(key) || { count: 0, winCount: 0 }
+    cur.count++
+    if (lead.is_winner) cur.winCount++
+    pairAgg.set(key, cur)
+
+    const info =
+      minerInfo.get(lead.miner_hotkey) || {
+        totalLeads: 0,
+        totalWins: 0,
+        requestIds: new Set<string>(),
+      }
+    info.totalLeads++
+    if (lead.is_winner) info.totalWins++
+    info.requestIds.add(lead.request_id)
+    minerInfo.set(lead.miner_hotkey, info)
+  }
+
+  // === 5. Place miners using gravity toward their request centroids ===
+  for (const [hotkey, info] of minerInfo.entries()) {
+    let cx = 0
+    let cy = 0
+    let count = 0
+    for (const reqId of info.requestIds) {
+      const n = nodeById.get(`req:${reqId}`)
+      if (n && !n.isPending) {
+        cx += n.x
+        cy += n.y
+        count++
+      }
+    }
+    if (count === 0) continue
+    cx /= count
+    cy /= count
+
+    const h = simpleHash(hotkey)
+    const angle = ((h % 1000) / 1000) * Math.PI * 2
+    const dist = 38 + ((h >> 4) % 32)
+
+    nodeById.set(`mnr:${hotkey}`, {
+      id: `mnr:${hotkey}`,
+      type: 'miner',
+      x: cx + dist * Math.cos(angle),
+      y: cy + dist * Math.sin(angle),
+      vx: 0,
+      vy: 0,
+      label: hotkey,
+      hotkey,
+      leadCount: info.totalLeads,
+      winCount: info.totalWins,
+      requestCount: info.requestIds.size,
+    })
+  }
+
+  // === 6. Build edge list (already consolidated) ===
+  for (const [key, agg] of pairAgg.entries()) {
+    const [requestId, minerHotkey] = key.split('|')
+    const sourceId = `req:${requestId}`
+    const targetId = `mnr:${minerHotkey}`
+    if (!nodeById.has(sourceId) || !nodeById.has(targetId)) continue
+    edges.push({
+      sourceId,
+      targetId,
+      count: agg.count,
+      winCount: agg.winCount,
+    })
+
+    const reqNode = nodeById.get(sourceId)
+    if (reqNode) {
+      reqNode.leadCount += agg.count
+      reqNode.winCount += agg.winCount
+    }
+  }
+
+  // === 7. Force relaxation (only over completed nodes; pending are fixed) ===
+  const movableNodes = Array.from(nodeById.values()).filter((n) => !n.fixed)
+  const N = movableNodes.length
+
+  if (N > 1) {
+    const seenPairs = new Set<string>()
+    const uniqueEdges: { a: GraphNode; b: GraphNode; restLen: number }[] = []
+    for (const e of edges) {
+      const k = e.sourceId < e.targetId ? `${e.sourceId}|${e.targetId}` : `${e.targetId}|${e.sourceId}`
+      if (seenPairs.has(k)) continue
+      seenPairs.add(k)
+      const a = nodeById.get(e.sourceId)!
+      const b = nodeById.get(e.targetId)!
+      if (a.fixed || b.fixed) continue
+      uniqueEdges.push({ a, b, restLen: 60 })
+    }
+
+    const ITER = N > 800 ? 40 : N > 400 ? 70 : 110
+    const REPEL = 1800
+    const ATTRACT = 0.05
+    const DAMPING = 0.65
+    const ANCHOR_PULL = 0.012
+
+    for (let iter = 0; iter < ITER; iter++) {
+      const alpha = Math.max(0.15, 1 - iter / ITER)
+
+      // Pairwise repulsion (movable nodes only)
+      for (let i = 0; i < N; i++) {
+        const a = movableNodes[i]
+        for (let j = i + 1; j < N; j++) {
+          const b = movableNodes[j]
+          const dx = b.x - a.x
+          const dy = b.y - a.y
+          let dist2 = dx * dx + dy * dy
+          if (dist2 < 4) dist2 = 4
+          const dist = Math.sqrt(dist2)
+          const sizeBoost = (a.type === 'request' ? 2.4 : 1) * (b.type === 'request' ? 2.4 : 1)
+          const force = (REPEL * sizeBoost) / dist2
+          const fx = (dx / dist) * force
+          const fy = (dy / dist) * force
+          a.vx -= fx
+          a.vy -= fy
+          b.vx += fx
+          b.vy += fy
+        }
+      }
+
+      // Edge attraction
+      for (const e of uniqueEdges) {
+        const dx = e.b.x - e.a.x
+        const dy = e.b.y - e.a.y
+        const dist = Math.sqrt(dx * dx + dy * dy) || 1
+        const force = ATTRACT * (dist - e.restLen)
+        const fx = (dx / dist) * force
+        const fy = (dy / dist) * force
+        e.a.vx += fx
+        e.a.vy += fy
+        e.b.vx -= fx
+        e.b.vy -= fy
+      }
+
+      // Anchor pull toward industry centroid (only for request nodes with anchor)
+      for (const n of movableNodes) {
+        if (n.ax !== undefined && n.ay !== undefined) {
+          n.vx += (n.ax - n.x) * ANCHOR_PULL
+          n.vy += (n.ay - n.y) * ANCHOR_PULL
+        }
+        n.x += n.vx * alpha
+        n.y += n.vy * alpha
+        n.vx *= DAMPING
+        n.vy *= DAMPING
+      }
+    }
+  }
+
+  // === 8. Place pending requests outside the completed graph boundary ===
+  // Done after force relaxation so the orbit radius reflects the cluster's
+  // visible footprint, not the pre-sim compact placement.
+  if (pendingRequests.length > 0) {
+    // Use every completed point, including miner hotkeys. This keeps pending
+    // requests outside the circle a viewer would draw around the completed
+    // request/miner constellation instead of only outside request nodes.
+    const completedBoundaryNodes = Array.from(nodeById.values()).filter(
+      (n) => !(n.type === 'request' && n.isPending)
+    )
+    const orbitAnchorNodes = completedBoundaryNodes.length > 0 ? completedBoundaryNodes : []
+
+    // Centroid of the completed constellation.
+    let cx = 0
+    let cy = 0
+    for (const n of orbitAnchorNodes) {
+      cx += n.x
+      cy += n.y
+    }
+    if (orbitAnchorNodes.length > 0) {
+      cx /= orbitAnchorNodes.length
+      cy /= orbitAnchorNodes.length
+    } else {
+      cx = 0
+      cy = 0
+    }
+
+    // Actual completed boundary. Include each node's rendered radius so the
+    // pending ring clears the outer edge of every completed request/miner.
+    let clusterEdge = 160
+    for (const n of orbitAnchorNodes) {
+      clusterEdge = Math.max(clusterEdge, Math.hypot(n.x - cx, n.y - cy) + renderedNodeRadius(n))
+    }
+    if (!Number.isFinite(clusterEdge) || clusterEdge < 1) clusterEdge = 160
+
+    // Pending request nodes render at roughly REQUEST_RADIUS. Keep the jitter
+    // outward-only so no pending node can drift back inside the completed
+    // boundary.
+    const orbitRadius = clusterEdge + REQUEST_RADIUS + PENDING_COMPLETED_BUFFER
+
+    pendingRequests.forEach((req, i) => {
+      const h = simpleHash(req.request_id)
+      // Evenly spaced base angles around the full circle. We start at -π/2 (top)
+      // and step by 2π / N so the ring reads as intentional.
+      const baseAngle = -Math.PI / 2 + (i / pendingRequests.length) * Math.PI * 2
+      // ±10° angular jitter. Just enough to feel organic, not mechanical.
+      const angleJitter = (((h >> 8) % 200) / 200 - 0.5) * (Math.PI / 9)
+      // Outward-only radial jitter. Prevents a mechanical ring while preserving
+      // the completed-boundary guarantee.
+      const radialJitter = ((h % 200) / 200) * 16
+      const angle = baseAngle + angleJitter
+      const r = orbitRadius + radialJitter
+      nodeById.set(`req:${req.request_id}`, {
+        id: `req:${req.request_id}`,
+        type: 'request',
+        x: cx + r * Math.cos(angle),
+        y: cy + r * Math.sin(angle),
+        vx: 0,
+        vy: 0,
+        label: req.request_id,
+        request: req,
+        leadCount: 0,
+        winCount: 0,
+        requestCount: 1,
+        industry: primaryIndustry(req),
+        isPending: true,
+        fixed: true,
+      })
+    })
+  }
+
+  return {
+    nodes: Array.from(nodeById.values()),
+    edges,
+    nodeById,
+    clusters,
+  }
+}
+
+interface CosmosProps {
+  requests: CosmosRequest[]
+  leads: CosmosConsensusLead[]
+  topMiners?: Set<string>
+  visibleNodeIds?: Set<string> | null
+  forceLabelIds?: Set<string> | null
+  emphasizedNodeIds?: Set<string> | null
+  onRequestActivate?: (request: CosmosRequest) => void
+  onMinerActivate?: (hotkey: string) => void
+}
+
+export function FulfillmentCosmos({
+  requests,
+  leads,
+  topMiners,
+  visibleNodeIds = null,
+  forceLabelIds = null,
+  emphasizedNodeIds = null,
+  onRequestActivate,
+  onMinerActivate,
+}: CosmosProps) {
+  const containerRef = useRef<HTMLDivElement>(null)
+  const svgRef = useRef<SVGSVGElement>(null)
+  const [size, setSize] = useState({ w: 800, h: 600 })
+  const [view, setView] = useState({ scale: 1, tx: 0, ty: 0 })
+  const [isDragging, setIsDragging] = useState(false)
+  const dragStart = useRef<{ x: number; y: number; tx: number; ty: number } | null>(null)
+  const [hoveredId, setHoveredId] = useState<string | null>(null)
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [computing, setComputing] = useState(true)
+  const [layout, setLayout] = useState<LayoutResult | null>(null)
+  const [filterKey, setFilterKey] = useState(0)
+
+  useEffect(() => {
+    const update = () => {
+      if (!containerRef.current) return
+      const rect = containerRef.current.getBoundingClientRect()
+      setSize({ w: rect.width, h: rect.height })
+    }
+    update()
+    const obs = new ResizeObserver(update)
+    if (containerRef.current) obs.observe(containerRef.current)
+    return () => obs.disconnect()
+  }, [])
+
+  useEffect(() => {
+    setComputing(true)
+    setFilterKey((k) => k + 1)
+    let cancelled = false
+    const id = window.setTimeout(() => {
+      if (cancelled) return
+      const result = computeLayout(requests, leads)
+      setLayout(result)
+      setComputing(false)
+    }, 10)
+    return () => {
+      cancelled = true
+      window.clearTimeout(id)
+    }
+  }, [requests, leads])
+
+  useEffect(() => {
+    if (!layout || layout.nodes.length === 0) return
+    if (size.w <= 0 || size.h <= 0) return
+    let minX = Infinity,
+      maxX = -Infinity,
+      minY = Infinity,
+      maxY = -Infinity
+    for (const n of layout.nodes) {
+      if (n.x < minX) minX = n.x
+      if (n.x > maxX) maxX = n.x
+      if (n.y < minY) minY = n.y
+      if (n.y > maxY) maxY = n.y
+    }
+    // 18% padding around the graph for premium breathing room
+    const padX = (maxX - minX) * 0.18 + 100
+    const padY = (maxY - minY) * 0.18 + 100
+    const gw = Math.max(1, maxX - minX + padX * 2)
+    const gh = Math.max(1, maxY - minY + padY * 2)
+    const scale = Math.min(size.w / gw, size.h / gh, 1.15)
+    const cx = (minX + maxX) / 2
+    const cy = (minY + maxY) / 2
+    setView({
+      scale,
+      tx: size.w / 2 - cx * scale,
+      ty: size.h / 2 - cy * scale,
+    })
+  }, [layout, size.w, size.h])
+
+  // Attach wheel via DOM addEventListener so we can opt out of passive (default in React 18+)
+  useEffect(() => {
+    const svg = svgRef.current
+    if (!svg) return
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault()
+      const rect = svg.getBoundingClientRect()
+      const mx = e.clientX - rect.left
+      const my = e.clientY - rect.top
+      setView((prev) => {
+        const factor = e.deltaY < 0 ? 1.12 : 1 / 1.12
+        const newScale = Math.max(0.15, Math.min(6, prev.scale * factor))
+        const k = newScale / prev.scale
+        return {
+          scale: newScale,
+          tx: mx - (mx - prev.tx) * k,
+          ty: my - (my - prev.ty) * k,
+        }
+      })
+    }
+    svg.addEventListener('wheel', onWheel, { passive: false })
+    return () => svg.removeEventListener('wheel', onWheel)
+  }, [])
+
+  const handleMouseDown = useCallback(
+    (e: React.MouseEvent) => {
+      if (e.button !== 0) return
+      const target = e.target as Element
+      if (target.closest('[data-node-id]')) return
+      setIsDragging(true)
+      setSelectedId(null)
+      dragStart.current = { x: e.clientX, y: e.clientY, tx: view.tx, ty: view.ty }
+    },
+    [view.tx, view.ty]
+  )
+
+  const handleMouseMove = useCallback(
+    (e: React.MouseEvent) => {
+      if (!isDragging) return
+      const start = dragStart.current
+      if (!start) return
+      const dx = e.clientX - start.x
+      const dy = e.clientY - start.y
+      setView((prev) => ({ ...prev, tx: start.tx + dx, ty: start.ty + dy }))
+    },
+    [isDragging]
+  )
+
+  const handleMouseUp = useCallback(() => {
+    setIsDragging(false)
+    dragStart.current = null
+  }, [])
+
+  const focusId = hoveredId || selectedId
+
+  const highlightedEdgeIdx = useMemo(() => {
+    if (!layout || !focusId) return null
+    const set = new Set<number>()
+    layout.edges.forEach((e, idx) => {
+      if (e.sourceId === focusId || e.targetId === focusId) set.add(idx)
+    })
+    return set
+  }, [layout, focusId])
+
+  const connectedNodes = useMemo(() => {
+    if (!layout || !focusId) return null
+    const set = new Set<string>([focusId])
+    for (const e of layout.edges) {
+      if (e.sourceId === focusId) set.add(e.targetId)
+      if (e.targetId === focusId) set.add(e.sourceId)
+    }
+    return set
+  }, [layout, focusId])
+
+  const stats = useMemo(() => {
+    if (!layout) return null
+    let requestNodes = 0
+    let minerNodes = 0
+    for (const n of layout.nodes) {
+      if (visibleNodeIds && !visibleNodeIds.has(n.id)) continue
+      if (n.type === 'request') requestNodes++
+      else minerNodes++
+    }
+    let totalEdges = 0
+    let fulfilledEdges = 0
+    for (const e of layout.edges) {
+      if (visibleNodeIds && (!visibleNodeIds.has(e.sourceId) || !visibleNodeIds.has(e.targetId))) continue
+      totalEdges += e.count
+      fulfilledEdges += e.winCount
+    }
+    return { requestNodes, minerNodes, totalLeads: totalEdges, fulfilledLeads: fulfilledEdges }
+  }, [layout, visibleNodeIds])
+
+  const isNodeVisible = useCallback(
+    (id: string) => (visibleNodeIds ? visibleNodeIds.has(id) : true),
+    [visibleNodeIds]
+  )
+
+  return (
+    <div
+      ref={containerRef}
+      className="relative w-full h-full overflow-hidden rounded-xl border border-[var(--surface-border)] bg-[var(--surface-base)]"
+    >
+      <svg
+        ref={svgRef}
+        width={size.w}
+        height={size.h}
+        className={isDragging ? 'cursor-grabbing' : 'cursor-grab'}
+        onMouseDown={handleMouseDown}
+        onMouseMove={handleMouseMove}
+        onMouseUp={handleMouseUp}
+        onMouseLeave={handleMouseUp}
+      >
+        <defs>
+          {/* Each gradient is a soft inner highlight → flat base. Highlights are
+              a sliver brighter than the base so nodes feel slightly dimensional
+              without looking glossy or "designed". */}
+          <radialGradient id="cosmos-grad-completed" cx="50%" cy="50%" r="50%">
+            <stop offset="0%" stopColor="#fbf6ec" stopOpacity="1" />
+            <stop offset="100%" stopColor={COLOR_REQUEST_COMPLETED} stopOpacity="1" />
+          </radialGradient>
+          <radialGradient id="cosmos-grad-pending" cx="50%" cy="50%" r="50%">
+            <stop offset="0%" stopColor="#e3b682" stopOpacity="1" />
+            <stop offset="100%" stopColor={COLOR_REQUEST_PENDING} stopOpacity="1" />
+          </radialGradient>
+          <radialGradient id="cosmos-grad-miner-win" cx="50%" cy="50%" r="50%">
+            <stop offset="0%" stopColor="#d4b889" stopOpacity="1" />
+            <stop offset="100%" stopColor={COLOR_MINER_WINNING} stopOpacity="1" />
+          </radialGradient>
+          <radialGradient id="cosmos-grad-miner" cx="50%" cy="50%" r="50%">
+            <stop offset="0%" stopColor="#7a766e" stopOpacity="1" />
+            <stop offset="100%" stopColor={COLOR_MINER} stopOpacity="1" />
+          </radialGradient>
+        </defs>
+
+        <g
+          key={filterKey}
+          transform={`translate(${view.tx} ${view.ty}) scale(${view.scale})`}
+          className="cosmos-fade-in"
+        >
+          {/* Industry clustering is preserved in the layout math (anchor pull
+              keeps same-industry requests near each other) but we don't render
+              labels or boundaries, which keeps the cosmos uncluttered. */}
+
+          {/* Edges */}
+          {layout &&
+            layout.edges.map((edge, i) => {
+              const s = layout.nodeById.get(edge.sourceId)
+              const t = layout.nodeById.get(edge.targetId)
+              if (!s || !t) return null
+              if (!isNodeVisible(s.id) || !isNodeVisible(t.id)) return null
+              const isFocused = highlightedEdgeIdx?.has(i) ?? false
+              const dim = focusId !== null && !isFocused
+              const hasWin = edge.winCount > 0
+              const stroke = hasWin ? COLOR_WIN_EDGE : COLOR_LOSS_EDGE
+              // Logarithmic thickness based on lead count
+              const baseWidth = 0.5 + Math.log2(edge.count + 1) * 0.75
+              const width = isFocused ? baseWidth * 1.6 : baseWidth
+              const opacity = hasWin
+                ? isFocused
+                  ? 0.95
+                  : dim
+                    ? 0.12
+                    : 0.7
+                : isFocused
+                  ? 0.7
+                  : dim
+                    ? 0.05
+                    : 1
+
+              const dx = t.x - s.x
+              const dy = t.y - s.y
+              const dist = Math.sqrt(dx * dx + dy * dy) || 1
+              // Subtle curve for visual rhythm
+              const curveAmount = Math.min(dist * 0.12, 18)
+              const mx = (s.x + t.x) / 2
+              const my = (s.y + t.y) / 2
+              const nx = -dy / dist
+              const ny = dx / dist
+              // Curve direction influenced by edge index (alternating) for separation
+              const dir = (i % 2 === 0 ? 1 : -1) * (edge.count > 1 ? 1 : 0.4)
+              const cx = mx + nx * curveAmount * dir
+              const cy = my + ny * curveAmount * dir
+
+              return (
+                <path
+                  key={i}
+                  d={`M ${s.x} ${s.y} Q ${cx} ${cy} ${t.x} ${t.y}`}
+                  fill="none"
+                  stroke={stroke}
+                  strokeOpacity={opacity}
+                  strokeWidth={width}
+                  strokeLinecap="round"
+                >
+                  <title>
+                    {`${edge.count} lead${edge.count === 1 ? '' : 's'}${
+                      edge.winCount > 0 ? ` · ${edge.winCount} won` : ''
+                    }`}
+                  </title>
+                </path>
+              )
+            })}
+
+          {/* Nodes */}
+          {layout &&
+            layout.nodes.map((node) => {
+              if (!isNodeVisible(node.id)) return null
+              const isFocused = focusId === node.id
+              const isEmphasized = emphasizedNodeIds?.has(node.id) ?? false
+              const isConnected = connectedNodes?.has(node.id) ?? false
+              const dim = focusId !== null && !isConnected
+              const isRequest = node.type === 'request'
+              const status = node.request?.status || ''
+              const baseR = renderedNodeRadius(node)
+              const isTopMiner = !isRequest && topMiners?.has(node.hotkey || '')
+              const isPending = isRequest && PENDING_STATUSES.has(status)
+
+              let fillRef: string
+              if (isRequest) {
+                fillRef = isPending ? 'url(#cosmos-grad-pending)' : 'url(#cosmos-grad-completed)'
+              } else if (node.winCount && node.winCount > 0) {
+                fillRef = 'url(#cosmos-grad-miner-win)'
+              } else {
+                fillRef = 'url(#cosmos-grad-miner)'
+              }
+
+              const opacity = dim ? 0.18 : 1
+              const shouldShowLabel =
+                isRequest && (isFocused || (forceLabelIds?.has(node.id) ?? false))
+
+              const activate = () => {
+                if (isRequest && node.request && onRequestActivate) {
+                  onRequestActivate(node.request)
+                  return
+                }
+                if (!isRequest && node.hotkey && onMinerActivate) {
+                  onMinerActivate(node.hotkey)
+                  return
+                }
+                setSelectedId(selectedId === node.id ? null : node.id)
+              }
+              const accessibleLabel = isRequest
+                ? `Request ${node.label.slice(0, 8)}, ${node.leadCount} leads, ${node.winCount} won`
+                : `Miner ${truncateHotkey(node.hotkey || '')}, ${node.leadCount} leads, ${node.winCount} won`
+
+              return (
+                <g
+                  key={node.id}
+                  data-node-id={node.id}
+                  className={isPending ? 'pending-breath' : undefined}
+                  style={{ cursor: 'pointer', opacity, transition: 'opacity 200ms ease-out' }}
+                  role="button"
+                  tabIndex={0}
+                  aria-label={accessibleLabel}
+                  onMouseEnter={() => setHoveredId(node.id)}
+                  onMouseLeave={() => setHoveredId(null)}
+                  onFocus={() => setHoveredId(node.id)}
+                  onBlur={() => setHoveredId(null)}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    activate()
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault()
+                      e.stopPropagation()
+                      activate()
+                    }
+                  }}
+                >
+                  {isTopMiner && (
+                    <circle
+                      cx={node.x}
+                      cy={node.y}
+                      r={baseR + 3}
+                      fill="none"
+                      stroke={COLOR_TOP_RING}
+                      strokeOpacity={isFocused || isEmphasized ? 1 : 0.85}
+                      strokeWidth={1.4}
+                    />
+                  )}
+                  {isEmphasized && !isFocused && (
+                    <circle
+                      cx={node.x}
+                      cy={node.y}
+                      r={baseR + (isTopMiner ? 7 : 5)}
+                      fill="none"
+                      stroke="#ffffff"
+                      strokeOpacity={0.75}
+                      strokeWidth={1.2}
+                    />
+                  )}
+                  {isFocused && (
+                    <circle
+                      cx={node.x}
+                      cy={node.y}
+                      r={baseR + (isTopMiner ? 6 : 5)}
+                      fill="none"
+                      stroke={isRequest ? (isPending ? COLOR_REQUEST_PENDING : COLOR_REQUEST_COMPLETED) : COLOR_MINER_WINNING}
+                      strokeOpacity={0.55}
+                      strokeWidth={1}
+                    />
+                  )}
+                  <circle
+                    cx={node.x}
+                    cy={node.y}
+                    r={baseR}
+                    fill={fillRef}
+                    stroke={
+                      isFocused || isEmphasized
+                        ? '#ffffff'
+                        : isRequest
+                          ? 'rgba(255,255,255,0.22)'
+                          : 'rgba(255,255,255,0.10)'
+                    }
+                    strokeWidth={isFocused || isEmphasized ? 1.4 : 0.6}
+                    style={{ transition: 'stroke 160ms ease-out, stroke-width 160ms ease-out' }}
+                  >
+                    <title>
+                      {isRequest
+                        ? `${asText(node.request?.icp_details?.industry) || 'Request'} · ${
+                            node.label.slice(0, 8)
+                          } · ${node.leadCount} leads · ${node.winCount} won`
+                        : `${truncateHotkey(node.hotkey || '')} · ${node.leadCount} leads · ${
+                            node.winCount
+                          } won across ${node.requestCount} request${
+                            node.requestCount === 1 ? '' : 's'
+                          }`}
+                    </title>
+                  </circle>
+                  {shouldShowLabel && (
+                    <text
+                      x={node.x}
+                      y={node.y - baseR - 8}
+                      textAnchor="middle"
+                      style={{
+                        fontSize: 11 / view.scale,
+                        fontFamily: 'var(--font-sans), sans-serif',
+                        fontWeight: 500,
+                        fill: '#f5f0e8',
+                        stroke: 'rgba(8, 8, 10, 0.94)',
+                        strokeWidth: 3.5 / view.scale,
+                        strokeLinejoin: 'round',
+                        paintOrder: 'stroke fill',
+                        pointerEvents: 'none',
+                      }}
+                    >
+                      {industryLabel(node.request?.icp_details?.industry, 2, 30) ||
+                        node.label.slice(0, 8)}
+                    </text>
+                  )}
+                  {!isRequest && (isFocused || isEmphasized) && (
+                    <text
+                      x={node.x}
+                      y={node.y + baseR + 9}
+                      textAnchor="middle"
+                      style={{
+                        fontSize: 10 / view.scale,
+                        fontFamily: 'var(--font-mono), monospace',
+                        fill: '#e8e1d4',
+                        stroke: 'rgba(8, 8, 10, 0.94)',
+                        strokeWidth: 3 / view.scale,
+                        strokeLinejoin: 'round',
+                        paintOrder: 'stroke fill',
+                        pointerEvents: 'none',
+                      }}
+                    >
+                      {truncateHotkey(node.hotkey || '')}
+                    </text>
+                  )}
+                </g>
+              )
+            })}
+        </g>
+      </svg>
+
+      {/* Loading skeleton: orbital dots */}
+      {computing && (
+        <div className="absolute inset-0 flex items-center justify-center bg-black/40 pointer-events-none">
+          <div className="relative w-32 h-32">
+            {Array.from({ length: 12 }).map((_, i) => {
+              const angle = (i / 12) * Math.PI * 2
+              const r = 56
+              const x = 64 + r * Math.cos(angle)
+              const y = 64 + r * Math.sin(angle)
+              return (
+                <div
+                  key={i}
+                  className="absolute w-1.5 h-1.5 rounded-full orbit-dot"
+                  style={{
+                    left: `${x - 3}px`,
+                    top: `${y - 3}px`,
+                    animationDelay: `${i * 100}ms`,
+                    background: 'rgba(201, 169, 110, 0.8)',
+                  }}
+                />
+              )
+            })}
+            <div className="absolute inset-0 flex items-center justify-center">
+              <div className="text-[10px] uppercase tracking-[0.16em] text-[color:var(--text-tertiary)] font-medium">
+                Mapping cosmos
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Legend chip: warm neutral surface, gold accent for "fulfilled" */}
+      {!computing && stats && (
+        <div className="absolute bottom-3 left-3 flex flex-wrap items-center gap-3 text-[10px] bg-[rgba(16,16,19,0.78)] backdrop-blur-md rounded-md px-3 py-1.5 border border-[var(--surface-border)] pointer-events-none font-mono text-[color:var(--text-secondary)]">
+          <span className="flex items-center gap-1.5">
+            <span
+              className="inline-block w-1.5 h-1.5 rounded-full"
+              style={{ background: COLOR_REQUEST_PENDING }}
+            />
+            <span>Pending</span>
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span
+              className="inline-block w-1.5 h-1.5 rounded-full"
+              style={{ background: COLOR_REQUEST_COMPLETED }}
+            />
+            <span>Completed</span>
+          </span>
+          <span className="opacity-30">·</span>
+          <span className="flex items-center gap-1.5">
+            <span className="inline-block w-3 h-0.5 rounded-full" style={{ background: COLOR_WIN_EDGE }} />
+            <span>Winning lead</span>
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span
+              className="inline-block w-3 h-0.5 rounded-full"
+              style={{ background: 'rgba(245, 240, 232, 0.3)' }}
+            />
+            <span>Submitted lead</span>
+          </span>
+          <span className="opacity-30">·</span>
+          <span className="flex items-center gap-1.5">
+            <span
+              className="inline-block w-1.5 h-1.5 rounded-full border"
+              style={{ borderColor: COLOR_TOP_RING, background: 'transparent' }}
+            />
+            <span>Top miner</span>
+          </span>
+          <span className="opacity-30">·</span>
+          <span>
+            <span className="text-[color:var(--text-primary)]">{stats.requestNodes}</span> req ·{' '}
+            <span className="text-[color:var(--text-primary)]">{stats.minerNodes}</span> miners ·{' '}
+            <span className="text-[color:var(--text-primary)]">{stats.totalLeads}</span> leads ·{' '}
+            <span style={{ color: COLOR_WIN_EDGE }}>{stats.fulfilledLeads}</span> fulfilled
+          </span>
+        </div>
+      )}
+
+    </div>
+  )
+}

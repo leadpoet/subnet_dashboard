@@ -35,7 +35,7 @@ interface MinerTrackerProps {
 
 export function MinerTracker({
   minerStats,
-  activeMiners,
+  activeMiners: _activeMiners,
   metagraph,
   externalSelectedMiner,
   onMinerSelected,

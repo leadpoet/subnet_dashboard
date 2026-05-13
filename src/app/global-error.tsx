@@ -7,6 +7,10 @@ export default function GlobalError({
   error: Error & { digest?: string }
   reset: () => void
 }) {
+  if (typeof window !== 'undefined') {
+    // Log to console for client-side debugging / production telemetry pipelines.
+    console.error('[GlobalError] unrecoverable error:', error)
+  }
   return (
     <html>
       <body>

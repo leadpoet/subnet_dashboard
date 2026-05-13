@@ -601,38 +601,6 @@ function calculateRejectionReasonsFromEpochs(
     .sort((a, b) => b.count - a.count)
 }
 
-// OLD: Calculate rejection reasons from miner stats (all-time)
-function calculateRejectionReasons(
-  minerStats: Record<string, PrecalcMinerStats>,
-  activeMiners: Set<string> | null
-): RejectionReasonAggregated[] {
-  const reasonCounts = new Map<string, number>()
-
-  for (const [hotkey, stats] of Object.entries(minerStats)) {
-    if (activeMiners && !activeMiners.has(hotkey)) continue
-
-    const reasons = stats.rejection_reasons_raw || {}
-    for (const [reason, count] of Object.entries(reasons)) {
-      const cleanedReason = cleanRejectionReason(reason)
-      // Skip excluded reasons
-      const lowerReason = cleanedReason.toLowerCase()
-      if (lowerReason.includes('llm error') || lowerReason.includes('validation error') || lowerReason === 'unknown') {
-        continue
-      }
-      reasonCounts.set(cleanedReason, (reasonCounts.get(cleanedReason) || 0) + count)
-    }
-  }
-
-  const total = Array.from(reasonCounts.values()).reduce((a, b) => a + b, 0)
-  return Array.from(reasonCounts.entries())
-    .map(([reason, count]) => ({
-      reason,
-      count,
-      percentage: total > 0 ? Math.round((count / total) * 1000) / 10 : 0,
-    }))
-    .sort((a, b) => b.count - a.count)
-}
-
 function calculateIncentiveData(
   minerStats: Record<string, PrecalcMinerStats>,
   metagraph: MetagraphData | null
