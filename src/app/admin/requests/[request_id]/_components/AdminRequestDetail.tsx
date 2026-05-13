@@ -302,6 +302,18 @@ function Stat({
 // =================================================================
 // Winners tab
 // =================================================================
+//
+// Layout, top to bottom:
+//   1. WinnersTable           — Excel-style table, 18 columns,
+//                               one row per winning lead
+//   2. PerLeadIntentSignals   — for each lead, the verified
+//                               intent signals it earned credit
+//                               for, with full evidence (URL,
+//                               date, snippet, matched ICP signal)
+//
+// The table is the scannable overview ("show me everyone you
+// delivered"); the per-lead block is the evidence dive ("how do
+// I justify each one to the client").
 
 function WinnersList({ winners }: { winners: AdminWinningLead[] }) {
   if (winners.length === 0) {
@@ -313,317 +325,391 @@ function WinnersList({ winners }: { winners: AdminWinningLead[] }) {
           background: 'var(--surface)',
         }}
       >
-        <div
-          className="text-sm"
-          style={{ color: 'var(--text-secondary)' }}
-        >
+        <div className="text-sm" style={{ color: 'var(--text-secondary)' }}>
           No winning leads yet for this chain.
         </div>
       </div>
     )
   }
   return (
-    <div className="space-y-3">
-      {winners.map((w, i) => (
-        <WinnerCard key={w.consensus.consensus_id} winner={w} rank={i + 1} />
-      ))}
+    <div className="space-y-8">
+      <WinnersTable winners={winners} />
+      <PerLeadIntentSignals winners={winners} />
     </div>
   )
 }
 
-function WinnerCard({
-  winner,
-  rank,
+// -----------------------------------------------------------------
+// WinnersTable
+// -----------------------------------------------------------------
+// Column set is fixed by the operator. Total table width sits
+// around 3000px, so the wrapper enables horizontal scroll and the
+// row-index column is sticky-left so the eye doesn't lose its
+// place when scanning right.
+
+interface TableCol {
+  key: string
+  label: string
+  // Tailwind min-width class. Cells wrap when content exceeds it.
+  minW: string
+  // True for long-form cells where we want soft-wrap with tighter
+  // line height (Description, Intent Details).
+  longForm?: boolean
+  // Render function. Returns a React node, never raw HTML strings.
+  cell: (w: AdminWinningLead) => React.ReactNode
+}
+
+function dashIfEmpty(v: string | null | undefined): React.ReactNode {
+  if (!v) return <span style={{ color: 'var(--text-tertiary)' }}>—</span>
+  return v
+}
+
+function ExtLink({
+  href,
+  children,
 }: {
-  winner: AdminWinningLead
-  rank: number
+  href: string
+  children: React.ReactNode
 }) {
-  const [expanded, setExpanded] = useState(rank === 1)
-  const { consensus, lead } = winner
-
-  // Compose the location string from the best available fields.
-  // company_hq_* is where the LEAD is anchored; city/state/country
-  // is where the PERSON is. We surface both.
-  const personLoc = [lead?.city, lead?.state, lead?.country]
-    .filter(Boolean)
-    .join(', ')
-  const companyLoc = [
-    lead?.company_hq_city,
-    lead?.company_hq_state,
-    lead?.company_hq_country,
-  ]
-    .filter(Boolean)
-    .join(', ')
-
   return (
-    <div
-      className="rounded-xl border overflow-hidden card-lift"
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="transition-colors hover:text-gold break-all"
+      style={{ color: 'var(--text-primary)' }}
+    >
+      {children}
+    </a>
+  )
+}
+
+const TABLE_COLUMNS: TableCol[] = [
+  {
+    key: 'name',
+    label: 'Name',
+    minW: 'min-w-[180px]',
+    cell: (w) => dashIfEmpty(w.lead?.full_name),
+  },
+  {
+    key: 'email',
+    label: 'Email',
+    minW: 'min-w-[220px]',
+    cell: (w) =>
+      w.lead?.email ? (
+        <ExtLink href={`mailto:${w.lead.email}`}>{w.lead.email}</ExtLink>
+      ) : (
+        dashIfEmpty(null)
+      ),
+  },
+  {
+    key: 'role',
+    label: 'Role',
+    minW: 'min-w-[170px]',
+    cell: (w) => dashIfEmpty(w.lead?.role),
+  },
+  {
+    key: 'company',
+    label: 'Company',
+    minW: 'min-w-[180px]',
+    cell: (w) => dashIfEmpty(w.lead?.business),
+  },
+  {
+    key: 'linkedin',
+    label: 'LinkedIn',
+    minW: 'min-w-[220px]',
+    cell: (w) =>
+      w.lead?.linkedin_url ? (
+        <ExtLink href={w.lead.linkedin_url}>{w.lead.linkedin_url}</ExtLink>
+      ) : (
+        dashIfEmpty(null)
+      ),
+  },
+  {
+    key: 'website',
+    label: 'Website',
+    minW: 'min-w-[220px]',
+    cell: (w) =>
+      w.lead?.company_website ? (
+        <ExtLink href={w.lead.company_website}>{w.lead.company_website}</ExtLink>
+      ) : (
+        dashIfEmpty(null)
+      ),
+  },
+  {
+    key: 'company_linkedin',
+    label: 'Company LinkedIn',
+    minW: 'min-w-[220px]',
+    cell: (w) =>
+      w.lead?.company_linkedin ? (
+        <ExtLink href={w.lead.company_linkedin}>{w.lead.company_linkedin}</ExtLink>
+      ) : (
+        dashIfEmpty(null)
+      ),
+  },
+  {
+    key: 'industry',
+    label: 'Industry',
+    minW: 'min-w-[140px]',
+    cell: (w) => dashIfEmpty(w.lead?.industry),
+  },
+  {
+    key: 'sub_industry',
+    label: 'Sub Industry',
+    minW: 'min-w-[140px]',
+    cell: (w) => dashIfEmpty(w.lead?.sub_industry),
+  },
+  {
+    key: 'city',
+    label: 'City',
+    minW: 'min-w-[120px]',
+    cell: (w) => dashIfEmpty(w.lead?.city),
+  },
+  {
+    key: 'state',
+    label: 'State',
+    minW: 'min-w-[120px]',
+    cell: (w) => dashIfEmpty(w.lead?.state),
+  },
+  {
+    key: 'country',
+    label: 'Country',
+    minW: 'min-w-[120px]',
+    cell: (w) => dashIfEmpty(w.lead?.country),
+  },
+  {
+    key: 'hq_state',
+    label: 'HQ State',
+    minW: 'min-w-[120px]',
+    cell: (w) => dashIfEmpty(w.lead?.company_hq_state),
+  },
+  {
+    key: 'hq_country',
+    label: 'HQ Country',
+    minW: 'min-w-[120px]',
+    cell: (w) => dashIfEmpty(w.lead?.company_hq_country),
+  },
+  {
+    key: 'employee_count',
+    label: 'Employee Count',
+    minW: 'min-w-[110px]',
+    cell: (w) => dashIfEmpty(w.lead?.employee_count),
+  },
+  {
+    key: 'description',
+    label: 'Description',
+    minW: 'min-w-[320px]',
+    longForm: true,
+    cell: (w) => dashIfEmpty(w.lead?.description),
+  },
+  {
+    key: 'intent_details',
+    label: 'Intent Details',
+    minW: 'min-w-[340px]',
+    longForm: true,
+    cell: (w) => dashIfEmpty(w.consensus.intent_details),
+  },
+  {
+    key: 'phone',
+    label: 'Phone',
+    minW: 'min-w-[140px]',
+    cell: (w) => dashIfEmpty(w.lead?.phone ?? null),
+  },
+]
+
+function WinnersTable({ winners }: { winners: AdminWinningLead[] }) {
+  return (
+    <section
+      className="rounded-xl border overflow-hidden"
       style={{
         borderColor: 'var(--surface-border)',
         background: 'var(--surface)',
       }}
     >
-      <button
-        onClick={() => setExpanded((v) => !v)}
-        className="w-full text-left px-5 py-4 hover-bg-warm transition-colors"
+      <header
+        className="flex items-center justify-between gap-4 border-b px-5 py-3.5"
+        style={{ borderColor: 'var(--surface-border)' }}
       >
-        <div className="flex items-start gap-4">
-          <div
-            className="flex-shrink-0 mt-0.5 flex items-center justify-center rounded-full w-6 h-6 text-[10px] font-medium border"
-            style={{
-              borderColor:
-                rank === 1
-                  ? 'rgba(201, 169, 110, 0.45)'
-                  : 'var(--surface-border-strong)',
-              background:
-                rank === 1
-                  ? 'rgba(201, 169, 110, 0.16)'
-                  : 'var(--surface-elevated)',
-              color: rank === 1 ? '#c9a96e' : 'var(--text-secondary)',
-            }}
-          >
-            {rank === 1 ? <Crown className="h-3 w-3" /> : rank}
-          </div>
-          <div className="min-w-0 flex-1">
-            <div className="flex items-baseline gap-2 flex-wrap">
-              <h3
-                className="font-medium truncate"
-                style={{ color: 'var(--text-primary)' }}
-              >
-                {lead?.business || (
-                  <span style={{ color: 'var(--text-tertiary)' }}>
-                    (no business name)
-                  </span>
-                )}
-              </h3>
-              {lead?.industry && (
-                <span
-                  className="text-[11px]"
-                  style={{ color: 'var(--text-tertiary)' }}
-                >
-                  {lead.industry}
-                  {lead.sub_industry ? ` · ${lead.sub_industry}` : ''}
-                </span>
-              )}
-            </div>
-            <div
-              className="mt-1 flex items-center gap-x-3 gap-y-1 text-xs flex-wrap"
-              style={{ color: 'var(--text-secondary)' }}
-            >
-              {lead?.full_name && (
-                <span className="inline-flex items-center gap-1.5">
-                  <User className="h-3 w-3 opacity-70" />
-                  {lead.full_name}
-                  {lead.role ? <span className="opacity-60">· {lead.role}</span> : null}
-                </span>
-              )}
-              {lead?.email && (
-                <a
-                  href={`mailto:${lead.email}`}
-                  className="inline-flex items-center gap-1.5 hover:text-gold transition-colors truncate"
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  <Mail className="h-3 w-3 opacity-70" />
-                  {lead.email}
-                </a>
-              )}
-              {(personLoc || companyLoc) && (
-                <span className="inline-flex items-center gap-1.5">
-                  <MapPin className="h-3 w-3 opacity-70" />
-                  {personLoc || companyLoc}
-                </span>
-              )}
-            </div>
-          </div>
-          <div className="hidden sm:flex items-center gap-4 flex-shrink-0">
-            <div className="text-right">
-              <div
-                className="text-[10px] uppercase tracking-[0.14em]"
-                style={{ color: 'var(--text-tertiary)' }}
-              >
-                Score
-              </div>
-              <div
-                className="text-sm font-medium tabular-nums"
-                style={{ color: 'var(--text-primary)' }}
-              >
-                {formatScore(consensus.consensus_final_score)}
-              </div>
-            </div>
-            <div className="text-right">
-              <div
-                className="text-[10px] uppercase tracking-[0.14em]"
-                style={{ color: 'var(--text-tertiary)' }}
-              >
-                Reward
-              </div>
-              <div className="text-sm font-medium tabular-nums text-gold">
-                {formatRewardPct(consensus.reward_pct)}
-              </div>
-            </div>
-          </div>
-          <ChevronDown
-            className={cn(
-              'h-4 w-4 flex-shrink-0 transition-transform mt-1',
-              expanded && 'rotate-180',
-            )}
-            style={{ color: 'var(--text-tertiary)' }}
-          />
+        <div className="flex items-baseline gap-2">
+          <h2 className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
+            Winning leads
+          </h2>
+          <span className="tabular-nums text-xs" style={{ color: 'var(--text-tertiary)' }}>
+            {winners.length}
+          </span>
         </div>
-      </button>
-
-      {expanded && (
-        <div
-          className="border-t px-5 py-5 space-y-5"
-          style={{ borderColor: 'var(--surface-border)' }}
+        <span
+          className="hidden sm:inline-flex items-center gap-1.5 text-[10px] uppercase tracking-[0.14em]"
+          style={{ color: 'var(--text-tertiary)' }}
         >
-          {/* Lead body */}
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-            <div className="lg:col-span-2 space-y-4">
-              <FieldGroup title="Lead">
-                <Field label="Business" value={lead?.business} />
-                <Field label="Industry" value={[lead?.industry, lead?.sub_industry].filter(Boolean).join(' · ')} />
-                <Field label="Employee count" value={lead?.employee_count} />
-                <Field
-                  label="HQ"
-                  value={companyLoc || undefined}
-                />
-                <Field
-                  label="Website"
-                  value={lead?.company_website}
-                  link={lead?.company_website}
-                  icon={<Globe className="h-3 w-3" />}
-                />
-                <Field
-                  label="Company LinkedIn"
-                  value={lead?.company_linkedin}
-                  link={lead?.company_linkedin}
-                  icon={<Linkedin className="h-3 w-3" />}
-                />
-              </FieldGroup>
-              <FieldGroup title="Contact">
-                <Field label="Name" value={lead?.full_name} />
-                <Field label="Role" value={lead?.role} />
-                <Field
-                  label="Type · seniority"
-                  value={[lead?.role_type, lead?.seniority].filter(Boolean).join(' · ')}
-                />
-                <Field
-                  label="Email"
-                  value={lead?.email}
-                  link={lead?.email ? `mailto:${lead.email}` : undefined}
-                  icon={<Mail className="h-3 w-3" />}
-                />
-                <Field
-                  label="Phone"
-                  value={lead?.phone || undefined}
-                />
-                <Field
-                  label="LinkedIn"
-                  value={lead?.linkedin_url}
-                  link={lead?.linkedin_url}
-                  icon={<Linkedin className="h-3 w-3" />}
-                />
-                <Field
-                  label="Location"
-                  value={personLoc || undefined}
-                />
-              </FieldGroup>
-              {lead?.description && (
-                <FieldGroup title="Company description">
-                  <p
-                    className="text-sm leading-relaxed whitespace-pre-line"
-                    style={{ color: 'var(--text-secondary)' }}
-                  >
-                    {lead.description}
-                  </p>
-                </FieldGroup>
-              )}
-            </div>
+          <ChevronRight className="h-3 w-3" /> Scroll horizontally for more
+        </span>
+      </header>
 
-            <div className="space-y-4">
-              <FieldGroup title="Scoring">
-                <Field
-                  label="Final score"
-                  value={formatScore(consensus.consensus_final_score)}
-                  mono
-                />
-                <Field
-                  label="Intent signal"
-                  value={formatScore(consensus.consensus_intent_signal_final)}
-                  mono
-                />
-                <Field
-                  label="Rep score"
-                  value={formatScore(consensus.consensus_rep_score, 0)}
-                  mono
-                />
-                <Field
-                  label="Reward / epoch"
-                  value={formatRewardPct(consensus.reward_pct)}
-                  mono
-                />
-                <Field
-                  label="Validators"
-                  value={consensus.num_validators?.toString()}
-                  mono
-                />
-                <Field
-                  label="Computed"
-                  value={formatDateTime(consensus.computed_at)}
-                />
-              </FieldGroup>
-              <FieldGroup title="Verification">
-                <CheckRow label="ICP fit (Tier 1)" passed={consensus.consensus_icp_fit} />
-                <CheckRow label="Tier 2 (data accuracy)" passed={consensus.consensus_tier2_passed} />
-                <CheckRow label="Email" passed={consensus.consensus_email_verified} />
-                <CheckRow label="Person (LinkedIn)" passed={consensus.consensus_person_verified} />
-                <CheckRow label="Company" passed={consensus.consensus_company_verified} />
-                <CheckRow label="Decision-maker" passed={consensus.consensus_decision_maker} />
-              </FieldGroup>
-              <FieldGroup title="Source">
-                <Field
-                  label="Miner"
-                  value={shortHotkey(consensus.miner_hotkey)}
-                  copy={consensus.miner_hotkey}
-                  mono
-                />
-                <Field
-                  label="Lead ID"
-                  value={consensus.lead_id.slice(0, 8) + '…'}
-                  copy={consensus.lead_id}
-                  mono
-                />
-              </FieldGroup>
-            </div>
-          </div>
-
-          {/* Intent details + breakdown */}
-          {consensus.intent_details && (
-            <FieldGroup
-              title="Intent details (client-facing)"
-              accentIcon={<Sparkles className="h-3 w-3 text-gold" />}
-            >
-              <p
-                className="text-sm leading-relaxed whitespace-pre-line"
-                style={{ color: 'var(--text-primary)' }}
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm border-collapse">
+          <thead>
+            <tr style={{ background: 'var(--surface-elevated)' }}>
+              <th
+                scope="col"
+                className="sticky left-0 z-10 px-3 py-2.5 text-left text-[10px] uppercase tracking-[0.14em] font-medium border-b border-r whitespace-nowrap"
+                style={{
+                  background: 'var(--surface-elevated)',
+                  borderColor: 'var(--surface-border)',
+                  color: 'var(--text-tertiary)',
+                  minWidth: '44px',
+                  width: '44px',
+                }}
               >
-                {consensus.intent_details}
-              </p>
-            </FieldGroup>
-          )}
-
-          <IntentSignalsPanel
-            mapping={consensus.intent_signal_mapping}
-            breakdown={consensus.intent_breakdown}
-          />
-        </div>
-      )}
-    </div>
+                #
+              </th>
+              {TABLE_COLUMNS.map((col) => (
+                <th
+                  key={col.key}
+                  scope="col"
+                  className={cn(
+                    'px-3 py-2.5 text-left text-[10px] uppercase tracking-[0.14em] font-medium border-b whitespace-nowrap',
+                    col.minW,
+                  )}
+                  style={{
+                    background: 'var(--surface-elevated)',
+                    borderColor: 'var(--surface-border)',
+                    color: 'var(--text-tertiary)',
+                  }}
+                >
+                  {col.label}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {winners.map((w, idx) => (
+              <tr key={w.consensus.consensus_id} className="hover-bg-warm transition-colors">
+                <td
+                  className="sticky left-0 z-[5] px-3 py-3 border-b border-r tabular-nums text-xs align-top"
+                  style={{
+                    background: 'var(--surface)',
+                    borderColor: 'var(--surface-border)',
+                    color: 'var(--text-tertiary)',
+                  }}
+                >
+                  {idx + 1}
+                </td>
+                {TABLE_COLUMNS.map((col) => (
+                  <td
+                    key={col.key}
+                    className={cn(
+                      'px-3 py-3 border-b align-top',
+                      col.longForm
+                        ? 'text-[12px] leading-relaxed whitespace-pre-line'
+                        : 'whitespace-normal break-words',
+                      col.minW,
+                    )}
+                    style={{
+                      borderColor: 'var(--surface-border)',
+                      color: 'var(--text-primary)',
+                      maxWidth: col.longForm ? '420px' : '280px',
+                    }}
+                  >
+                    {col.cell(w)}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
   )
 }
 
-function IntentSignalsPanel({
+// -----------------------------------------------------------------
+// PerLeadIntentSignals
+// -----------------------------------------------------------------
+// One section per winning lead, each containing the verified intent
+// signals that earned credit for that lead. Header surfaces the
+// business + contact name + final score so the operator can match
+// rows in the table above to evidence below.
+
+function PerLeadIntentSignals({ winners }: { winners: AdminWinningLead[] }) {
+  const withSignals = winners.filter(
+    (w) => creditedSignals(w.consensus.intent_signal_mapping).length > 0,
+  )
+  if (withSignals.length === 0) return null
+  return (
+    <section>
+      <div
+        className="text-[10px] uppercase tracking-[0.18em] mb-4 flex items-center gap-2"
+        style={{ color: 'var(--text-tertiary)' }}
+      >
+        <Sparkles className="h-3 w-3 text-gold" />
+        Verified intent signals · per lead
+      </div>
+      <div className="space-y-5">
+        {withSignals.map((w, idx) => (
+          <div
+            key={w.consensus.consensus_id}
+            className="rounded-xl border"
+            style={{
+              borderColor: 'var(--surface-border)',
+              background: 'var(--surface)',
+            }}
+          >
+            <header
+              className="px-5 py-3.5 border-b flex items-baseline gap-3 flex-wrap"
+              style={{ borderColor: 'var(--surface-border)' }}
+            >
+              <span
+                className="inline-flex items-center justify-center w-5 h-5 rounded-full text-[10px] tabular-nums border"
+                style={{
+                  borderColor: 'var(--surface-border-strong)',
+                  background: 'var(--surface-elevated)',
+                  color: 'var(--text-secondary)',
+                }}
+              >
+                {idx + 1}
+              </span>
+              <h3 className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
+                {w.lead?.business || (
+                  <span style={{ color: 'var(--text-tertiary)' }}>(no business)</span>
+                )}
+              </h3>
+              {w.lead?.full_name && (
+                <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>
+                  {w.lead.full_name}
+                  {w.lead.role ? (
+                    <span style={{ color: 'var(--text-tertiary)' }}> · {w.lead.role}</span>
+                  ) : null}
+                </span>
+              )}
+              <div className="ml-auto flex items-center gap-4">
+                <span className="text-[11px] tabular-nums" style={{ color: 'var(--text-secondary)' }}>
+                  <span style={{ color: 'var(--text-tertiary)' }}>score</span>{' '}
+                  {formatScore(w.consensus.consensus_final_score)}
+                </span>
+                <span className="text-[11px] tabular-nums text-gold">
+                  <span style={{ color: 'var(--text-tertiary)' }}>reward</span>{' '}
+                  {formatRewardPct(w.consensus.reward_pct)}
+                </span>
+              </div>
+            </header>
+            <div className="p-5">
+              <IntentSignalsList
+                mapping={w.consensus.intent_signal_mapping}
+                breakdown={w.consensus.intent_breakdown}
+              />
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  )
+}
+
+// IntentSignalsList: replaces the older FieldGroup-wrapped
+// IntentSignalsPanel since PerLeadIntentSignals already provides
+// its own card chrome and header.
+function IntentSignalsList({
   mapping,
   breakdown,
 }: {
@@ -632,8 +718,6 @@ function IntentSignalsPanel({
 }) {
   const credited = creditedSignals(mapping)
   if (credited.length === 0) return null
-  // Index per_signal entries by source_index so we can pair the
-  // detailed paragraph with the underlying mapping.
   const breakdownByIdx = new Map<number, string>()
   for (const b of breakdown?.per_signal ?? []) {
     if (typeof b.source_index === 'number' && b.details) {
@@ -641,107 +725,91 @@ function IntentSignalsPanel({
     }
   }
   return (
-    <FieldGroup
-      title="Verified intent signals"
-      accentIcon={<Sparkles className="h-3 w-3 text-gold" />}
-    >
-      <div className="space-y-3">
-        {credited.map((s, i) => {
-          const sourceIdx = i // mapping is dense for credited slots
-          const breakdownText = breakdownByIdx.get(sourceIdx)
-          const sourceLabel = s.source || 'web'
-          const matched = s.matched_icp_signal
-          return (
-            <div
-              key={`${s.url}-${i}`}
-              className="rounded-lg border px-4 py-3.5 space-y-2"
-              style={{
-                borderColor: 'var(--surface-border)',
-                background: 'var(--surface-elevated)',
-              }}
-            >
-              <div className="flex items-center gap-2 flex-wrap">
-                <span
-                  className="inline-flex items-center gap-1 text-[10px] uppercase tracking-[0.14em] rounded-full px-2 py-0.5 border"
-                  style={{
-                    borderColor: 'var(--surface-border-strong)',
-                    color: 'var(--text-secondary)',
-                  }}
-                >
-                  {sourceLabel}
+    <div className="space-y-3">
+      {credited.map((s, i) => {
+        const breakdownText = breakdownByIdx.get(i)
+        const sourceLabel = s.source || 'web'
+        const matched = s.matched_icp_signal
+        return (
+          <div
+            key={`${s.url}-${i}`}
+            className="rounded-lg border px-4 py-3.5 space-y-2"
+            style={{
+              borderColor: 'var(--surface-border)',
+              background: 'var(--surface-elevated)',
+            }}
+          >
+            <div className="flex items-center gap-2 flex-wrap">
+              <span
+                className="inline-flex items-center gap-1 text-[10px] uppercase tracking-[0.14em] rounded-full px-2 py-0.5 border"
+                style={{
+                  borderColor: 'var(--surface-border-strong)',
+                  color: 'var(--text-secondary)',
+                }}
+              >
+                {sourceLabel}
+              </span>
+              {s.date && (
+                <span className="text-[11px]" style={{ color: 'var(--text-tertiary)' }}>
+                  {s.date}
                 </span>
-                {s.date && (
-                  <span
-                    className="text-[11px]"
-                    style={{ color: 'var(--text-tertiary)' }}
-                  >
-                    {s.date}
-                  </span>
-                )}
-                {typeof s.after_decay_score === 'number' && (
-                  <span
-                    className="text-[11px] tabular-nums ml-auto"
-                    style={{ color: 'var(--text-secondary)' }}
-                  >
-                    <span style={{ color: 'var(--text-tertiary)' }}>
-                      score
-                    </span>{' '}
-                    {s.after_decay_score.toFixed(1)}
-                  </span>
-                )}
-              </div>
-              {matched && (
-                <div
-                  className="text-xs italic"
+              )}
+              {typeof s.after_decay_score === 'number' && (
+                <span
+                  className="text-[11px] tabular-nums ml-auto"
                   style={{ color: 'var(--text-secondary)' }}
                 >
-                  Matches ICP signal: &ldquo;{matched}&rdquo;
-                </div>
-              )}
-              {(breakdownText || s.description) && (
-                <div
-                  className="text-sm leading-relaxed"
-                  style={{ color: 'var(--text-primary)' }}
-                >
-                  {breakdownText || s.description}
-                </div>
-              )}
-              {s.snippet && (
-                <details className="text-xs">
-                  <summary
-                    className="cursor-pointer transition-colors hover:text-gold inline-flex items-center gap-1"
-                    style={{ color: 'var(--text-tertiary)' }}
-                  >
-                    <ChevronRight className="h-3 w-3" />
-                    Raw evidence
-                  </summary>
-                  <p
-                    className="mt-2 pl-4 leading-relaxed whitespace-pre-line"
-                    style={{ color: 'var(--text-secondary)' }}
-                  >
-                    {s.snippet}
-                  </p>
-                </details>
-              )}
-              {s.url && (
-                <a
-                  href={s.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1 text-[11px] transition-colors hover:text-gold truncate"
-                  style={{ color: 'var(--text-tertiary)' }}
-                >
-                  <Globe className="h-3 w-3" />
-                  <span className="truncate">{s.url}</span>
-                </a>
+                  <span style={{ color: 'var(--text-tertiary)' }}>score</span>{' '}
+                  {s.after_decay_score.toFixed(1)}
+                </span>
               )}
             </div>
-          )
-        })}
-      </div>
-    </FieldGroup>
+            {matched && (
+              <div className="text-xs italic" style={{ color: 'var(--text-secondary)' }}>
+                Matches ICP signal: &ldquo;{matched}&rdquo;
+              </div>
+            )}
+            {(breakdownText || s.description) && (
+              <div className="text-sm leading-relaxed" style={{ color: 'var(--text-primary)' }}>
+                {breakdownText || s.description}
+              </div>
+            )}
+            {s.snippet && (
+              <details className="text-xs">
+                <summary
+                  className="cursor-pointer transition-colors hover:text-gold inline-flex items-center gap-1"
+                  style={{ color: 'var(--text-tertiary)' }}
+                >
+                  <ChevronRight className="h-3 w-3" />
+                  Raw evidence
+                </summary>
+                <p
+                  className="mt-2 pl-4 leading-relaxed whitespace-pre-line"
+                  style={{ color: 'var(--text-secondary)' }}
+                >
+                  {s.snippet}
+                </p>
+              </details>
+            )}
+            {s.url && (
+              <a
+                href={s.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 text-[11px] transition-colors hover:text-gold truncate max-w-full"
+                style={{ color: 'var(--text-tertiary)' }}
+              >
+                <Globe className="h-3 w-3 flex-shrink-0" />
+                <span className="truncate">{s.url}</span>
+              </a>
+            )}
+          </div>
+        )
+      })}
+    </div>
   )
 }
+
 
 // =================================================================
 // ICP tab
