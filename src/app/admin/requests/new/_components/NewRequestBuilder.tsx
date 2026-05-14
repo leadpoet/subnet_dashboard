@@ -20,8 +20,10 @@ import {
 import {
   emptyDraft,
   parseFreeFormIcp,
+  normalizeIntentSignals,
   type ParsedIcpDraft,
 } from '@/lib/admin-icp-parser'
+import type { IntentSignalSpec } from '@/lib/admin-supabase'
 
 type SubmitState =
   | { status: 'idle' }
@@ -75,7 +77,12 @@ function normalizeDraft(draft: ParsedIcpDraft): ParsedIcpDraft {
     sub_industry: draft.sub_industry.map((s) => s.trim()).filter(Boolean),
     target_roles: draft.target_roles.map((s) => s.trim()).filter(Boolean),
     country: draft.country.map((s) => s.trim()).filter(Boolean),
-    intent_signals: draft.intent_signals.map((s) => s.trim()).filter(Boolean),
+    // Intent signals are now structured objects (text + required +
+    // is_scored). Trim the text only; drop entries whose text is
+    // empty after trim so a stray blank row doesn't reach the gateway.
+    intent_signals: draft.intent_signals
+      .map((spec) => ({ ...spec, text: spec.text.trim() }))
+      .filter((spec) => spec.text.length > 0),
     excluded_companies: draft.excluded_companies.map((s) => s.trim()).filter(Boolean),
     num_leads: Math.max(1, Math.floor(Number(draft.num_leads) || 10)),
   }
@@ -135,7 +142,12 @@ function companyMentionWarnings(draft: ParsedIcpDraft): string[] {
     { label: 'Geography', values: [draft.geography] },
     { label: 'Target roles', values: draft.target_roles },
     { label: 'Target seniority', values: [draft.target_seniority] },
-    { label: 'Intent signals', values: draft.intent_signals },
+    {
+      label: 'Intent signals',
+      // intent_signals is now an array of structured specs; the
+      // company-name leak check only operates on the user-visible text.
+      values: draft.intent_signals.map((s) => s.text),
+    },
     { label: 'Excluded companies', values: draft.excluded_companies },
   ]
 
@@ -333,6 +345,134 @@ function MultiCheckboxField<T extends string>({
   )
 }
 
+// =================================================================
+// IntentSignalEditor — per-row editor for buyer-side intent signals.
+//
+// Each row exposes:
+//   - The signal phrase (single-line text input).
+//   - "Required" toggle  → lead must satisfy this signal or fail
+//     (failure_reason: missing_required_intent_signal).
+//   - "Scored" toggle    → if off, the signal is binary yes/no and
+//     does NOT contribute to the lead's intent_signal_final, even
+//     when matched. The required gate still applies.
+//
+// Defaults to required=false, is_scored=true so a freshly added row
+// behaves like a legacy free-text signal until the operator opts in
+// to a stricter gate.
+// =================================================================
+function IntentSignalEditor({
+  value,
+  onChange,
+  hint,
+}: {
+  value: IntentSignalSpec[]
+  onChange: (next: IntentSignalSpec[]) => void
+  hint?: string
+}) {
+  function updateRow(idx: number, patch: Partial<IntentSignalSpec>) {
+    onChange(value.map((spec, i) => (i === idx ? { ...spec, ...patch } : spec)))
+  }
+  function removeRow(idx: number) {
+    onChange(value.filter((_, i) => i !== idx))
+  }
+  function addRow() {
+    onChange([...value, { text: '', required: false, is_scored: true }])
+  }
+
+  return (
+    <div>
+      <FieldLabel hint={hint}>Intent signals</FieldLabel>
+      <div className="mt-2 space-y-2">
+        {value.length === 0 ? (
+          <p className="rounded-lg border border-dashed border-slate-800/80 bg-slate-950/40 px-3 py-2 text-[11px] text-slate-500">
+            No intent signals yet. Add at least one observable buying event
+            you want miners to verify.
+          </p>
+        ) : (
+          value.map((spec, idx) => (
+            <div
+              key={idx}
+              className="rounded-lg border border-slate-800/70 bg-slate-950/40 p-2"
+            >
+              <div className="flex items-start gap-2">
+                <input
+                  type="text"
+                  value={spec.text}
+                  onChange={(e) => updateRow(idx, { text: e.target.value })}
+                  placeholder="e.g. Recently hired a CFO"
+                  className="premium-focus flex-1 rounded-md border border-slate-800/70 bg-slate-950/60 px-2.5 py-1.5 text-sm text-slate-100 placeholder:text-slate-600"
+                />
+                <button
+                  type="button"
+                  onClick={() => removeRow(idx)}
+                  aria-label="Remove signal"
+                  title="Remove signal"
+                  className="rounded-md border border-slate-800/70 px-2 py-1 text-[11px] text-slate-400 hover:border-burgundy-soft hover:text-burgundy"
+                >
+                  ×
+                </button>
+              </div>
+              <div className="mt-2 flex flex-wrap gap-3 pl-0.5">
+                <label className="inline-flex items-center gap-1.5 text-[11px] text-slate-300">
+                  <input
+                    type="checkbox"
+                    checked={spec.required}
+                    onChange={(e) =>
+                      updateRow(idx, { required: e.target.checked })
+                    }
+                    className="h-3.5 w-3.5 accent-gold"
+                  />
+                  Required
+                  <span
+                    className="text-[10px] text-slate-500"
+                    title="Lead must produce verified evidence for this signal or it fails."
+                  >
+                    (must pass)
+                  </span>
+                </label>
+                <label className="inline-flex items-center gap-1.5 text-[11px] text-slate-300">
+                  <input
+                    type="checkbox"
+                    checked={spec.is_scored}
+                    onChange={(e) =>
+                      updateRow(idx, { is_scored: e.target.checked })
+                    }
+                    className="h-3.5 w-3.5 accent-gold"
+                  />
+                  Scored
+                  <span
+                    className="text-[10px] text-slate-500"
+                    title="When off, this signal is binary yes/no and does not contribute to the intent score."
+                  >
+                    (contributes to score)
+                  </span>
+                </label>
+                {spec.required && !spec.is_scored && (
+                  <span className="rounded-full border border-gold-soft bg-gold-soft px-2 py-0.5 text-[10px] uppercase tracking-wider text-gold">
+                    Binary gate
+                  </span>
+                )}
+                {spec.required && spec.is_scored && (
+                  <span className="rounded-full border border-gold-soft bg-gold-soft px-2 py-0.5 text-[10px] uppercase tracking-wider text-gold">
+                    Mandatory + scored
+                  </span>
+                )}
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+      <button
+        type="button"
+        onClick={addRow}
+        className="mt-2 rounded-md border border-slate-800/80 bg-slate-950/40 px-3 py-1.5 text-[11px] text-slate-300 hover:border-gold-soft hover:text-gold"
+      >
+        + Add signal
+      </button>
+    </div>
+  )
+}
+
 export function NewRequestBuilder() {
   const [rawIcp, setRawIcp] = useState('')
   const [draft, setDraft] = useState<ParsedIcpDraft>(() => emptyDraft())
@@ -385,7 +525,19 @@ export function NewRequestBuilder() {
         })
         return
       }
-      setDraft(body.draft as ParsedIcpDraft)
+      // The AI parse route may still return `intent_signals` as a
+      // plain ``string[]`` for backward compatibility (the gateway
+      // accepts both shapes). Normalize defensively so the form's
+      // per-row editor always sees structured specs with defaulted
+      // required / is_scored flags.
+      const rawDraft = body.draft as ParsedIcpDraft & {
+        intent_signals?: unknown
+      }
+      const coercedDraft: ParsedIcpDraft = {
+        ...rawDraft,
+        intent_signals: normalizeIntentSignals(rawDraft.intent_signals),
+      }
+      setDraft(coercedDraft)
       setParseState({ status: 'success', model: body.model })
     } catch (error) {
       setParseState({
@@ -624,15 +776,10 @@ export function NewRequestBuilder() {
             onChange={(v) => update('employee_count', v)}
           />
 
-          <ArrayField
-            label="Intent signals"
+          <IntentSignalEditor
             value={draft.intent_signals}
             onChange={(v) => update('intent_signals', v)}
-            placeholder="Recently hired a CFO&#10;Posted VP Sales role in last 90 days"
-            hint="Use concrete observable events miners can verify in page content."
-            splitMode="newline"
-            rows={5}
-            resetKey={resetKey}
+            hint="Use concrete observable events miners can verify in page content. Toggle 'Required' to force the lead to satisfy this signal (or it fails). Toggle 'Scored' off to make it binary yes/no — it won't contribute to the intent score."
           />
 
           <ArrayField

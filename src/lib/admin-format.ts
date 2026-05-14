@@ -111,9 +111,28 @@ export function asList(v: string | string[] | null | undefined): string[] {
   return v.trim() ? [v] : []
 }
 
+/**
+ * Return the buyer's intent signal *texts* as a flat string array.
+ *
+ * Tolerates both legacy ``string[]`` rows and the new structured
+ * ``IntentSignalSpec[]`` shape. Callers that need the required /
+ * is_scored flags should consume ``icp.intent_signals`` directly or
+ * via ``normalizeIntentSignals`` from ``./admin-icp-parser``.
+ */
 export function icpSignals(icp: IcpDetails | null | undefined): string[] {
   if (!icp || !Array.isArray(icp.intent_signals)) return []
-  return icp.intent_signals.filter((s) => typeof s === 'string' && s.length > 0)
+  const out: string[] = []
+  for (const entry of icp.intent_signals) {
+    if (typeof entry === 'string') {
+      if (entry.length > 0) out.push(entry)
+      continue
+    }
+    if (entry && typeof entry === 'object' && typeof entry.text === 'string') {
+      const t = entry.text.trim()
+      if (t.length > 0) out.push(t)
+    }
+  }
+  return out
 }
 
 // =================================================================

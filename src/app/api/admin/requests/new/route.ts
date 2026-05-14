@@ -31,6 +31,31 @@ function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((item) => typeof item === 'string')
 }
 
+/**
+ * intent_signals is allowed to be either:
+ *  - a legacy ``string[]`` (still accepted by the gateway validator
+ *    which coerces each entry to default flags), OR
+ *  - an array of ``{text: string, required?: boolean, is_scored?: boolean}``
+ *    objects produced by the new admin UI.
+ *
+ * Mixed arrays are allowed for forward-compat as the operator
+ * incrementally upgrades a draft. The gateway's Pydantic validator
+ * is the source of truth on field constraints; we only sanity-check
+ * the outer shape here so an obvious malformed payload doesn't waste
+ * a round trip.
+ */
+function isIntentSignalsArray(value: unknown): boolean {
+  if (!Array.isArray(value)) return false
+  return value.every((item) => {
+    if (typeof item === 'string') return true
+    if (item && typeof item === 'object') {
+      const obj = item as Record<string, unknown>
+      return typeof obj.text === 'string' || typeof obj.signal === 'string'
+    }
+    return false
+  })
+}
+
 function validatePayload(body: FulfillmentPayload): string[] {
   const errors: string[] = []
 
@@ -51,12 +76,20 @@ function validatePayload(body: FulfillmentPayload): string[] {
     'target_role_types',
     'employee_count',
     'country',
-    'intent_signals',
   ]
   for (const key of optionalArrays) {
     if (body[key] !== undefined && !isStringArray(body[key])) {
       errors.push(`${key} must be a list`)
     }
+  }
+
+  if (
+    body.intent_signals !== undefined &&
+    !isIntentSignalsArray(body.intent_signals)
+  ) {
+    errors.push(
+      'intent_signals must be a list of strings, or of objects with a "text" field (optionally "required" and "is_scored").',
+    )
   }
 
   if (!Number.isInteger(body.num_leads) || Number(body.num_leads) <= 0) {

@@ -203,6 +203,29 @@ export function startBackgroundRefresh(): void {
 // Model Competition refresh interval (1 minute)
 const MODEL_COMPETITION_REFRESH_INTERVAL = 60 * 1000
 
+// =================================================================
+// MODEL_COMPETITION_V2_LIVE_AT
+// =================================================================
+// Cutover instant for the company-mode model competition (v2). Any
+// champion crowned BEFORE this instant ran the old leads-with-contacts
+// scoring pipeline and is no longer comparable to current champions.
+// We hide those rows from the dashboard so the lineage strip and
+// "current champion" slot only show the new-era competition.
+//
+// Default value: 2026-05-14T04:00:00Z — a few minutes before the
+// hard-cutover commit ``313b7997 refactor(qualification): hard cutover
+// to company-mode model competition`` (committed 2026-05-13T21:03:17
+// PT / 2026-05-14T04:03:17Z). Conservative — picks up the cutover
+// commit itself and anything crowned after the gateway restart.
+//
+// Override via env if the deploy slips, or push the cutover forward if
+// any old-era rows leak through after the production restart. The
+// constant is intentionally evaluated at module load so a value change
+// requires a dashboard restart (matches the deploy-time semantics of
+// the rest of this cache).
+const MODEL_COMPETITION_V2_LIVE_AT =
+  process.env.MODEL_COMPETITION_V2_LIVE_AT || '2026-05-14T04:00:00Z'
+
 // Get today's 12 AM UTC timestamp
 function getTodayMidnightUTC(): Date {
   const now = new Date()
@@ -327,11 +350,16 @@ async function fetchModelCompetitionData(): Promise<unknown> {
       }
     })
 
-  // Query qualification_champion_history for all champions with score > 0
+  // Query qualification_champion_history for all champions with score
+  // > 0, restricted to the company-mode v2 era. The cutover is enforced
+  // at the supabase query level so the row count stays bounded (old
+  // history can grow large) and stale-row detection downstream sees a
+  // clean post-cutover view.
   const { data: championHistory, error: historyError } = await supabase
     .from('qualification_champion_history')
     .select('*')
     .gt('score', 0)
+    .gte('champion_at', MODEL_COMPETITION_V2_LIVE_AT)
     .order('champion_at', { ascending: false })
 
   if (historyError) {
@@ -423,8 +451,20 @@ async function fetchModelCompetitionData(): Promise<unknown> {
     }
   })
 
-  // Current champion: qualification_models is source of truth
-  if (champModel) {
+  // Current champion: qualification_models is source of truth.
+  //
+  // ``qualification_models.is_champion=true`` can still point at a row
+  // that was crowned under the OLD leads-with-contacts pipeline if no
+  // v2-era model has dethroned it yet. We must NOT surface those —
+  // the dashboard would show an old-era score in the throne and an
+  // empty lineage strip, which is misleading. Drop the current
+  // champion if its ``champion_at`` predates the v2 cutover; the UI
+  // then falls through to its "vacant throne" state, which is the
+  // correct read of the world until a v2 champion emerges.
+  const v2CutoverMs = new Date(MODEL_COMPETITION_V2_LIVE_AT).getTime()
+  const champIsV2 =
+    champModel && new Date(champModel.champion_at).getTime() >= v2CutoverMs
+  if (champModel && champIsV2) {
     const champEntry = championsList.find((c: { modelId: string }) => c.modelId === champModel.id)
     if (champEntry) {
       // Override history. qualification_models says this is champion.

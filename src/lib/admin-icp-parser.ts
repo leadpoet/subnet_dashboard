@@ -29,6 +29,56 @@ import {
   type RoleType,
   type EmployeeBucket,
 } from './admin-icp-constants'
+import type { IntentSignalSpec } from './admin-supabase'
+
+/**
+ * Coerce any value the dashboard might receive from the gateway,
+ * Supabase, the AI-parse route, or operator-typed local state into
+ * the canonical ``IntentSignalSpec[]`` shape.
+ *
+ * Accepts:
+ *  - ``string[]``: legacy admin drafts and historical ``icp_details``
+ *    rows in Supabase. Each entry coerces to
+ *    ``{text, required:false, is_scored:true}`` (the same defaults
+ *    the gateway's Pydantic validator applies).
+ *  - Mixed array of ``string`` and ``IntentSignalSpec``: tolerated so
+ *    in-progress UI state can be partially upgraded.
+ *  - ``IntentSignalSpec[]``: passed through.
+ *  - ``null`` / ``undefined`` / empty: returns ``[]``.
+ *
+ * Always returns a clean, defaulted array — never throws.
+ */
+export function normalizeIntentSignals(
+  value: unknown,
+): IntentSignalSpec[] {
+  if (!value) return []
+  if (!Array.isArray(value)) return []
+  const out: IntentSignalSpec[] = []
+  for (const entry of value) {
+    if (typeof entry === 'string') {
+      const t = entry.trim()
+      if (!t) continue
+      out.push({ text: t, required: false, is_scored: true })
+      continue
+    }
+    if (entry && typeof entry === 'object') {
+      const obj = entry as Record<string, unknown>
+      const rawText = typeof obj.text === 'string'
+        ? obj.text
+        : typeof obj.signal === 'string'
+          ? (obj.signal as string)
+          : ''
+      const t = rawText.trim()
+      if (!t) continue
+      out.push({
+        text: t,
+        required: typeof obj.required === 'boolean' ? obj.required : false,
+        is_scored: typeof obj.is_scored === 'boolean' ? obj.is_scored : true,
+      })
+    }
+  }
+  return out
+}
 
 export interface ParsedIcpDraft {
   prompt: string
@@ -40,7 +90,10 @@ export interface ParsedIcpDraft {
   target_role_types: RoleType[]
   target_seniority: string
   employee_count: EmployeeBucket[]
-  intent_signals: string[]
+  // Structured buyer-side intent signals. Legacy text-only payloads
+  // from the heuristic parser / AI parse / Supabase get normalized
+  // into this shape via ``normalizeIntentSignals``.
+  intent_signals: IntentSignalSpec[]
   product_service: string
   num_leads: number
   internal_label: string
@@ -351,7 +404,7 @@ function fieldByLabel(text: string, labels: string[]): string | null {
  * "Triggers" / "Buying" header. Falls back to scanning the whole text
  * for hire / job-posting / funding-round style phrases.
  */
-function detectIntentSignals(text: string): string[] {
+function detectIntentSignals(text: string): IntentSignalSpec[] {
   const lines = text.split(/\r?\n/)
   const signals: string[] = []
 
@@ -406,7 +459,10 @@ function detectIntentSignals(text: string): string[] {
     }
   }
 
-  return dedupeKeepCase(signals).slice(0, 10)
+  // The heuristic parser has no way to infer required / is_scored from
+  // free-form text, so every entry gets the safe defaults. Operators
+  // toggle these per signal in the new request UI before submitting.
+  return normalizeIntentSignals(dedupeKeepCase(signals).slice(0, 10))
 }
 
 // =================================================================

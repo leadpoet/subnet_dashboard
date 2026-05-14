@@ -48,6 +48,25 @@ export function getAdminSupabase(): SupabaseClient {
 // handlers can pass results to client components without re-typing.
 // =================================================================
 
+// =================================================================
+// IntentSignalSpec — structured buyer-side intent signal.
+//
+// Mirrors gateway/fulfillment/models.py::IntentSignalSpec exactly.
+// `required=true`  -> lead MUST satisfy this signal or it fails.
+// `is_scored=false` -> binary yes/no; doesn't contribute to the
+//                     numeric intent score (still subject to the
+//                     required gate if `required=true`).
+//
+// Default flags (required=false, is_scored=true) reproduce the
+// pre-feature legacy behaviour, so any code path that hands the
+// gateway a bare string array still works.
+// =================================================================
+export interface IntentSignalSpec {
+  text: string
+  required: boolean
+  is_scored: boolean
+}
+
 export interface IcpDetails {
   prompt?: string
   industry?: string | string[]
@@ -58,7 +77,12 @@ export interface IcpDetails {
   target_role_types?: string[]
   target_seniority?: string
   employee_count?: string | string[]
-  intent_signals?: string[]
+  // Legacy rows in Supabase stored ``intent_signals`` as ``string[]``.
+  // New requests store structured ``IntentSignalSpec[]``. Both shapes
+  // can be present at read time; producers must coerce via
+  // ``normalizeIntentSignals`` (admin-icp-parser.ts) before rendering
+  // UI that depends on the required / is_scored flags.
+  intent_signals?: Array<string | IntentSignalSpec>
   product_service?: string
   excluded_companies?: string[]
   num_leads?: number
@@ -168,6 +192,13 @@ export interface IntentSignalMappingEntry {
   after_decay_score?: number
   matched_icp_signal?: string | null
   matched_icp_signal_idx?: number
+  // Flags inherited from the buyer-side IntentSignalSpec that this
+  // miner signal was matched to. Populated by the gateway scorer at
+  // intent-scoring time. Null when no spec was matched
+  // (``matched_icp_signal_idx`` is -1) or when the spec list was
+  // empty. Legacy rows pre-dating the flag rollout will be undefined.
+  matched_icp_signal_required?: boolean | null
+  matched_icp_signal_is_scored?: boolean | null
 }
 
 export interface IntentBreakdownEntry {
