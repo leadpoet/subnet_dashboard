@@ -1268,11 +1268,6 @@ export function ModelCompetition() {
     () => data?.recentSubmissions.filter((s) => !s.isChampion) ?? [],
     [data]
   )
-  const evaluatingSubmissions = useMemo(
-    () => challengers.filter((s) => s.status === 'evaluating'),
-    [challengers]
-  )
-
   const handleChampionOpen = useCallback(() => {
     if (!currentChampion) return
     const championSubmission = data?.recentSubmissions.find((s) => s.isChampion)
@@ -1410,28 +1405,16 @@ export function ModelCompetition() {
       </div>
 
       {/* ════════════════════════════════════════════════════════════
-          Challengers + Live-eval floating panel.
-          Mirrors the Fulfillment cosmos + leaderboard composition:
-          a hero board with a fixed side panel for live activity.
+          Challengers. Per-row "Evaluating" badge already communicates
+          live activity, so no separate floating panel is needed.
           ════════════════════════════════════════════════════════════ */}
-      <div className="relative">
-        <ChallengersBoard
-          challengers={challengers}
-          onSelect={(s) => {
-            setSelectedSubmission(s)
-            setIsSubmissionDetailOpen(true)
-          }}
-        />
-        {evaluatingSubmissions.length > 0 && (
-          <LiveEvaluatingPanel
-            submissions={evaluatingSubmissions}
-            onSelect={(s) => {
-              setSelectedSubmission(s)
-              setIsSubmissionDetailOpen(true)
-            }}
-          />
-        )}
-      </div>
+      <ChallengersBoard
+        challengers={challengers}
+        onSelect={(s) => {
+          setSelectedSubmission(s)
+          setIsSubmissionDetailOpen(true)
+        }}
+      />
 
       {/* ════════════════════════════════════════════════════════════
           Past champions: compact table-style list below the fold.
@@ -1543,8 +1526,21 @@ function ChampionHero({
 
   return (
     <section
-      aria-label="Current champion"
-      className="relative rounded-2xl border border-gold-soft bg-gradient-to-b from-[rgba(201,169,110,0.05)] to-transparent overflow-hidden"
+      role="button"
+      tabIndex={0}
+      aria-label="Current champion. Press Enter to view score breakdown."
+      onClick={onOpen}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          onOpen()
+        }
+      }}
+      className={cn(
+        'group relative rounded-2xl border border-gold-soft bg-gradient-to-b from-[rgba(201,169,110,0.05)] to-transparent overflow-hidden cursor-pointer transition-all',
+        'hover:border-[rgba(201,169,110,0.45)] hover:from-[rgba(201,169,110,0.09)]',
+        'focus:outline-none focus-visible:ring-2 focus-visible:ring-gold-soft focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950'
+      )}
     >
       {/* Subtle gold accent line at top */}
       <span
@@ -1658,15 +1654,12 @@ function ChampionHero({
             </span>
           </div>
 
-          {/* CTA */}
-          <button
-            type="button"
-            onClick={onOpen}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[11px] font-medium text-slate-100 bg-slate-900/70 border border-slate-700/50 hover:bg-slate-800/80 hover:border-slate-600 transition-colors"
-          >
+          {/* Click-to-open affordance. The whole hero is the trigger;
+              this is a subtle visual cue that follows the gold accent. */}
+          <span className="inline-flex items-center gap-1 text-[11px] font-medium text-slate-400 group-hover:text-gold transition-colors">
             View score breakdown
-            <ChevronRight className="h-3.5 w-3.5" aria-hidden />
-          </button>
+            <ChevronRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" aria-hidden />
+          </span>
         </div>
       </div>
     </section>
@@ -2021,58 +2014,6 @@ function ChallengerRow({
         <StatusBadge status={submission.status} />
       </span>
     </button>
-  )
-}
-
-/* ============================================================
- * LiveEvaluatingPanel. Floating side panel mirroring Fulfillment's
- * Leaderboard placement (top-right of the relative container).
- * ============================================================ */
-function LiveEvaluatingPanel({
-  submissions,
-  onSelect,
-}: {
-  submissions: Submission[]
-  onSelect: (s: Submission) => void
-}) {
-  return (
-    <aside
-      aria-label="Currently evaluating models"
-      // Hidden on small screens. The floating panel would overlay the
-      // challengers leaderboard and obscure content. On mobile, the
-      // pending-breath + Evaluating badge on each row already communicates
-      // live activity, so the floating overlay is redundant.
-      className="hidden md:flex md:flex-col absolute top-3 right-3 w-64 max-w-[calc(100%-1.5rem)] bg-slate-950/85 backdrop-blur-md rounded-xl border border-amber-warm-soft shadow-2xl shadow-black/40 overflow-hidden animate-in fade-in slide-in-from-right-2 duration-200"
-    >
-      <header className="flex items-center gap-2 px-3.5 py-2.5 border-b border-slate-800/70 bg-gradient-to-b from-slate-900/80 to-slate-900/40">
-        <Loader2 className="h-3 w-3 text-amber-warm animate-spin" aria-hidden />
-        <span className="text-[11px] font-semibold text-slate-100">Evaluating now</span>
-        <span className="ml-auto text-[10px] text-amber-warm font-mono tabular-nums">
-          {submissions.length} live
-        </span>
-      </header>
-      <div className="divide-y divide-slate-800/60 max-h-[220px] overflow-y-auto">
-        {submissions.map((s) => (
-          <button
-            key={s.id}
-            type="button"
-            onClick={() => onSelect(s)}
-            className="w-full px-3.5 py-2 text-left hover-bg-warm transition-colors"
-            title={`View ${s.minerHotkey}`}
-          >
-            <div className="flex items-center gap-2">
-              <code className="text-[11px] font-mono text-slate-200 truncate flex-1" title={s.minerHotkey}>
-                {truncateHotkey(s.minerHotkey)}
-              </code>
-              <span className="inline-block w-1.5 h-1.5 rounded-full dot-amber live-pulse" aria-hidden />
-            </div>
-            <div className="text-[10px] text-slate-500 font-mono tabular-nums mt-0.5">
-              Started {getRelativeTime(s.createdAt)}
-            </div>
-          </button>
-        ))}
-      </div>
-    </aside>
   )
 }
 
