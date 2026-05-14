@@ -324,28 +324,11 @@ export function DashboardClient({ initialData, metagraph: initialMetagraph }: Da
         <header className="relative mb-6 md:mb-8 pb-4 md:pb-5 border-b border-[var(--surface-border)]">
           <div className="flex items-center justify-between gap-4">
             <h1 className="text-xl sm:text-2xl md:text-[26px] leading-none tracking-[-0.018em] text-[color:var(--text-primary)]">
-              <a
-                href="https://leadpoet.com"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="font-semibold hover:opacity-80 transition-opacity"
-                aria-label="Leadpoet, open marketing site in a new tab"
-              >
-                Leadpoet
-              </a>
+              <span className="font-semibold">Leadpoet</span>
               <span className="ml-2 font-light text-[color:var(--text-secondary)]">Subnet Dashboard</span>
             </h1>
             <SyncedIndicator lastSync={lastSync} pulse={syncPulse} />
           </div>
-          {/* Subtle gold underscore: editorial masthead accent. */}
-          <span
-            aria-hidden
-            className="absolute left-0 bottom-[-1px] h-px w-16 md:w-20"
-            style={{
-              background:
-                'linear-gradient(90deg, var(--brand) 0%, rgba(201,169,110,0) 100%)',
-            }}
-          />
         </header>
 
         {/* Tabs: gated by launch mode. */}
@@ -563,7 +546,7 @@ function SyncedIndicator({
   const label = formatRelativeShort(lastSync)
   return (
     <div
-      className="hidden sm:flex items-center gap-2 text-[10px] font-mono text-slate-500 shrink-0"
+      className="flex items-center gap-1.5 sm:gap-2 text-[10px] font-mono text-slate-500 shrink-0"
       title="Auto-syncs every 60s"
     >
       <span
@@ -574,7 +557,8 @@ function SyncedIndicator({
         aria-hidden
       />
       <span>
-        Synced <span className="text-slate-300">{label}</span>
+        <span className="hidden sm:inline">Synced </span>
+        <span className="text-slate-300">{label}</span>
       </span>
     </div>
   )

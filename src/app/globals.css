@@ -292,6 +292,16 @@
   transition: box-shadow 160ms ease-out, border-color 160ms ease-out;
 }
 
+/* Prevent shift/click focus halos from adding a second visual state on
+   buttons. Buttons already communicate state via active/hover styling. */
+button:focus,
+button:focus-visible,
+[role="button"]:focus,
+[role="button"]:focus-visible {
+  outline: none !important;
+  box-shadow: none !important;
+}
+
 /* Mobile safe-area utilities (iPhone home indicator etc.) */
 .safe-bottom {
   padding-bottom: max(1rem, env(safe-area-inset-bottom));

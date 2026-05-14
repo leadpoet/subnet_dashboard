@@ -74,8 +74,8 @@ const PENDING_COMPLETED_BUFFER = 72
 // Cyan/emerald/rose stocks from Tailwind defaults have been retired here.
 const COLOR_WIN_EDGE = '#c9a96e'                      // warm gold for winning leads
 const COLOR_LOSS_EDGE = 'rgba(245, 240, 232, 0.18)'   // faint warm gray for submitted-only
-const COLOR_REQUEST_PENDING = '#cf9d61'               // dusty amber
-const COLOR_REQUEST_COMPLETED = '#e8e1d4'             // warm cream, finalized
+const COLOR_REQUEST_PENDING = '#7a766e'               // muted warm gray, waiting
+const COLOR_REQUEST_COMPLETED = '#e8e1d4'             // warm cream/white, finalized
 const COLOR_MINER = '#5e5a52'                         // warm gray, neutral miner
 const COLOR_MINER_WINNING = '#b89868'                 // muted gold, miner with wins
 const COLOR_TOP_RING = '#e8c987'                      // brighter gold, top miner ring
@@ -389,51 +389,55 @@ function computeLayout(requests: CosmosRequest[], leads: CosmosConsensusLead[]):
     )
     const orbitAnchorNodes = completedBoundaryNodes.length > 0 ? completedBoundaryNodes : []
 
-    // Centroid of the completed constellation.
-    let cx = 0
-    let cy = 0
+    // Use the bounding-box center of the completed constellation, not the
+    // statistical centroid. The viewport auto-fit centers on the bbox of
+    // all rendered nodes, so anchoring the pending orbit on the same bbox
+    // center ensures top/bottom/left/right pending sit symmetrically
+    // around the visible center after auto-fit. The centroid can drift
+    // toward dense regions (e.g. a long miner tail) and make symmetric
+    // angular placement look skewed once the viewport recenters.
+    let bboxMinX = Infinity
+    let bboxMaxX = -Infinity
+    let bboxMinY = Infinity
+    let bboxMaxY = -Infinity
     for (const n of orbitAnchorNodes) {
-      cx += n.x
-      cy += n.y
+      const r = renderedNodeRadius(n)
+      if (n.x - r < bboxMinX) bboxMinX = n.x - r
+      if (n.x + r > bboxMaxX) bboxMaxX = n.x + r
+      if (n.y - r < bboxMinY) bboxMinY = n.y - r
+      if (n.y + r > bboxMaxY) bboxMaxY = n.y + r
     }
-    if (orbitAnchorNodes.length > 0) {
-      cx /= orbitAnchorNodes.length
-      cy /= orbitAnchorNodes.length
-    } else {
-      cx = 0
-      cy = 0
-    }
+    const haveBbox =
+      Number.isFinite(bboxMinX) &&
+      Number.isFinite(bboxMaxX) &&
+      Number.isFinite(bboxMinY) &&
+      Number.isFinite(bboxMaxY)
+    const cx = haveBbox ? (bboxMinX + bboxMaxX) / 2 : 0
+    const cy = haveBbox ? (bboxMinY + bboxMaxY) / 2 : 0
 
-    // Actual completed boundary. Include each node's rendered radius so the
-    // pending ring clears the outer edge of every completed request/miner.
+    // Actual completed boundary measured from the bbox center. Include each
+    // node's rendered radius so the pending ring clears the outer edge of
+    // every completed request/miner.
     let clusterEdge = 160
     for (const n of orbitAnchorNodes) {
       clusterEdge = Math.max(clusterEdge, Math.hypot(n.x - cx, n.y - cy) + renderedNodeRadius(n))
     }
     if (!Number.isFinite(clusterEdge) || clusterEdge < 1) clusterEdge = 160
 
-    // Pending request nodes render at roughly REQUEST_RADIUS. Keep the jitter
-    // outward-only so no pending node can drift back inside the completed
-    // boundary.
+    // Pending request nodes render at roughly REQUEST_RADIUS. Keep every
+    // pending node on the exact same radius so the outer ring reads as a
+    // clean, intentional orbit rather than an organic scatter.
     const orbitRadius = clusterEdge + REQUEST_RADIUS + PENDING_COMPLETED_BUFFER
 
     pendingRequests.forEach((req, i) => {
-      const h = simpleHash(req.request_id)
       // Evenly spaced base angles around the full circle. We start at -π/2 (top)
       // and step by 2π / N so the ring reads as intentional.
-      const baseAngle = -Math.PI / 2 + (i / pendingRequests.length) * Math.PI * 2
-      // ±10° angular jitter. Just enough to feel organic, not mechanical.
-      const angleJitter = (((h >> 8) % 200) / 200 - 0.5) * (Math.PI / 9)
-      // Outward-only radial jitter. Prevents a mechanical ring while preserving
-      // the completed-boundary guarantee.
-      const radialJitter = ((h % 200) / 200) * 16
-      const angle = baseAngle + angleJitter
-      const r = orbitRadius + radialJitter
+      const angle = -Math.PI / 2 + (i / pendingRequests.length) * Math.PI * 2
       nodeById.set(`req:${req.request_id}`, {
         id: `req:${req.request_id}`,
         type: 'request',
-        x: cx + r * Math.cos(angle),
-        y: cy + r * Math.sin(angle),
+        x: cx + orbitRadius * Math.cos(angle),
+        y: cy + orbitRadius * Math.sin(angle),
         vx: 0,
         vy: 0,
         label: req.request_id,
@@ -726,7 +730,7 @@ export function FulfillmentCosmos({
             <stop offset="100%" stopColor={COLOR_REQUEST_COMPLETED} stopOpacity="1" />
           </radialGradient>
           <radialGradient id="cosmos-grad-pending" cx="50%" cy="50%" r="50%">
-            <stop offset="0%" stopColor="#e3b682" stopOpacity="1" />
+            <stop offset="0%" stopColor="#9a9690" stopOpacity="1" />
             <stop offset="100%" stopColor={COLOR_REQUEST_PENDING} stopOpacity="1" />
           </radialGradient>
           <radialGradient id="cosmos-grad-miner-win" cx="50%" cy="50%" r="50%">
@@ -803,13 +807,7 @@ export function FulfillmentCosmos({
                   strokeOpacity={opacity}
                   strokeWidth={width}
                   strokeLinecap="round"
-                >
-                  <title>
-                    {`${edge.count} lead${edge.count === 1 ? '' : 's'}${
-                      edge.winCount > 0 ? ` · ${edge.winCount} won` : ''
-                    }`}
-                  </title>
-                </path>
+                />
               )
             })}
 
@@ -956,19 +954,7 @@ export function FulfillmentCosmos({
                     }
                     strokeWidth={isFocused || isEmphasized ? 1.4 : 0.6}
                     style={{ transition: 'stroke 160ms ease-out, stroke-width 160ms ease-out' }}
-                  >
-                    <title>
-                      {isRequest
-                        ? `${asText(node.request?.icp_details?.industry) || 'Request'} · ${
-                            node.label.slice(0, 8)
-                          } · ${node.leadCount} leads · ${node.winCount} won`
-                        : `${truncateHotkey(node.hotkey || '')} · ${node.leadCount} leads · ${
-                            node.winCount
-                          } won across ${node.requestCount} request${
-                            node.requestCount === 1 ? '' : 's'
-                          }`}
-                    </title>
-                  </circle>
+                  />
                   {shouldShowLabel && (
                     <text
                       x={node.x}
@@ -1048,26 +1034,26 @@ export function FulfillmentCosmos({
 
       {/* Legend chip: warm neutral surface, gold accent for "fulfilled" */}
       {!computing && stats && (
-        <div className="absolute bottom-3 left-3 flex flex-wrap items-center gap-3 text-[10px] bg-[rgba(16,16,19,0.78)] backdrop-blur-md rounded-md px-3 py-1.5 border border-[var(--surface-border)] pointer-events-none font-mono text-[color:var(--text-secondary)]">
+        <div className="absolute bottom-3 left-3 max-w-[calc(100%-1.5rem)] flex w-fit flex-wrap items-center gap-x-3 gap-y-1.5 text-[10px] bg-[rgba(16,16,19,0.78)] backdrop-blur-md rounded-md px-3 py-1.5 border border-[var(--surface-border)] pointer-events-none font-mono text-[color:var(--text-secondary)]">
+          {/* Request status */}
           <span className="flex items-center gap-1.5">
             <span
               className="inline-block w-1.5 h-1.5 rounded-full"
               style={{ background: COLOR_REQUEST_PENDING }}
             />
-            <span>Pending</span>
+            <span>Pending request</span>
           </span>
           <span className="flex items-center gap-1.5">
             <span
               className="inline-block w-1.5 h-1.5 rounded-full"
               style={{ background: COLOR_REQUEST_COMPLETED }}
             />
-            <span>Completed</span>
+            <span>Completed request</span>
           </span>
+
           <span className="opacity-30">·</span>
-          <span className="flex items-center gap-1.5">
-            <span className="inline-block w-3 h-0.5 rounded-full" style={{ background: COLOR_WIN_EDGE }} />
-            <span>Winning lead</span>
-          </span>
+
+          {/* Lead types */}
           <span className="flex items-center gap-1.5">
             <span
               className="inline-block w-3 h-0.5 rounded-full"
@@ -1075,20 +1061,20 @@ export function FulfillmentCosmos({
             />
             <span>Submitted lead</span>
           </span>
+          <span className="flex items-center gap-1.5">
+            <span className="inline-block w-3 h-0.5 rounded-full" style={{ background: COLOR_WIN_EDGE }} />
+            <span>Fulfilled lead</span>
+          </span>
+
           <span className="opacity-30">·</span>
+
+          {/* Miner types */}
           <span className="flex items-center gap-1.5">
             <span
               className="inline-block w-1.5 h-1.5 rounded-full border"
               style={{ borderColor: COLOR_TOP_RING, background: 'transparent' }}
             />
             <span>Top miner</span>
-          </span>
-          <span className="opacity-30">·</span>
-          <span>
-            <span className="text-[color:var(--text-primary)]">{stats.requestNodes}</span> req ·{' '}
-            <span className="text-[color:var(--text-primary)]">{stats.minerNodes}</span> miners ·{' '}
-            <span className="text-[color:var(--text-primary)]">{stats.totalLeads}</span> leads ·{' '}
-            <span style={{ color: COLOR_WIN_EDGE }}>{stats.fulfilledLeads}</span> fulfilled
           </span>
         </div>
       )}

@@ -349,11 +349,6 @@ function ContactBlock() {
       aria-label="Contact"
       className="mt-10 lg:mt-12 rounded-2xl border border-slate-800/70 bg-slate-950/40 overflow-hidden"
     >
-      <span
-        className="block h-px"
-        style={{ background: 'linear-gradient(90deg, transparent, #c9a96e 50%, transparent)' }}
-        aria-hidden
-      />
       <div className="px-6 py-6 flex flex-col md:flex-row md:items-center gap-4 md:gap-6">
         <div className="flex items-center gap-3">
           <div>
@@ -367,8 +362,8 @@ function ContactBlock() {
           href="mailto:hello@leadpoet.com"
           className={cn(
             'md:ml-auto inline-flex items-center gap-1.5 px-3.5 py-2 rounded-md text-[12px] font-medium',
-            'text-gold bg-gold-soft border border-gold-strong hover:bg-gold-tint transition-colors',
-            'focus:outline-none focus-visible:ring-2 focus-visible:ring-gold-soft'
+            'text-slate-200 bg-slate-900/60 border border-slate-700/50 hover:bg-slate-800/60 hover:border-slate-600/60 transition-colors',
+            'focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-500/50'
           )}
         >
           hello@leadpoet.com

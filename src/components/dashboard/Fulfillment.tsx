@@ -352,10 +352,8 @@ export function Fulfillment({ onSync }: { onSync?: () => void } = {}) {
   // Per-miner fetch errors. The MinerDetailDialog reads from this so failures
   // are visible to the user instead of producing a blank scores panel.
   const [minerErrors, setMinerErrors] = useState<Record<string, string>>({})
-  const [panelsVisible, setPanelsVisible] = useState(true)
+  const [leaderboardVisible, setLeaderboardVisible] = useState(true)
   const [historyOpen, setHistoryOpen] = useState(false)
-  const [lastSync, setLastSync] = useState<number | null>(null)
-  const [syncPulse, setSyncPulse] = useState(false)
   const searchInputRef = useRef<HTMLInputElement>(null)
   // Last ETag we've seen from the API. Sent back as If-None-Match on the
   // next poll; if the server's data hasn't changed, we get a 304 and skip
@@ -373,9 +371,6 @@ export function Fulfillment({ onSync }: { onSync?: () => void } = {}) {
       // Server tells us nothing changed since our last successful poll.
       // Keep the existing data, just refresh the sync indicator.
       if (res.status === 304) {
-        setLastSync(Date.now())
-        setSyncPulse(true)
-        window.setTimeout(() => setSyncPulse(false), 900)
         onSync?.()
         return
       }
@@ -389,9 +384,6 @@ export function Fulfillment({ onSync }: { onSync?: () => void } = {}) {
       if (json.success) {
         setData(json.data)
         setError(null)
-        setLastSync(Date.now())
-        setSyncPulse(true)
-        window.setTimeout(() => setSyncPulse(false), 900)
         onSync?.()
       } else {
         setError(json.error || 'Unknown error')
@@ -607,6 +599,7 @@ export function Fulfillment({ onSync }: { onSync?: () => void } = {}) {
       reasons: data?.rejectionBreakdown || [],
       passed: data?.scoreTotals?.passed || 0,
       failed: data?.scoreTotals?.failed || 0,
+      sampleSize: data?.scoreTotals?.sampleSize,
       scope: 'global' as const,
       label: '',
       loading: false,
@@ -642,6 +635,21 @@ export function Fulfillment({ onSync }: { onSync?: () => void } = {}) {
         return b.consensus_final_score - a.consensus_final_score
       })
   }, [data, dialogRequest])
+
+  const historyStats = useMemo(() => {
+    if (!data) return { submissions: 0, fulfilled: 0, miners: 0 }
+    let fulfilled = 0
+    const miners = new Set<string>()
+    for (const c of data.allConsensus) {
+      if (c.is_winner) fulfilled += 1
+      miners.add(c.miner_hotkey)
+    }
+    return {
+      submissions: data.allConsensus.length,
+      fulfilled,
+      miners: miners.size,
+    }
+  }, [data])
 
   const handleRequestActivate = useCallback(
     (req: CosmosRequest) => {
@@ -705,8 +713,6 @@ export function Fulfillment({ onSync }: { onSync?: () => void } = {}) {
           focusedMinerHotkey={focusedMinerHotkey}
           onMinerSelect={handleMinerActivate}
           onRequestSelect={(req) => setDialogRequest(req)}
-          lastSync={lastSync}
-          syncPulse={syncPulse}
           onRefresh={fetchData}
           readableReason={readableReason}
           readableStatus={readableStatus}
@@ -791,12 +797,12 @@ export function Fulfillment({ onSync }: { onSync?: () => void } = {}) {
             <span>History</span>
           </button>
           <button
-            onClick={() => setPanelsVisible((v) => !v)}
+            onClick={() => setLeaderboardVisible((v) => !v)}
             className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-[11px] font-medium text-slate-300 bg-slate-900/60 border border-slate-700/50 hover:bg-slate-800/60 hover:text-slate-100 hover:border-slate-600 transition-colors"
-            title={panelsVisible ? 'Hide side panels' : 'Show side panels'}
-            aria-label="Toggle side panels"
+            title={leaderboardVisible ? 'Hide leaderboard' : 'Show leaderboard'}
+            aria-label="Toggle leaderboard"
           >
-            <span>{panelsVisible ? 'Hide' : 'Show'}</span>
+            <span>{leaderboardVisible ? 'Hide leaderboard' : 'Show leaderboard'}</span>
           </button>
         </div>
       </div>
@@ -813,7 +819,7 @@ export function Fulfillment({ onSync }: { onSync?: () => void } = {}) {
           onMinerActivate={handleMinerActivate}
         />
 
-        {panelsVisible && data.leaderboard.length > 0 && (
+        {leaderboardVisible && data.leaderboard.length > 0 && (
           <LeaderboardPanel
             entries={data.leaderboard}
             focusedHotkey={focusedMinerHotkey}
@@ -822,7 +828,6 @@ export function Fulfillment({ onSync }: { onSync?: () => void } = {}) {
           />
         )}
 
-        {panelsVisible && <RejectionPanel view={rejectionView} />}
       </div>
       </div>
       {/* End md:block desktop layout */}
@@ -830,6 +835,8 @@ export function Fulfillment({ onSync }: { onSync?: () => void } = {}) {
       <RequestHistoryDialog
         open={historyOpen}
         requests={data.activeRequests}
+        rejectionView={rejectionView}
+        cosmosStats={historyStats}
         onSelectRequest={(req) => {
           setHistoryOpen(false)
           setDialogRequest(req)
@@ -884,7 +891,7 @@ function LeaderboardPanel({
   return (
     <div
       data-keep-open
-      className="absolute top-3 right-3 w-72 max-w-[calc(100%-1.5rem)] bg-slate-950/80 backdrop-blur-md rounded-xl border border-slate-800/80 shadow-2xl shadow-black/40 overflow-hidden animate-in fade-in slide-in-from-right-2 duration-200"
+      className="absolute top-3 right-3 w-72 max-w-[calc(100%-1.5rem)] bg-slate-950/80 backdrop-blur-md rounded-xl border border-slate-800/80 shadow-2xl shadow-black/40 overflow-hidden"
     >
       <div className="flex items-center gap-2 px-3.5 py-2.5 border-b border-slate-800/70 bg-gradient-to-b from-slate-900/80 to-slate-900/40">
         <span className="text-[11px] font-semibold text-slate-100">Top miners</span>
@@ -931,95 +938,90 @@ function LeaderboardPanel({
   )
 }
 
-/* ============================================================
- * Rejection panel (premium)
- * ============================================================ */
-function RejectionPanel({
+type RejectionView = {
+  reasons: { reason: string; count: number }[]
+  passed: number
+  failed: number
+  sampleSize?: number
+  scope: 'global' | 'miner'
+  label: string
+  loading: boolean
+}
+
+function RejectionReasonsContent({
   view,
+  maxRows,
+  className,
 }: {
-  view: {
-    reasons: { reason: string; count: number }[]
-    passed: number
-    failed: number
-    scope: 'global' | 'miner'
-    label: string
-    loading: boolean
-  }
+  view: RejectionView
+  maxRows?: number
+  className?: string
 }) {
-  const top = view.reasons.slice(0, 7)
-  const maxCount = Math.max(1, ...top.map((r) => r.count))
+  const rows = typeof maxRows === 'number' ? view.reasons.slice(0, maxRows) : view.reasons
+  const maxCount = Math.max(1, ...rows.map((r) => r.count))
+  const totalEvaluated = view.passed + view.failed
+
   return (
-    <div
-      data-keep-open
-      className={cn(
-        'absolute bottom-3 right-3 w-80 max-w-[calc(100%-1.5rem)] bg-slate-950/80 backdrop-blur-md rounded-xl border shadow-2xl shadow-black/40 overflow-hidden animate-in fade-in slide-in-from-bottom-2 duration-300',
-        view.scope === 'miner'
-          ? 'border-gold-strong ring-1 ring-gold-soft'
-          : 'border-slate-800/80'
-      )}
-    >
-      <div className="flex items-center gap-2 px-3.5 py-2.5 border-b border-slate-800/70 bg-gradient-to-b from-slate-900/80 to-slate-900/40">
-        <span className="text-[11px] font-semibold text-slate-100">Rejection reasons</span>
-        {view.scope === 'miner' ? (
-          <span
-            className="ml-auto text-[10px] text-gold font-mono bg-gold-soft border border-gold-soft rounded px-1.5 py-0.5"
-            title={view.label}
-          >
-            {truncateHotkey(view.label)}
+    <div className={cn('space-y-3', className)}>
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[10px] font-mono text-slate-500">
+        <span>
+          Failed <span className="text-slate-300 tabular-nums">{view.failed}</span>
+        </span>
+        <span>
+          Passed <span className="text-slate-300 tabular-nums">{view.passed}</span>
+        </span>
+        <span>
+          Evaluated <span className="text-slate-300 tabular-nums">{totalEvaluated}</span>
+        </span>
+        {view.sampleSize && (
+          <span title="Global rejection breakdown is computed from the most recent fulfillment score sample returned by the API.">
+            Sample <span className="text-slate-300 tabular-nums">last {view.sampleSize}</span>
           </span>
-        ) : (
-          <span className="ml-auto text-[10px] text-slate-500 font-mono">all miners</span>
         )}
       </div>
 
-      <div className="px-3.5 py-2.5 space-y-2 max-h-[320px] overflow-y-auto">
-        {view.loading ? (
-          <div className="flex items-center gap-2 text-xs text-slate-500 py-3">
-            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            Loading scores...
-          </div>
-        ) : top.length === 0 ? (
-          <div className="text-center py-3 text-xs text-slate-500">
-            {view.scope === 'miner' ? 'No rejections. Clean miner.' : 'No rejection data.'}
-          </div>
-        ) : (
-          top.map(({ reason, count }, idx) => {
-            const pct = (count / maxCount) * 100
-            const ofTotal = view.failed > 0 ? (count / view.failed) * 100 : 0
-            // gradient severity: top entries deeper
-            const severity = 1 - idx / Math.max(1, top.length - 1) * 0.45
-            return (
-              <div key={reason} className="group">
-                <div className="flex items-center justify-between mb-1 text-[10px]">
-                  <span
-                    className="text-slate-200 truncate"
-                    title={readableReason(reason) + ` · ${reason}`}
-                  >
-                    {readableReason(reason)}
-                  </span>
-                  <span className="flex items-center gap-2 text-slate-500 font-mono shrink-0 ml-2 tabular-nums">
-                    <span>{ofTotal.toFixed(0)}%</span>
-                    <span className="text-slate-300 w-6 text-right">{count}</span>
-                  </span>
-                </div>
-                <div className="h-1.5 rounded-full bg-slate-800/60 overflow-hidden">
-                  <div
-                    className="h-full rounded-full"
-                    style={{
-                      // Dusty burgundy. Saturates at the top entries, fades for the tail.
-                      // Was a vivid rose gradient (244/63/94 → 251/113/133); replaced
-                      // with a desaturated maroon to feel editorial rather than alarmist.
-                      width: `${pct}%`,
-                      background: `linear-gradient(90deg, rgba(168, 116, 111, ${0.6 + severity * 0.3}) 0%, rgba(196, 142, 137, ${0.5 + severity * 0.3}) 100%)`,
-                      transition: 'width 320ms cubic-bezier(0.16, 1, 0.3, 1)',
-                    }}
-                  />
-                </div>
+      {view.loading ? (
+        <div className="flex items-center gap-2 text-xs text-slate-500 py-3">
+          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          Loading scores...
+        </div>
+      ) : rows.length === 0 ? (
+        <div className="text-center py-3 text-xs text-slate-500">
+          {view.scope === 'miner' ? 'No rejections. Clean miner.' : 'No rejection data.'}
+        </div>
+      ) : (
+        rows.map(({ reason, count }, idx) => {
+          const pct = (count / maxCount) * 100
+          const ofTotal = view.failed > 0 ? (count / view.failed) * 100 : 0
+          const severity = 1 - idx / Math.max(1, rows.length - 1) * 0.45
+          return (
+            <div key={reason} className="group">
+              <div className="flex items-center justify-between mb-1 text-[10px]">
+                <span
+                  className="text-slate-200 truncate"
+                  title={readableReason(reason) + ` · ${reason}`}
+                >
+                  {readableReason(reason)}
+                </span>
+                <span className="flex items-center gap-2 text-slate-500 font-mono shrink-0 ml-2 tabular-nums">
+                  <span>{ofTotal.toFixed(0)}%</span>
+                  <span className="text-slate-300 w-6 text-right">{count}</span>
+                </span>
               </div>
-            )
-          })
-        )}
-      </div>
+              <div className="h-1.5 rounded-full bg-slate-800/60 overflow-hidden">
+                <div
+                  className="h-full rounded-full"
+                  style={{
+                    width: `${pct}%`,
+                    background: `linear-gradient(90deg, rgba(168, 116, 111, ${0.6 + severity * 0.3}) 0%, rgba(196, 142, 137, ${0.5 + severity * 0.3}) 100%)`,
+                    transition: 'width 320ms cubic-bezier(0.16, 1, 0.3, 1)',
+                  }}
+                />
+              </div>
+            </div>
+          )
+        })
+      )}
     </div>
   )
 }
@@ -1033,30 +1035,29 @@ function RejectionPanel({
 function RequestHistoryDialog({
   open,
   requests,
+  rejectionView,
+  cosmosStats,
   onSelectRequest,
   onOpenChange,
 }: {
   open: boolean
   requests: ActiveRequest[]
+  rejectionView: RejectionView
+  cosmosStats: { submissions: number; fulfilled: number; miners: number }
   onSelectRequest: (req: ActiveRequest) => void
   onOpenChange: (open: boolean) => void
 }) {
   const [query, setQuery] = useState('')
   const [scope, setScope] = useState<FilterMode>('all')
+  const [mode, setMode] = useState<'requests' | 'rejections'>('requests')
 
   useEffect(() => {
     if (!open) {
       setQuery('')
       setScope('all')
+      setMode('requests')
     }
   }, [open])
-
-  const counts = useMemo(() => {
-    const all = requests.length
-    const pending = requests.filter((r) => PENDING_STATUSES.includes(r.status)).length
-    const completed = requests.filter((r) => r.status === 'fulfilled').length
-    return { all, pending, completed }
-  }, [requests])
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -1082,23 +1083,75 @@ function RequestHistoryDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:w-[calc(100vw-3rem)] sm:max-w-[1400px] sm:max-h-[90vh] overflow-hidden flex flex-col bg-slate-950 border-slate-800 text-slate-100 p-0 sm:p-0 gap-0">
+      <DialogContent
+        aria-describedby={undefined}
+        className="sm:w-[calc(100vw-3rem)] sm:max-w-[1400px] sm:max-h-[90vh] overflow-hidden flex flex-col bg-slate-950 border-slate-800 text-slate-100 p-0 sm:p-0 gap-0"
+      >
         <DialogHeader className="px-5 py-4 border-b border-slate-800/80 space-y-3 text-left">
           <div className="flex items-center gap-2 pr-8">
             <DialogTitle className="text-sm font-semibold text-slate-100">
-              Request history
+              {mode === 'requests' ? 'Request history' : 'Rejection reasons'}
             </DialogTitle>
-            <span className="ml-auto text-[10px] text-slate-500 font-mono tabular-nums">
-              {counts.all} total · {counts.pending} pending · {counts.completed} completed
-            </span>
+            {mode === 'rejections' && (
+              <span className="ml-auto text-[10px] text-slate-500 font-mono tabular-nums">
+                {rejectionView.failed} failed · {rejectionView.passed} passed
+              </span>
+            )}
           </div>
+
+          {mode === 'requests' && (
+            <div className="grid grid-cols-3 gap-2">
+              <HistoryStat label="Miners" value={cosmosStats.miners} tone="neutral" />
+              <HistoryStat label="Submitted leads" value={cosmosStats.submissions} tone="neutral" />
+              <HistoryStat label="Fulfilled leads" value={cosmosStats.fulfilled} tone="gold" />
+            </div>
+          )}
 
           <div className="flex flex-col sm:flex-row sm:items-center gap-2">
             <div className="inline-flex items-center gap-1 p-1 rounded-lg bg-slate-900/60 border border-slate-700/50 self-start">
-              <HistoryTab active={scope === 'all'} onClick={() => setScope('all')} label="All" count={counts.all} tone="neutral" />
-              <HistoryTab active={scope === 'pending'} onClick={() => setScope('pending')} label="Pending" count={counts.pending} tone="pending" />
-              <HistoryTab active={scope === 'completed'} onClick={() => setScope('completed')} label="Completed" count={counts.completed} tone="completed" />
+              <HistoryTab
+                active={mode === 'requests' && scope === 'all'}
+                onClick={() => {
+                  setMode('requests')
+                  setScope('all')
+                }}
+                label="All"
+                tone="neutral"
+              />
+              <HistoryTab
+                active={mode === 'requests' && scope === 'pending'}
+                onClick={() => {
+                  setMode('requests')
+                  setScope('pending')
+                }}
+                label="Pending"
+                tone="pending"
+              />
+              <HistoryTab
+                active={mode === 'requests' && scope === 'completed'}
+                onClick={() => {
+                  setMode('requests')
+                  setScope('completed')
+                }}
+                label="Completed"
+                tone="completed"
+              />
+              <button
+                onClick={() => setMode('rejections')}
+                className={cn(
+                  'flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-medium border transition-all',
+                  mode === 'rejections'
+                    ? 'bg-burgundy-soft text-burgundy border-burgundy-soft'
+                    : 'bg-transparent text-slate-400 border-transparent hover:text-slate-200 hover:bg-slate-800/40'
+                )}
+              >
+                <span>Rejection reasons</span>
+                <span className={cn('text-[10px] font-mono tabular-nums', mode === 'rejections' ? 'text-current/70' : 'text-slate-500')}>
+                  {rejectionView.failed}
+                </span>
+              </button>
             </div>
+            {mode === 'requests' && (
             <div className="relative sm:flex-1 sm:max-w-md">
               <input
                 type="text"
@@ -1128,11 +1181,16 @@ function RequestHistoryDialog({
                 )}
               </div>
             </div>
+            )}
           </div>
         </DialogHeader>
 
         <div className="flex-1 overflow-y-auto overflow-x-hidden">
-          {filtered.length === 0 ? (
+          {mode === 'rejections' ? (
+            <div className="p-5">
+              <RejectionReasonsContent view={rejectionView} />
+            </div>
+          ) : filtered.length === 0 ? (
             <div className="text-center py-16 text-sm text-slate-500">
               No requests match the current filter.
             </div>
@@ -1162,6 +1220,28 @@ function RequestHistoryDialog({
   )
 }
 
+function HistoryStat({
+  label,
+  value,
+  tone,
+}: {
+  label: string
+  value: number
+  tone: 'gold' | 'neutral'
+}) {
+  const valueClass = tone === 'gold' ? 'text-gold' : 'text-slate-100'
+  return (
+    <div className="rounded-md border border-slate-800/80 bg-slate-900/40 px-3 py-2">
+      <div className="text-[10px] uppercase tracking-wider text-slate-500 font-mono">
+        {label}
+      </div>
+      <div className={cn('text-lg font-semibold tabular-nums leading-tight mt-0.5', valueClass)}>
+        {value.toLocaleString()}
+      </div>
+    </div>
+  )
+}
+
 function HistoryTab({
   active,
   onClick,
@@ -1172,7 +1252,7 @@ function HistoryTab({
   active: boolean
   onClick: () => void
   label: string
-  count: number
+  count?: number
   tone: 'neutral' | 'pending' | 'completed'
 }) {
   const activeBg =
@@ -1192,14 +1272,16 @@ function HistoryTab({
       )}
     >
       <span>{label}</span>
-      <span
-        className={cn(
-          'text-[10px] font-mono tabular-nums',
-          active ? 'text-current/70' : 'text-slate-500'
-        )}
-      >
-        {count}
-      </span>
+      {count !== undefined && (
+        <span
+          className={cn(
+            'text-[10px] font-mono tabular-nums',
+            active ? 'text-current/70' : 'text-slate-500'
+          )}
+        >
+          {count}
+        </span>
+      )}
     </button>
   )
 }
@@ -1348,7 +1430,10 @@ function RequestDetailDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-3xl sm:w-[calc(100%-2rem)] sm:max-h-[85vh] overflow-hidden flex flex-col bg-slate-950 border-slate-800 text-slate-100 p-0 sm:p-0 gap-0">
+      <DialogContent
+        aria-describedby={undefined}
+        className="sm:max-w-3xl sm:w-[calc(100%-2rem)] sm:max-h-[85vh] overflow-hidden flex flex-col bg-slate-950 border-slate-800 text-slate-100 p-0 sm:p-0 gap-0"
+      >
         <DialogHeader className="px-5 py-4 border-b border-slate-800/80 space-y-2 text-left">
           <div className="flex items-center gap-2 pr-8">
             <DialogTitle className="text-sm font-mono text-slate-100">

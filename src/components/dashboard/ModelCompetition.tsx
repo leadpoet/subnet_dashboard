@@ -17,6 +17,7 @@ import {
   Check,
   ChevronRight,
   AlertTriangle,
+  Crown,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -184,6 +185,19 @@ function formatDate(dateStr: string): string {
   })
 }
 
+// Shorter date format used in the ChampionHero "Champion since" line.
+// Drops the time component; the live "Reigning for X" counter on the right
+// already communicates duration, so the time-of-day is redundant clutter,
+// especially on narrow viewports.
+function formatChampionSinceDate(dateStr: string): string {
+  const date = new Date(dateStr)
+  return date.toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  })
+}
+
 // Helper to format PostgreSQL interval to readable string
 function formatDuration(interval: string | null): string {
   if (!interval) return 'Current'
@@ -248,20 +262,6 @@ function formatCountdown(secondsRemaining: number): string | null {
   return `${d}d ${h % 24}h`
 }
 
-/**
- * Deterministic, muted color swatch from hotkey. Matches the Fulfillment
- * avatar convention. 22% saturation so each badge reads as a chromatic
- * neutral rather than a vivid Tailwind hue.
- */
-function hotkeySwatch(hotkey: string): { hue: number; hex: string; initials: string } {
-  let h = 0
-  for (let i = 0; i < hotkey.length; i++) {
-    h = (h * 33 + hotkey.charCodeAt(i)) | 0
-  }
-  const hue = Math.abs(h) % 360
-  const initials = hotkey.slice(2, 4).toUpperCase()
-  return { hue, hex: `hsl(${hue}, 22%, 58%)`, initials }
-}
 
 /**
  * Smooth count-up animation for premium stat displays. Lifted from Fulfillment
@@ -330,7 +330,7 @@ function StatusBadge({ status }: { status: string }) {
       )
     case 'evaluating':
       return (
-        <span className="inline-flex items-center gap-1 text-[10px] rounded px-1.5 py-0.5 border font-medium bg-amber-warm-soft text-amber-warm border-amber-warm-soft">
+        <span className="inline-flex items-center gap-1 text-[10px] rounded px-1.5 py-0.5 border font-medium bg-cream-soft text-cream border-cream-soft">
           <Loader2 className="h-2.5 w-2.5 animate-spin" aria-hidden />
           Evaluating
         </span>
@@ -831,6 +831,7 @@ function ChampionDetailDialog({
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent
+        aria-describedby={undefined}
         className={cn(
           'bg-slate-950 border-slate-800 text-slate-100 shadow-2xl shadow-black/60',
           'overflow-hidden flex flex-col p-0 outline-none gap-0',
@@ -1101,6 +1102,7 @@ function SubmissionDetailDialog({
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent
+        aria-describedby={undefined}
         className={cn(
           'bg-slate-950 border-slate-800 text-slate-100 shadow-2xl shadow-black/60',
           'overflow-hidden flex flex-col p-0 outline-none gap-0',
@@ -1456,7 +1458,6 @@ function ChampionHero({
   onOpen: () => void
 }) {
   useTick(1000) // re-render for live reign counter
-  const swatch = hotkeySwatch(champion.minerHotkey)
   const reignSeconds = Math.max(
     0,
     Math.floor((Date.now() - new Date(champion.championAt).getTime()) / 1000)
@@ -1492,54 +1493,59 @@ function ChampionHero({
 
       <div className="px-5 sm:px-7 py-5 sm:py-6">
         {/* Header: small label + live reign on the right */}
-        <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center justify-between mb-4 gap-3">
           <div className="text-[10px] uppercase tracking-[0.18em] text-gold font-semibold">
             Current champion
           </div>
-          <div className="text-[10px] font-mono text-slate-400 tabular-nums">
-            <span className="text-slate-500">Reigning for </span>
+          <div className="text-[10px] font-mono text-slate-400 tabular-nums shrink-0">
+            <span className="text-slate-500 hidden sm:inline">Reigning for </span>
             <span className="text-gold">{formatLiveDuration(reignSeconds)}</span>
           </div>
         </div>
 
-        {/* Body: avatar + identity on the left, score on the right */}
-        <div className="flex items-center gap-4 sm:gap-6 flex-wrap">
-          {/* Avatar */}
-          <div
-            className="w-14 h-14 sm:w-16 sm:h-16 rounded-full flex items-center justify-center text-base font-bold text-slate-950 shadow-lg shrink-0"
-            style={{
-              background: `linear-gradient(135deg, hsl(${swatch.hue}, 22%, 66%), hsl(${swatch.hue}, 22%, 46%))`,
-              boxShadow: `0 0 0 1px hsl(${swatch.hue}, 22%, 58%, 0.4), 0 12px 32px -10px hsl(${swatch.hue}, 22%, 36%, 0.55)`,
-            }}
-            aria-hidden
-          >
-            {swatch.initials}
-          </div>
-
-          {/* Identity */}
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2 flex-wrap">
-              <code className="text-sm sm:text-base font-mono text-slate-100 truncate" title={champion.minerHotkey}>
-                {truncateHotkey(champion.minerHotkey)}
-              </code>
-              <CopyButton text={champion.minerHotkey} ariaLabel="Copy champion hotkey" />
+        {/* Body: stacks vertically on mobile, horizontal on desktop. */}
+        <div className="flex flex-col sm:flex-row sm:items-center gap-4 sm:gap-6">
+          {/* Avatar + identity. Champion gets a gold crown avatar — the
+              one place gold is reserved for the active champion identity,
+              not derived from the hotkey hash. */}
+          <div className="flex items-center gap-4 min-w-0">
+            <div
+              className="w-14 h-14 sm:w-16 sm:h-16 rounded-full flex items-center justify-center shadow-lg shrink-0"
+              style={{
+                background:
+                  'linear-gradient(135deg, rgba(232, 201, 135, 0.18), rgba(201, 169, 110, 0.08))',
+                boxShadow:
+                  '0 0 0 1px rgba(201, 169, 110, 0.45), 0 12px 32px -10px rgba(201, 169, 110, 0.35)',
+              }}
+              aria-label="Current champion"
+            >
+              <Crown
+                className="h-6 w-6 sm:h-7 sm:w-7 text-gold"
+                strokeWidth={1.75}
+                aria-hidden
+              />
             </div>
-            {champion.modelName && (
-              <div className="text-[12px] text-slate-400 mt-0.5 font-mono truncate">
-                {champion.modelName}
+
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2">
+                <code className="text-sm sm:text-base font-mono text-slate-100 truncate" title={champion.minerHotkey}>
+                  {truncateHotkey(champion.minerHotkey)}
+                </code>
+                <CopyButton text={champion.minerHotkey} ariaLabel="Copy champion hotkey" />
               </div>
-            )}
-            <div className="text-[11px] text-slate-500 mt-1.5">
-              Champion since <span className="text-slate-300">{formatDate(champion.championAt)}</span>
+              <div className="text-[11px] text-slate-500 mt-1.5">
+                Champion since{' '}
+                <span className="text-slate-300">{formatChampionSinceDate(champion.championAt)}</span>
+              </div>
             </div>
           </div>
 
-          {/* Score block */}
-          <div className="text-right">
+          {/* Score block. Full width on mobile (own row), right-aligned on desktop. */}
+          <div className="text-left sm:text-right sm:ml-auto sm:shrink-0">
             <div className="text-[10px] text-slate-500 uppercase tracking-[0.12em] font-medium">
               Score
             </div>
-            <div className="flex items-baseline gap-1 justify-end mt-0.5">
+            <div className="flex items-baseline gap-1 justify-start sm:justify-end mt-0.5">
               <CountUp
                 value={champion.score}
                 decimals={2}
@@ -1566,8 +1572,8 @@ function ChampionHero({
           <div className="flex items-center gap-2 text-[11px] text-slate-400">
             {codeUnlocked ? (
               <>
-                <Eye className="h-3.5 w-3.5 text-gold" aria-hidden />
-                <span>Code available, view in breakdown</span>
+                <Eye className="h-3.5 w-3.5 text-slate-500" aria-hidden />
+                <span>Code available</span>
               </>
             ) : (
               <>
@@ -1590,14 +1596,12 @@ function ChampionHero({
             <span className="text-base font-mono font-semibold text-gold-bright tabular-nums">
               {beatToWin.toFixed(2)}
             </span>
-            <span className="text-[10px] text-slate-500">
-              (+{CHALLENGE_THRESHOLD_PCT}%)
-            </span>
           </div>
 
-          {/* Click-to-open affordance. The whole hero is the trigger;
-              this is a subtle visual cue that follows the gold accent. */}
-          <span className="inline-flex items-center gap-1 text-[11px] font-medium text-slate-400 group-hover:text-gold transition-colors">
+          {/* Click-to-open affordance. The whole hero is the trigger; this
+              is a subtle visual cue. Hidden on mobile to keep the bottom
+              strip uncluttered (whole card is already a tap target). */}
+          <span className="hidden sm:inline-flex items-center gap-1 text-[11px] font-medium text-slate-400 group-hover:text-gold transition-colors">
             View score breakdown
             <ChevronRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" aria-hidden />
           </span>
@@ -1845,13 +1849,11 @@ function ChallengersBoard({
         </span>
       </header>
       {/* Column header */}
-      <div className="hidden md:grid grid-cols-[2rem_1fr_minmax(0,1.2fr)_4.5rem_4rem_6rem] gap-3 px-4 py-1.5 text-[9px] text-slate-500 font-mono uppercase tracking-[0.06em] bg-slate-900/40 border-b border-slate-800/60">
+      <div className="hidden md:grid grid-cols-[2rem_1fr_6rem_5rem] gap-3 px-4 py-1.5 text-[9px] text-slate-500 font-mono uppercase tracking-[0.06em] bg-slate-900/40 border-b border-slate-800/60">
         <span className="text-right">#</span>
         <span>Hotkey</span>
-        <span>Model</span>
         <span className="text-right">Score</span>
         <span className="text-right">Time</span>
-        <span>Status</span>
       </div>
       <div className="max-h-[420px] overflow-y-auto divide-y divide-slate-800/60">
         {challengers.map((s, idx) => (
@@ -1878,52 +1880,54 @@ function ChallengerRow({
   const isEvaluating = submission.status === 'evaluating'
   const isSubmitted = submission.status === 'submitted'
   const isEvaluated = submission.status === 'evaluated'
+  const hasScore = isEvaluated && submission.score !== null
 
   return (
     <button
       type="button"
       onClick={onSelect}
       className={cn(
-        'w-full grid grid-cols-[2rem_minmax(0,1fr)_4.5rem] md:grid-cols-[2rem_1fr_minmax(0,1.2fr)_4.5rem_4rem_6rem] gap-2 md:gap-3 items-center px-4 py-3 md:py-2.5 text-[11px] text-left transition-colors',
+        'w-full grid grid-cols-[2rem_minmax(0,1fr)_auto] md:grid-cols-[2rem_1fr_6rem_5rem] gap-2 md:gap-3 items-center px-4 py-2.5 text-[11px] text-left transition-colors',
         'hover-bg-warm focus:outline-none focus:bg-slate-800/40',
-        isEvaluating && 'pending-breath'
+        (isEvaluating || isSubmitted) && 'pending-breath'
       )}
       title={`View submission ${submission.minerHotkey}`}
     >
       <span className="text-[10px] font-mono text-slate-500 text-right tabular-nums">
         {String(rank).padStart(2, '0')}
       </span>
-      <div className="flex items-center gap-2 min-w-0">
-        <code className="font-mono text-slate-200 truncate" title={submission.minerHotkey}>
-          {truncateHotkey(submission.minerHotkey)}
-        </code>
-        {isEvaluated && (
-          submission.canShowCode ? (
-            <Eye className="h-3 w-3 text-gold shrink-0" aria-label="Code available" />
-          ) : (
-            <Lock className="h-3 w-3 text-slate-500 shrink-0" aria-label="Code locked" />
-          )
-        )}
+      <div className="flex flex-col min-w-0 gap-0.5 md:flex-row md:items-center md:gap-2">
+        <div className="flex items-center gap-2 min-w-0">
+          <code className="font-mono text-slate-200 truncate" title={submission.minerHotkey}>
+            {truncateHotkey(submission.minerHotkey)}
+          </code>
+          {isEvaluated && (
+            submission.canShowCode ? (
+              <Eye className="h-3 w-3 text-slate-500 shrink-0" aria-label="Code available" />
+            ) : (
+              <Lock className="h-3 w-3 text-slate-500 shrink-0" aria-label="Code locked" />
+            )
+          )}
+        </div>
+        <span className="md:hidden font-mono text-slate-500 tabular-nums text-[10px]">
+          {getRelativeTime(submission.createdAt)}
+        </span>
       </div>
-      <span className="font-mono text-slate-400 truncate text-[10px] col-start-2 col-span-2 md:col-start-auto md:col-span-1" title={submission.modelName}>
-        {submission.modelName || <span className="text-slate-600">·</span>}
-      </span>
-      <span
-        className={cn(
-          'font-mono font-semibold text-right tabular-nums',
-          submission.score !== null ? 'text-gold' : 'text-slate-600'
-        )}
-      >
-        {submission.score !== null ? submission.score.toFixed(2) : '·'}
-      </span>
-      <span className="font-mono text-slate-500 tabular-nums text-[10px] col-start-2 md:col-start-auto md:text-right">
+      {/* Score-or-status column. When the submission is evaluated, we show
+          the score in gold; otherwise we show "Evaluating" inline so the
+          column always reads as a status of progress. */}
+      {hasScore ? (
+        <span className="font-mono font-semibold text-right tabular-nums tracking-tight text-gold">
+          {submission.score!.toFixed(2)}
+        </span>
+      ) : (
+        <span className="flex items-center justify-end gap-1.5 text-[10px] font-mono text-slate-400">
+          <Loader2 className="h-3 w-3 animate-spin text-slate-500" aria-hidden />
+          <span>Evaluating</span>
+        </span>
+      )}
+      <span className="hidden md:inline-block font-mono text-slate-500 tabular-nums text-[10px] text-right">
         {getRelativeTime(submission.createdAt)}
-      </span>
-      <span className="flex items-center justify-end md:justify-start gap-1.5 col-start-3 md:col-start-auto">
-        {isSubmitted && (
-          <span className="inline-block w-1 h-1 rounded-full dot-amber pending-breath" aria-hidden />
-        )}
-        <StatusBadge status={submission.status} />
       </span>
     </button>
   )
@@ -1956,7 +1960,7 @@ function PastChampionRow({
           {truncateHotkey(champion.minerHotkey)}
         </code>
         {champion.canShowCode ? (
-          <Eye className="h-3 w-3 text-gold shrink-0" aria-label="Code available" />
+          <Eye className="h-3 w-3 text-slate-500 shrink-0" aria-label="Code available" />
         ) : (
           <Lock className="h-3 w-3 text-slate-500 shrink-0" aria-label="Code locked" />
         )}

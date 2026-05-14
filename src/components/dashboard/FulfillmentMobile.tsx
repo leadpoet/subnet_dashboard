@@ -71,8 +71,6 @@ interface Props {
   focusedMinerHotkey: string | null
   onMinerSelect: (hotkey: string) => void
   onRequestSelect: (req: ActiveRequest) => void
-  lastSync: number | null
-  syncPulse: boolean
   onRefresh: () => Promise<void> | void
   readableReason: (reason: string) => string
   readableStatus: (status: string) => string
@@ -173,8 +171,6 @@ export function FulfillmentMobile({
   focusedMinerHotkey,
   onMinerSelect,
   onRequestSelect,
-  lastSync,
-  syncPulse,
   onRefresh,
   readableReason,
   readableStatus,
@@ -202,7 +198,11 @@ export function FulfillmentMobile({
     const miners = new Set(
       allConsensus.map((c) => c.miner_hotkey).filter((h): h is string => Boolean(h)),
     ).size
-    return { fulfilledLeads, miners }
+    return {
+      fulfilledLeads,
+      miners,
+      submittedLeads: allConsensus.length,
+    }
   }, [allConsensus])
 
   // Filtered + sorted request list
@@ -237,14 +237,6 @@ export function FulfillmentMobile({
     return m
   }, [allConsensus])
 
-  const lastSyncLabel = useMemo(() => {
-    if (lastSync === null) return ''
-    const diff = (Date.now() - lastSync) / 1000
-    if (diff < 60) return 'just now'
-    if (diff < 3600) return `${Math.floor(diff / 60)}m ago`
-    return `${Math.floor(diff / 3600)}h ago`
-  }, [lastSync])
-
   return (
     <div
       ref={scrollRef}
@@ -273,55 +265,15 @@ export function FulfillmentMobile({
         </div>
       )}
 
-      {/* Sticky header */}
-      <div className="sticky top-0 z-30 bg-slate-950/95 backdrop-blur-md border-b border-slate-800/60 -mx-0 px-4 pt-3 pb-3 safe-top">
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-base font-semibold text-slate-100 tracking-tight">Fulfillment</h2>
-          {lastSync !== null && (
-            <div className="flex items-center gap-1.5 text-[10px] font-mono text-slate-500">
-              <span
-                className={cn(
-                  'inline-block w-1.5 h-1.5 rounded-full dot-gold',
-                  syncPulse ? 'live-pulse' : 'opacity-70'
-                )}
-              />
-              <span>Synced {lastSyncLabel}</span>
-            </div>
-          )}
-        </div>
-
-        {/* Search */}
-        <div className="relative">
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search hotkey, request id, or industry"
-            className="w-full pl-3 pr-9 h-10 bg-slate-900/60 border border-slate-700/50 rounded-lg text-xs font-mono text-slate-100 placeholder:text-slate-500 outline-none premium-focus transition-colors"
-            inputMode="search"
-            autoComplete="off"
-            autoCorrect="off"
-            spellCheck={false}
-          />
-          {searchQuery && (
-            <button
-              onClick={() => setSearchQuery('')}
-              className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-200 transition-colors p-1"
-              aria-label="Clear search"
-            >
-              <X className="h-3.5 w-3.5" />
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* Body sections: comfortable spacing */}
-      <div className="px-4 py-4 space-y-4 safe-bottom">
+      {/* Body sections: comfortable spacing. The redundant "Fulfillment"
+          masthead is omitted on mobile because the tab bar already labels
+          this view. The sync indicator lives in the global masthead. */}
+      <div className="px-4 pt-4 pb-4 space-y-4 safe-bottom safe-top">
         {/* At-a-glance stat strip */}
         <section className="mobile-section">
           <div className="grid grid-cols-3 divide-x divide-slate-800/60">
-            <StatCell label="Done" value={counts.completed} tone="default" />
             <StatCell label="Miners" value={stats.miners} tone="default" />
+            <StatCell label="Submitted" value={stats.submittedLeads} tone="default" />
             <StatCell label="Fulfilled" value={stats.fulfilledLeads} tone="gold" />
           </div>
         </section>
@@ -442,31 +394,66 @@ export function FulfillmentMobile({
           )}
         </section>
 
-        {/* Request history */}
-        <section className="mobile-section">
-          <SectionHeader
-            title="Request history"
-            subtitle={`${filteredRequests.length}`}
-          />
-          {filteredRequests.length === 0 ? (
-            <div className="px-4 py-10 text-center text-xs text-slate-500">
-              No requests match the current filter.
+        {/* Request history. The header (title + count + search) is sticky
+            just under the masthead so users can keep filtering as they
+            scroll through long request lists. We render the sticky header
+            OUTSIDE the rounded card because `overflow: hidden` (used to
+            clip rounded corners on `mobile-section`) breaks descendants
+            with `position: sticky`. The bg colors mirror `mobile-section`
+            so this section reads as a peer to "Top miners" and "Rejection
+            reasons" rather than a different visual layer. */}
+        <section>
+          <div className="sticky top-0 z-20 rounded-t-[0.875rem] border border-b-0 border-[var(--surface-border)] bg-[rgba(16,16,19,0.92)] backdrop-blur-md overflow-hidden">
+            <div className="flex items-center gap-2 px-4 py-2.5 bg-slate-900/40 border-b border-slate-800/60">
+              <span className="text-xs font-semibold text-slate-100">Request history</span>
+              <span className="ml-auto text-[10px] text-slate-500 font-mono tabular-nums">
+                {filteredRequests.length}
+              </span>
             </div>
-          ) : (
-            <div className="divide-y divide-slate-800/60">
-              {filteredRequests.map((req) => (
-                <RequestMobileCard
-                  key={req.request_id}
-                  request={req}
-                  winners={winnersByRequest.get(req.request_id) || 0}
-                  onSelect={() => onRequestSelect(req)}
-                  readableStatus={readableStatus}
-                  asText={asText}
-                  formatDate={formatDate}
-                />
-              ))}
+            <div className="relative px-4 py-2.5">
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Filter by request id, industry, or country"
+                className="w-full pl-3 pr-9 h-9 bg-slate-900/80 border border-slate-700/50 rounded-lg text-xs font-mono text-slate-100 placeholder:text-slate-500 outline-none premium-focus transition-colors"
+                inputMode="search"
+                autoComplete="off"
+                autoCorrect="off"
+                spellCheck={false}
+              />
+              {searchQuery && (
+                <button
+                  onClick={() => setSearchQuery('')}
+                  className="absolute right-6 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-200 transition-colors p-1"
+                  aria-label="Clear search"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              )}
             </div>
-          )}
+          </div>
+          <div className="rounded-b-[0.875rem] border border-t-0 border-[var(--surface-border)] bg-[rgba(16,16,19,0.65)] overflow-hidden">
+            {filteredRequests.length === 0 ? (
+              <div className="px-4 py-10 text-center text-xs text-slate-500">
+                No requests match the current filter.
+              </div>
+            ) : (
+              <div className="divide-y divide-slate-800/60">
+                {filteredRequests.map((req) => (
+                  <RequestMobileCard
+                    key={req.request_id}
+                    request={req}
+                    winners={winnersByRequest.get(req.request_id) || 0}
+                    onSelect={() => onRequestSelect(req)}
+                    readableStatus={readableStatus}
+                    asText={asText}
+                    formatDate={formatDate}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
         </section>
       </div>
     </div>

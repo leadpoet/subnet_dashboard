@@ -11,6 +11,7 @@ import {
   RotateCw,
   Clock,
   AlertTriangle,
+  PlusCircle,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import {
@@ -250,7 +251,7 @@ export function AdminRequestList({
             </button>
           ))}
         </div>
-        <div className="relative flex-1 max-w-md ml-auto">
+        <div className="relative flex-1 max-w-md sm:ml-auto">
           <Search
             className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5"
             style={{ color: 'var(--text-tertiary)' }}
@@ -272,6 +273,13 @@ export function AdminRequestList({
             /
           </span>
         </div>
+        <Link
+          href="/admin/requests/new"
+          className="inline-flex items-center justify-center gap-2 rounded-lg border border-gold-strong bg-gold-soft px-3 py-2 text-sm font-medium text-gold transition-colors hover:bg-gold-tint"
+        >
+          <PlusCircle className="h-4 w-4" />
+          New request
+        </Link>
       </section>
 
       {/* Body */}

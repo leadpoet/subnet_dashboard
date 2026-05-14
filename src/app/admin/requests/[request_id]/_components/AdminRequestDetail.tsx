@@ -1007,14 +1007,14 @@ function Field({
 }) {
   const empty = !value
   return (
-    <div className="flex items-baseline gap-3 text-sm">
+    <div className="flex items-start gap-3 text-sm">
       <span
-        className="text-[11px] uppercase tracking-[0.10em] flex-shrink-0 w-28"
+        className="text-[11px] uppercase tracking-[0.10em] flex-shrink-0 w-28 pt-0.5"
         style={{ color: 'var(--text-tertiary)' }}
       >
         {label}
       </span>
-      <div className="min-w-0 flex-1 flex items-center gap-1.5">
+      <div className="min-w-0 flex-1 flex items-start gap-1.5">
         {icon && <span style={{ color: 'var(--text-tertiary)' }}>{icon}</span>}
         {empty ? (
           <span style={{ color: 'var(--text-tertiary)' }}>—</span>
@@ -1034,7 +1034,7 @@ function Field({
         ) : (
           <span
             className={cn(
-              'truncate',
+              'whitespace-normal break-words leading-relaxed',
               mono ? 'font-mono text-[12px] tabular-nums' : '',
             )}
             style={{ color: 'var(--text-primary)' }}
