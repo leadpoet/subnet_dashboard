@@ -1,54 +1,97 @@
 /**
  * Next.js instrumentation hook.
  *
- * Runs once when the Node.js server process boots. We use it to start
- * the Deep Research auto-sweep loop — a background interval that
- * triggers the sweep route every 60 seconds. Combined with the
- * gateway already writing status='fulfilled' on chain completion, this
- * is what makes the QA pass run *automatically* the moment a chain
- * reaches fulfilled.
+ * Runs once when the Node.js server process boots. This file owns two
+ * unrelated boot-time responsibilities:
  *
- * Why not a Vercel/Linux cron? The deployment is EC2 self-hosted, so
- * an in-process interval is the simplest path that requires no extra
+ *   1. Cache warm-up + background refresh for the public dashboard.
+ *      Pre-warms `dashboard_precalc` so the first user doesn't pay the
+ *      cold-start cost, then schedules 5-minute dashboard refreshes and
+ *      1-minute Model Competition refreshes. Without these timers
+ *      running, `/api/model-competition` returns 503 forever and the
+ *      UI shows "Failed to fetch data".
+ *
+ *   2. Deep Research auto-sweep loop. A background interval that calls
+ *      the QA sweep every 60 seconds so chains hitting status='fulfilled'
+ *      get analyzed automatically, without anyone opening /admin.
+ *
+ * Why not a Vercel/Linux cron? The deployment is EC2 self-hosted, so an
+ * in-process interval is the simplest path that requires no extra
  * deployment surface area. If the dashboard process restarts, the
- * interval restarts with it; the stranded-run sweep recovers anything
- * caught mid-flight.
+ * intervals restart with it; for deep research, the stranded-run sweep
+ * recovers anything caught mid-flight.
  *
  * Guardrails:
  *   - Only runs on the Node.js runtime (skipped during build, edge,
  *     and dev-server compile passes via the NEXT_RUNTIME check below).
- *   - Refuses to schedule a second interval if the function is called
- *     twice (HMR / Next.js sometimes re-imports instrumentation in
- *     dev mode).
- *   - Catches every error so a single bad sweep doesn't kill the
- *     interval.
+ *   - Refuses to schedule a second deep-research interval if `register`
+ *     fires twice (HMR / Next.js sometimes re-imports instrumentation
+ *     in dev mode). The cache module guards its own intervals
+ *     internally, so calling startBackgroundRefresh /
+ *     startModelCompetitionRefresh twice is also safe.
+ *   - Catches every error so a single bad sweep doesn't kill the loop.
  */
 
 // Module-level flag so a re-import (Next.js HMR, dev-mode reload)
-// doesn't stack a second timer on top of the first one.
+// doesn't stack a second deep-research timer on top of the first one.
 let sweepIntervalHandle: NodeJS.Timeout | null = null
 
 const SWEEP_INTERVAL_MS = 60_000
 
-// Skip the very first tick by this much. Lets the rest of the server
-// finish booting (DB pool, route handlers) before we start firing
-// off background OpenRouter calls.
+// Skip the very first deep-research tick by this much. Lets the rest
+// of the server finish booting (DB pool, route handlers, cache warm-up)
+// before we start firing off background OpenRouter calls.
 const SWEEP_INITIAL_DELAY_MS = 15_000
 
 export async function register(): Promise<void> {
-  // The `register()` hook also fires for the Edge runtime, but our
-  // sweep relies on Node-only APIs (setInterval, env vars, Node
-  // supabase client). The runtime check keeps the import graph clean.
   if (process.env.NEXT_RUNTIME !== 'nodejs') return
 
+  // ---------------------------------------------------------------
+  // 1. Public dashboard cache warm-up + background refresh.
+  //    Fire and forget. The cache module guards against duplicate
+  //    intervals on its own, so it's safe even if register() is
+  //    invoked twice.
+  // ---------------------------------------------------------------
+  try {
+    const { warmCache, startBackgroundRefresh, startModelCompetitionRefresh } =
+      await import('./lib/cache')
+
+    console.log('[Server] Starting cache warm-up...')
+
+    warmCache()
+      .then(() => {
+        console.log('[Server] Cache warm-up complete')
+        startBackgroundRefresh()
+        startModelCompetitionRefresh()
+      })
+      .catch((err) => {
+        console.error('[Server] Cache warm-up failed:', err)
+        // Even on warm-up failure, start the refresh loops so the cache
+        // can self-heal on the next tick instead of being permanently
+        // empty (which is what made the Model Competition tab show
+        // "Failed to fetch data").
+        try {
+          startBackgroundRefresh()
+          startModelCompetitionRefresh()
+        } catch (innerErr) {
+          console.error(
+            '[Server] Failed to start refresh loops after warm-up failure:',
+            innerErr,
+          )
+        }
+      })
+  } catch (err) {
+    console.error('[Server] Cache module failed to load:', err)
+  }
+
+  // ---------------------------------------------------------------
+  // 2. Deep Research auto-sweep loop.
+  // ---------------------------------------------------------------
   if (sweepIntervalHandle !== null) {
     console.log('[deep_research] sweep interval already running, skipping')
     return
   }
 
-  // Allow opt-out via env var. Useful for build hosts, smoke tests,
-  // or any environment where we don't want the dashboard to spend
-  // OpenRouter credit.
   if (process.env.DEEP_RESEARCH_SWEEP_DISABLED === 'true') {
     console.log(
       '[deep_research] sweep disabled by DEEP_RESEARCH_SWEEP_DISABLED env',
@@ -58,11 +101,8 @@ export async function register(): Promise<void> {
 
   const tick = async () => {
     try {
-      // Lazy import so the module isn't pulled into the build graph
-      // for routes that don't need it. instrumentation.ts is loaded
-      // BEFORE the rest of the app boots, so a top-level import would
-      // force-load the supabase client at boot even if no sweep ever
-      // runs.
+      // Lazy import so the supabase client isn't pulled into the boot
+      // graph if the sweep never runs.
       const { runSweep } = await import('./lib/deep-research/sweep')
       await runSweep()
     } catch (err) {
@@ -77,8 +117,6 @@ export async function register(): Promise<void> {
       `then every ${SWEEP_INTERVAL_MS / 1000}s)`,
   )
 
-  // Delayed first tick so server boot doesn't race against any DB
-  // warm-up the route handlers depend on.
   setTimeout(() => {
     void tick()
     sweepIntervalHandle = setInterval(() => {
