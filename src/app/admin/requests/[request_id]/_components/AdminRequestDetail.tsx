@@ -55,6 +55,8 @@ export interface RequestDetailPayload {
     cycles: AdminFulfillmentRequest[]
   }
   icp: IcpDetails | null
+  approved_leads?: AdminWinningLead[]
+  fulfilled_leads?: AdminWinningLead[]
   winners: AdminWinningLead[]
   target_num_leads: number
   delivered_count: number
@@ -62,7 +64,7 @@ export interface RequestDetailPayload {
   deep_research?: DeepResearchState
 }
 
-type TabKey = 'deep_research' | 'winners' | 'icp' | 'chain'
+type TabKey = 'deep_research' | 'approved' | 'fulfilled' | 'icp' | 'chain'
 
 // Order matters — left-to-right tab order is the public contract.
 // Deep Research sits FIRST because the whole point is to QA before
@@ -70,7 +72,8 @@ type TabKey = 'deep_research' | 'winners' | 'icp' | 'chain'
 // through the raw leads.
 const TABS: { key: TabKey; label: string }[] = [
   { key: 'deep_research', label: 'Deep Research Analysis' },
-  { key: 'winners', label: 'Winning leads' },
+  { key: 'approved', label: 'Approved leads' },
+  { key: 'fulfilled', label: 'Fulfilled leads' },
   { key: 'icp', label: 'Client ICP' },
   { key: 'chain', label: 'Chain history' },
 ]
@@ -88,10 +91,12 @@ export function AdminRequestDetail({
   // fulfilled, without disrupting the existing flow for in-flight
   // chains where the analysis isn't yet meaningful.
   const initialTab: TabKey =
-    payload.deep_research?.status != null ? 'deep_research' : 'winners'
+    payload.deep_research?.status != null ? 'deep_research' : 'approved'
   const [tab, setTab] = useState<TabKey>(initialTab)
 
   const { chain, icp, winners, target_num_leads, delivered_count } = payload
+  const approvedLeads = payload.approved_leads ?? winners
+  const fulfilledLeads = payload.fulfilled_leads ?? winners
   const root = chain.root
   const leaf = chain.leaf
   const deepResearch: DeepResearchState =
@@ -271,9 +276,14 @@ export function AdminRequestDetail({
             {t.key === 'deep_research' && (
               <DeepResearchTabBadge state={deepResearch} />
             )}
-            {t.key === 'winners' && (
+            {t.key === 'approved' && (
               <span className="tabular-nums text-[10px] opacity-70">
-                {winners.length}
+                {approvedLeads.length}
+              </span>
+            )}
+            {t.key === 'fulfilled' && (
+              <span className="tabular-nums text-[10px] opacity-70">
+                {fulfilledLeads.length}
               </span>
             )}
             {t.key === 'chain' && (
@@ -293,7 +303,20 @@ export function AdminRequestDetail({
           chainStatus={leaf.status}
         />
       )}
-      {tab === 'winners' && <WinnersList winners={winners} />}
+      {tab === 'approved' && (
+        <LeadsList
+          leads={approvedLeads}
+          title="Approved leads"
+          emptyText="No approved leads yet for this chain."
+        />
+      )}
+      {tab === 'fulfilled' && (
+        <LeadsList
+          leads={fulfilledLeads}
+          title="Fulfilled leads"
+          emptyText="No fulfilled leads yet for this chain."
+        />
+      )}
       {tab === 'icp' && <IcpPanel icp={icp} />}
       {tab === 'chain' && <ChainPanel cycles={chain.cycles} />}
     </div>
@@ -1167,8 +1190,16 @@ function Stat({
 // was that having the evidence inside the row makes it easier to
 // audit a lead without scrolling back and forth.
 
-function WinnersList({ winners }: { winners: AdminWinningLead[] }) {
-  if (winners.length === 0) {
+function LeadsList({
+  leads,
+  title,
+  emptyText,
+}: {
+  leads: AdminWinningLead[]
+  title: string
+  emptyText: string
+}) {
+  if (leads.length === 0) {
     return (
       <div
         className="rounded-xl border p-12 text-center"
@@ -1178,12 +1209,12 @@ function WinnersList({ winners }: { winners: AdminWinningLead[] }) {
         }}
       >
         <div className="text-sm" style={{ color: 'var(--text-secondary)' }}>
-          No winning leads yet for this chain.
+          {emptyText}
         </div>
       </div>
     )
   }
-  return <WinnersTable winners={winners} />
+  return <WinnersTable winners={leads} title={title} />
 }
 
 // -----------------------------------------------------------------
@@ -1390,7 +1421,13 @@ const TABLE_COLUMNS: TableCol[] = [
   },
 ]
 
-function WinnersTable({ winners }: { winners: AdminWinningLead[] }) {
+function WinnersTable({
+  winners,
+  title = 'Winning leads',
+}: {
+  winners: AdminWinningLead[]
+  title?: string
+}) {
   return (
     <section
       className="rounded-xl border overflow-hidden"
@@ -1405,7 +1442,7 @@ function WinnersTable({ winners }: { winners: AdminWinningLead[] }) {
       >
         <div className="flex items-baseline gap-2">
           <h2 className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
-            Winning leads
+            {title}
           </h2>
           <span className="tabular-nums text-xs" style={{ color: 'var(--text-tertiary)' }}>
             {winners.length}

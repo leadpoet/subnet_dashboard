@@ -152,8 +152,11 @@ export async function GET(
   const leaf = cycles[cycles.length - 1]
   const chainIds = cycles.map((c) => c.request_id)
 
-  // Pull every winning consensus row across the chain.
-  const { data: winnersData, error: winnersErr } = await supabase
+  // Pull consensus rows that can be considered accepted for the chain:
+  // final winners, currently-held partial winners, and positive-score
+  // approved candidates on in-flight rows. The UI splits these into
+  // "Approved leads" and "Fulfilled leads".
+  const { data: consensusData, error: consensusErr } = await supabase
     .from('fulfillment_score_consensus')
     .select(
       'consensus_id, request_id, submission_id, lead_id, miner_hotkey, ' +
@@ -164,45 +167,45 @@ export async function GET(
         'intent_details, intent_breakdown, intent_signal_mapping, num_validators, computed_at',
     )
     .in('request_id', chainIds)
-    .eq('is_winner', true)
+    .or('is_winner.eq.true,is_chain_held.eq.true,consensus_final_score.gt.0')
     .order('consensus_final_score', { ascending: false })
 
-  if (winnersErr) {
+  if (consensusErr) {
     return NextResponse.json(
-      { error: `Supabase error: ${winnersErr.message}` },
+      { error: `Supabase error: ${consensusErr.message}` },
       { status: 502 },
     )
   }
 
-  // Dedup by lead_id (a held lead can appear in multiple chain rows
-  // if it carried over across recycles). Keep the highest-scoring.
-  const winnersByLead = new Map<string, AdminConsensusRow>()
-  for (const w of (winnersData || []) as unknown as AdminConsensusRow[]) {
-    const prev = winnersByLead.get(w.lead_id)
-    if (!prev) {
-      winnersByLead.set(w.lead_id, w)
-    } else if (
-      (w.consensus_final_score ?? 0) > (prev.consensus_final_score ?? 0)
-    ) {
-      winnersByLead.set(w.lead_id, w)
+  function dedupeConsensus(rows: AdminConsensusRow[]): AdminConsensusRow[] {
+    const byLead = new Map<string, AdminConsensusRow>()
+    for (const w of rows) {
+      const prev = byLead.get(w.lead_id)
+      if (!prev || (w.consensus_final_score ?? 0) > (prev.consensus_final_score ?? 0)) {
+        byLead.set(w.lead_id, w)
+      }
     }
+    return Array.from(byLead.values()).sort(
+      (a, b) => (b.consensus_final_score ?? 0) - (a.consensus_final_score ?? 0),
+    )
   }
-  const dedupedWinners = Array.from(winnersByLead.values()).sort(
-    (a, b) => (b.consensus_final_score ?? 0) - (a.consensus_final_score ?? 0),
-  )
 
-  // Pull lead_data for every winning (submission_id, lead_id) pair.
+  const consensusRows = (consensusData || []) as unknown as AdminConsensusRow[]
+  const approvedRows = dedupeConsensus(consensusRows)
+  const fulfilledRows = dedupeConsensus(consensusRows.filter((w) => w.is_winner))
+
+  // Pull lead_data for every accepted (submission_id, lead_id) pair.
   // lead_data is a JSONB array of entries; we filter to just the
-  // winning lead_id per submission so we don't ship the entire batch.
-  const winningSubIds = Array.from(
-    new Set(dedupedWinners.map((w) => w.submission_id)),
+  // matching lead_id per submission so we don't ship the entire batch.
+  const acceptedSubIds = Array.from(
+    new Set([...approvedRows, ...fulfilledRows].map((w) => w.submission_id)),
   )
   const leadDataBySubmission = new Map<string, LeadDataEntry[]>()
-  if (winningSubIds.length > 0) {
+  if (acceptedSubIds.length > 0) {
     const { data: subsData, error: subsErr } = await supabase
       .from('fulfillment_submissions')
       .select('submission_id, lead_data')
-      .in('submission_id', winningSubIds)
+      .in('submission_id', acceptedSubIds)
     if (subsErr) {
       console.error('[admin] lead_data fetch failed', subsErr)
     } else {
@@ -213,11 +216,16 @@ export async function GET(
     }
   }
 
-  const winningLeads: AdminWinningLead[] = dedupedWinners.map((w) => {
-    const entries = leadDataBySubmission.get(w.submission_id) || []
-    const match = entries.find((e) => e.lead_id === w.lead_id)
-    return { consensus: w, lead: match?.data ?? null }
-  })
+  function hydrateLeads(rows: AdminConsensusRow[]): AdminWinningLead[] {
+    return rows.map((w) => {
+      const entries = leadDataBySubmission.get(w.submission_id) || []
+      const match = entries.find((e) => e.lead_id === w.lead_id)
+      return { consensus: w, lead: match?.data ?? null }
+    })
+  }
+
+  const approvedLeads = hydrateLeads(approvedRows)
+  const fulfilledLeads = hydrateLeads(fulfilledRows)
 
   // Count all submissions for the "All submissions" tab badge — but
   // don't fetch the actual rows on the detail endpoint. The
@@ -275,9 +283,11 @@ export async function GET(
     {
       chain: { root, leaf, cycles },
       icp: mergeRequiredAttributes(leaf) ?? mergeRequiredAttributes(root),
-      winners: winningLeads,
+      approved_leads: approvedLeads,
+      fulfilled_leads: fulfilledLeads,
+      winners: fulfilledLeads,
       target_num_leads: root.num_leads ?? leaf.num_leads,
-      delivered_count: winningLeads.length,
+      delivered_count: fulfilledLeads.length,
       all_submissions_count: allSubsCount ?? 0,
       deep_research: deepResearch,
     },
