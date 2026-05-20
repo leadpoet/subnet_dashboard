@@ -92,6 +92,10 @@ export interface IcpDetails {
   product_service?: string
   excluded_companies?: string[]
   num_leads?: number
+  company_region?: string
+  company_country?: string | string[]
+  contact_region?: string
+  contact_country?: string | string[]
 }
 
 export interface AdminFulfillmentRequest {
