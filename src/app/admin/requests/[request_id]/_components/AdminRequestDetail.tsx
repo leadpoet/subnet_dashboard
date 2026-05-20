@@ -2661,6 +2661,18 @@ function IcpPanel({ icp }: { icp: IcpDetails | null }) {
             value={asList(icp.country).join(', ') || 'Any'}
           />
           {icp.geography && <Field label="Geography" value={icp.geography} />}
+          {icp.company_region && (
+            <Field label="Company HQ region" value={icp.company_region} />
+          )}
+          {icp.company_country && (
+            <Field label="Company HQ country" value={asList(icp.company_country).join(', ')} />
+          )}
+          {icp.contact_region && (
+            <Field label="Contact region" value={icp.contact_region} />
+          )}
+          {icp.contact_country && (
+            <Field label="Contact country" value={asList(icp.contact_country).join(', ')} />
+          )}
           <Field
             label="Employee count"
             value={asList(icp.employee_count).join(', ')}
