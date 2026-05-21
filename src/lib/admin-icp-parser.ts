@@ -84,15 +84,33 @@ export function normalizeRequiredAttributes(value: unknown): RequiredAttributes 
 
   const obj = value as Record<string, unknown>
   return {
-    company: stringListValue(obj.company),
-    contact: stringListValue(obj.contact),
+    company: filterRequiredAttributeList(stringListValue(obj.company)),
+    contact: filterRequiredAttributeList(stringListValue(obj.contact)),
   }
+}
+
+function isDedicatedIcpFieldRequirement(value: string): boolean {
+  const lower = value.toLowerCase()
+  return (
+    /\b(company\s+)?(hq|headquarters)\b/.test(lower) ||
+    /\b(company\s+)?(size|employee\s+count|employees|headcount|head\s*count|staff|fte)\b/.test(lower) ||
+    /\b(company|contact)?\s*(country|region|geography|territory|location|state|city)\b/.test(lower)
+  )
+}
+
+function filterRequiredAttributeList(values: string[]): string[] {
+  return values.filter((value) => !isDedicatedIcpFieldRequirement(value))
 }
 
 export interface ParsedIcpDraft {
   prompt: string
   industry: string[]
   sub_industry: string[]
+  company_country: string[]
+  company_region: string
+  contact_country: string[]
+  contact_region: string
+  /** Legacy company-side aliases kept while older code paths transition. */
   country: string[]
   geography: string
   target_roles: string[]
@@ -118,6 +136,10 @@ export function emptyDraft(): ParsedIcpDraft {
     prompt: '',
     industry: [],
     sub_industry: [],
+    company_country: [],
+    company_region: '',
+    contact_country: [],
+    contact_region: '',
     country: [],
     geography: '',
     target_roles: [],
@@ -614,15 +636,63 @@ export function parseFreeFormIcp(rawText: string): ParsedIcpDraft {
   ])
   if (seniority) draft.target_seniority = seniority
 
-  const geography = fieldByLabel(text, [
+  const companyRegion = fieldByLabel(text, [
+    'company region',
+    'company geography',
+    'company geo',
+    'company territory',
+    'company location',
+    'company hq',
+    'company hq region',
+    'hq region',
+    'hq geography',
     'geography',
     'geo',
     'region',
     'territory',
-    'city',
-    'state',
   ])
-  if (geography) draft.geography = geography
+  if (companyRegion) {
+    draft.company_region = companyRegion
+    draft.geography = companyRegion
+  }
+
+  const contactRegion = fieldByLabel(text, [
+    'contact region',
+    'contact geography',
+    'contact geo',
+    'contact territory',
+    'contact location',
+    'person region',
+    'person geography',
+    'lead region',
+    'lead geography',
+  ])
+  if (contactRegion) draft.contact_region = contactRegion
+
+  const companyCountries = fieldByLabel(text, [
+    'company countries',
+    'company country',
+    'company_country',
+    'hq countries',
+    'hq country',
+  ])
+  if (companyCountries) {
+    draft.company_country = splitList(companyCountries)
+    draft.country = draft.company_country
+  }
+
+  const contactCountries = fieldByLabel(text, [
+    'contact countries',
+    'contact country',
+    'contact_country',
+    'person countries',
+    'person country',
+    'lead countries',
+    'lead country',
+  ])
+  if (contactCountries) {
+    draft.contact_country = splitList(contactCountries)
+  }
 
   const explicitRoles = fieldByLabel(text, ['target roles', 'target_roles', 'roles', 'titles'])
   if (explicitRoles) {
@@ -657,7 +727,10 @@ export function parseFreeFormIcp(rawText: string): ParsedIcpDraft {
   }
 
   // Heuristic fallbacks for fields not explicitly labelled.
-  if (draft.country.length === 0) draft.country = detectCountries(text)
+  if (draft.company_country.length === 0) {
+    draft.company_country = detectCountries(text)
+  }
+  if (draft.country.length === 0) draft.country = draft.company_country
   if (draft.industry.length === 0) draft.industry = normalizeIndustries(detectIndustries(text))
   if (draft.target_role_types.length === 0) {
     draft.target_role_types = detectRoleTypes(text)

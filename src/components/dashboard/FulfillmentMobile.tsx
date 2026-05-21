@@ -10,10 +10,16 @@ import { X, RefreshCw } from 'lucide-react'
 
 interface IcpDetails {
   prompt?: string
+  company_country?: string | string[]
+  company_region?: string
+  contact_country?: string | string[]
+  contact_region?: string
   country?: string
+  geography?: string
   industry?: string
   sub_industry?: string
   target_roles?: string[]
+  target_role_types?: string[]
   company_stage?: string
   employee_count?: string
   intent_signals?: string[]
@@ -62,6 +68,7 @@ interface Props {
   allConsensus: ConsensusResult[]
   leaderboard: LeaderboardEntry[]
   leaderboardWindowDays: number
+  totalSubmittedLeads: number
   rejectionBreakdown: RejectionEntry[]
   scoreTotals: { passed: number; failed: number; sampleSize?: number }
   filter: FilterMode
@@ -162,6 +169,7 @@ export function FulfillmentMobile({
   allConsensus,
   leaderboard,
   leaderboardWindowDays,
+  totalSubmittedLeads,
   rejectionBreakdown,
   scoreTotals,
   filter,
@@ -201,9 +209,9 @@ export function FulfillmentMobile({
     return {
       fulfilledLeads,
       miners,
-      submittedLeads: allConsensus.length,
+      submittedLeads: totalSubmittedLeads,
     }
-  }, [allConsensus])
+  }, [allConsensus, totalSubmittedLeads])
 
   // Filtered + sorted request list
   const filteredRequests = useMemo(() => {

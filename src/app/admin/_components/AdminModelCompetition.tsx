@@ -665,7 +665,10 @@ function BenchmarkHistory({
                   <div className="mt-3 grid gap-2 text-xs sm:grid-cols-2">
                     <Meta label="Target roles" value={icpText(icpField(icp, 'target_roles')) || '—'} />
                     <Meta label="Role types" value={icpText(icpField(icp, 'target_role_types')) || '—'} />
-                    <Meta label="Countries" value={icpText(icpField(icp, 'country')) || '—'} />
+                    <Meta label="Company countries" value={icpText(icpField(icp, 'company_country') ?? icpField(icp, 'country')) || '—'} />
+                    <Meta label="Company region" value={icpText(icpField(icp, 'company_region') ?? icpField(icp, 'geography')) || '—'} />
+                    <Meta label="Contact countries" value={icpText(icpField(icp, 'contact_country')) || '—'} />
+                    <Meta label="Contact region" value={icpText(icpField(icp, 'contact_region')) || '—'} />
                     <Meta label="Employee count" value={icpText(icpField(icp, 'employee_count')) || '—'} />
                     <Meta label="Intent signals" value={icpText(icpField(icp, 'intent_signals')) || '—'} />
                     <Meta label="Product/service" value={icpText(icpField(icp, 'product_service')) || '—'} />

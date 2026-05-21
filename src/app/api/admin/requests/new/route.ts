@@ -13,6 +13,11 @@ type FulfillmentPayload = {
   target_role_types?: unknown
   target_seniority?: unknown
   employee_count?: unknown
+  company_country?: unknown
+  company_region?: unknown
+  contact_country?: unknown
+  contact_region?: unknown
+  // Legacy company-side aliases tolerated for older drafts.
   country?: unknown
   geography?: unknown
   intent_signals?: unknown
@@ -89,11 +94,24 @@ function validatePayload(body: FulfillmentPayload): string[] {
     'target_roles',
     'target_role_types',
     'employee_count',
+    'company_country',
+    'contact_country',
     'country',
   ]
   for (const key of optionalArrays) {
     if (body[key] !== undefined && !isStringArray(body[key])) {
       errors.push(`${key} must be a list`)
+    }
+  }
+
+  const optionalStrings: Array<keyof FulfillmentPayload> = [
+    'company_region',
+    'contact_region',
+    'geography',
+  ]
+  for (const key of optionalStrings) {
+    if (body[key] !== undefined && typeof body[key] !== 'string') {
+      errors.push(`${key} must be a string`)
     }
   }
 

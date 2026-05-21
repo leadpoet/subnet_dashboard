@@ -85,13 +85,22 @@ function StatusPill({ status }: { status: string }) {
   )
 }
 
-function ApprovalProgress({ approved, target }: { approved: number; target: number }) {
+function ApprovalProgress({
+  approved,
+  target,
+  status,
+}: {
+  approved: number
+  target: number
+  status: string
+}) {
   const pct = Math.max(0, Math.min(1, target > 0 ? approved / target : 0))
   const widthPct = `${pct * 100}%`
   const tone = pct >= 1 ? 'gold' : pct >= 0.5 ? 'cream' : 'amber'
   const fillColor =
     tone === 'gold' ? 'var(--brand)' : tone === 'cream' ? '#e8e1d4' : '#cf9d61'
   const remaining = Math.max(0, target - approved)
+  const isFinalFulfilled = statusTone(status) === 'fulfilled'
 
   return (
     <div className="min-w-[170px] space-y-1.5">
@@ -121,7 +130,7 @@ function ApprovalProgress({ approved, target }: { approved: number; target: numb
           />
         </div>
         <span className="whitespace-nowrap text-[10px] tabular-nums text-slate-500">
-          {remaining === 0 ? 'complete' : `${remaining} left`}
+          {remaining === 0 ? (isFinalFulfilled ? 'complete' : 'target met') : `${remaining} left`}
         </span>
       </div>
     </div>
@@ -235,7 +244,7 @@ export function AdminRequestList({
           <Tile
             label="Total quota"
             value={totals.target}
-            secondary={`${totals.target > 0 ? Math.round((totals.delivered / totals.target) * 100) : 0}% fulfilled`}
+            secondary={`${totals.target > 0 ? Math.round((totals.delivered / totals.target) * 100) : 0}% approved`}
           />
           <Tile
             label="In flight"
@@ -411,6 +420,7 @@ function ChainRow({ chain }: { chain: ChainSummary }) {
         <ApprovalProgress
           approved={chain.delivered_count}
           target={chain.target_num_leads}
+          status={chain.status}
         />
 
         {/* Status */}

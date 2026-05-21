@@ -32,6 +32,7 @@ import {
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
+const MAX_CHAIN_WALK = 250
 
 // Subset of fulfillment_requests columns we need to load the
 // deep research state for the chain's leaf row. Kept as a narrow
@@ -88,9 +89,9 @@ async function walkChain(
 
   // Walk backwards: who has us as their successor?
   let cur: AdminFulfillmentRequest | null = startRow
-  // Hard cap chain length at 50 cycles to defend against accidental
-  // cycles in the data. We've never seen a real chain past ~10.
-  for (let i = 0; cur && i < 50; i++) {
+  // Hard cap chain length to defend against accidental cycles while
+  // still allowing long-running recycled chains to render completely.
+  for (let i = 0; cur && i < MAX_CHAIN_WALK; i++) {
     const { data: predData } = await supabase
       .from('fulfillment_requests')
       .select(
@@ -107,7 +108,7 @@ async function walkChain(
 
   // Walk forwards via successor_request_id.
   cur = startRow
-  for (let i = 0; cur && i < 50; i++) {
+  for (let i = 0; cur && i < MAX_CHAIN_WALK; i++) {
     if (!cur.successor_request_id) break
     if (collected.has(cur.successor_request_id)) break
     const next = await fetchOne(cur.successor_request_id)

@@ -79,8 +79,12 @@ function sanitizeDraft(input: MaybeDraft, rawText: string): ParsedIcpDraft {
     prompt: stringValue(input.prompt) || rawText.trim(),
     industry: normalizeIndustries(stringArray(input.industry)),
     sub_industry: sanitizeSubIndustries(stringArray(input.sub_industry)),
-    country: stringArray(input.country),
-    geography: stringValue(input.geography),
+    company_country: stringArray(input.company_country ?? input.country),
+    company_region: stringValue(input.company_region ?? input.geography),
+    contact_country: stringArray(input.contact_country),
+    contact_region: stringValue(input.contact_region),
+    country: stringArray(input.company_country ?? input.country),
+    geography: stringValue(input.company_region ?? input.geography),
     target_roles: stringArray(input.target_roles).slice(0, 20),
     target_role_types: roleTypes(input.target_role_types),
     target_seniority: stringValue(input.target_seniority),
@@ -137,8 +141,10 @@ Schema:
   "prompt": string,
   "industry": string[],
   "sub_industry": string[],
-  "country": string[],
-  "geography": string,
+  "company_country": string[],
+  "company_region": string,
+  "contact_country": string[],
+  "contact_region": string,
   "target_roles": string[],
   "target_role_types": string[],
   "target_seniority": string,
@@ -166,9 +172,13 @@ ${VALID_ROLE_TYPES.map((v) => `  - ${v}`).join('\n')}
 - "target_seniority" should usually be "" unless the target is a single uniform seniority.
 - "employee_count" must use ONLY these canonical buckets:
 ${EMPLOYEE_COUNT_BUCKETS.map((v) => `  - ${v}`).join('\n')}
-- "country" must be country names, e.g. "United States", "France". Empty array means any country.
+- Use "company_country" for company HQ countries, e.g. "United States", "France". Empty array means any company country.
+- Use "company_region" for company HQ region/state/city requirements.
+- Use "contact_country" for the person/contact countries. Empty array means any contact country.
+- Use "contact_region" for person/contact region/state/city requirements.
+- Do NOT put company HQ, company region, contact region, country, geography, employee count, company size, or headcount rules into required_attributes. Use the dedicated fields above.
 - "intent_signals" must be a list of plain strings — each one a concrete observable event miners can verify from web content. Avoid vague signals like "has budget" or "high intent". Do NOT infer required-vs-optional; the operator will toggle "Required" per signal in the admin UI after reviewing your draft.
-- "required_attributes" is optional fail-closed criteria. This is the ONLY place for must-have criteria / required attributes / required criteria / hard requirements that are not already covered by role, industry, country, geography, employee_count, or intent_signals.
+- "required_attributes" is optional fail-closed criteria. This is the ONLY place for must-have criteria / required attributes / required criteria / hard requirements that are not already covered by role, role type, industry, company_country, company_region, contact_country, contact_region, employee_count, or intent_signals.
 - Use required_attributes.company for company-level gates, e.g. "Is an importer or exporter", "Has SOC 2 certification", "Uses Salesforce", "Operates in manufacturing, retail, or wholesale".
 - Use required_attributes.contact for person-level gates, e.g. "Is a W-2 employee", "Owns procurement", "Has budget authority", "Works in the US".
 - Preserve each required attribute as a standalone sentence. Do not split commas inside one criterion. Only include attributes explicitly stated by the operator; otherwise return {"company":[],"contact":[]}.

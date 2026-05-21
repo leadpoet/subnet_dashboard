@@ -3,6 +3,7 @@ import {
   getAdminSupabase,
   AdminConsensusRow,
   AdminFulfillmentRequest,
+  LeadDataInner,
   LeadDataEntry,
 } from '@/lib/admin-supabase'
 
@@ -11,6 +12,7 @@ export const dynamic = 'force-dynamic'
 
 const SUBMISSION_BATCH_SIZE = 1000
 const CONSENSUS_BATCH_SIZE = 1000
+const MAX_CHAIN_WALK = 250
 
 type SubmittedLeadStatus = 'approved' | 'fulfilled' | 'pending' | 'denied'
 type SubmittedLeadFilter = SubmittedLeadStatus | 'all'
@@ -73,7 +75,7 @@ async function walkChain(
   collected.set(startRow.request_id, startRow)
 
   let cur: AdminFulfillmentRequest | null = startRow
-  for (let i = 0; cur && i < 50; i++) {
+  for (let i = 0; cur && i < MAX_CHAIN_WALK; i++) {
     const { data: predData } = await supabase
       .from('fulfillment_requests')
       .select(
@@ -89,7 +91,7 @@ async function walkChain(
   }
 
   cur = startRow
-  for (let i = 0; cur && i < 50; i++) {
+  for (let i = 0; cur && i < MAX_CHAIN_WALK; i++) {
     if (!cur.successor_request_id) break
     if (collected.has(cur.successor_request_id)) break
     const next = await fetchOne(cur.successor_request_id)
@@ -148,6 +150,122 @@ function countRows(rows: SubmittedLeadIndexRow[]): Record<SubmittedLeadFilter, n
     pending: rows.filter((row) => row.status === 'pending').length,
     denied: rows.filter((row) => row.status === 'denied').length,
   }
+}
+
+function csvValue(value: unknown): string {
+  if (value == null) return ''
+  const text =
+    typeof value === 'string'
+      ? value
+      : typeof value === 'number' || typeof value === 'boolean'
+      ? String(value)
+      : JSON.stringify(value)
+  return `"${text.replace(/"/g, '""')}"`
+}
+
+function csvLine(values: unknown[]): string {
+  return values.map(csvValue).join(',')
+}
+
+function leadString(lead: LeadDataInner | null, key: keyof LeadDataInner): string {
+  const value = lead?.[key]
+  return typeof value === 'string' ? value : ''
+}
+
+function buildCsv(leads: Array<{
+  lead_id: string
+  submission_id: string
+  request_id: string
+  miner_hotkey: string
+  revealed: boolean
+  submitted_at: string | null
+  status: SubmittedLeadStatus
+  fulfilled: boolean
+  consensus: AdminConsensusRow | null
+  lead: LeadDataInner | null
+  score: number | null
+  rejection_reason: string | null
+  rejection_detail: string | null
+}>): string {
+  const headers = [
+    'status',
+    'fulfilled',
+    'lead_id',
+    'submission_id',
+    'request_id',
+    'miner_hotkey',
+    'submitted_at',
+    'score',
+    'rejection_reason',
+    'rejection_detail',
+    'full_name',
+    'email',
+    'phone',
+    'role',
+    'role_type',
+    'seniority',
+    'business',
+    'industry',
+    'sub_industry',
+    'employee_count',
+    'city',
+    'state',
+    'country',
+    'company_hq_city',
+    'company_hq_state',
+    'company_hq_country',
+    'linkedin_url',
+    'company_website',
+    'company_linkedin',
+    'description',
+    'intent_details',
+    'intent_signal_mapping_json',
+    'intent_breakdown_json',
+    'lead_data_json',
+    'consensus_json',
+  ]
+
+  const rows = leads.map((lead) =>
+    csvLine([
+      lead.status,
+      lead.fulfilled,
+      lead.lead_id,
+      lead.submission_id,
+      lead.request_id,
+      lead.miner_hotkey,
+      lead.submitted_at,
+      lead.score,
+      lead.rejection_reason,
+      lead.rejection_detail,
+      leadString(lead.lead, 'full_name'),
+      leadString(lead.lead, 'email'),
+      leadString(lead.lead, 'phone'),
+      leadString(lead.lead, 'role'),
+      leadString(lead.lead, 'role_type'),
+      leadString(lead.lead, 'seniority'),
+      leadString(lead.lead, 'business'),
+      leadString(lead.lead, 'industry'),
+      leadString(lead.lead, 'sub_industry'),
+      leadString(lead.lead, 'employee_count'),
+      leadString(lead.lead, 'city'),
+      leadString(lead.lead, 'state'),
+      leadString(lead.lead, 'country'),
+      leadString(lead.lead, 'company_hq_city'),
+      leadString(lead.lead, 'company_hq_state'),
+      leadString(lead.lead, 'company_hq_country'),
+      leadString(lead.lead, 'linkedin_url'),
+      leadString(lead.lead, 'company_website'),
+      leadString(lead.lead, 'company_linkedin'),
+      leadString(lead.lead, 'description'),
+      lead.consensus?.intent_details,
+      lead.consensus?.intent_signal_mapping,
+      lead.consensus?.intent_breakdown,
+      lead.lead,
+      lead.consensus,
+    ]),
+  )
+
+  return [csvLine(headers), ...rows].join('\n')
 }
 
 async function fetchAllConsensusRows(
@@ -212,6 +330,7 @@ export async function GET(
 
   const search = req.nextUrl.searchParams
   const statusFilter = parseFilter(search.get('status'))
+  const exportMode = search.get('export') === 'csv'
   const pageSize = parsePageParam(search.get('pageSize'), 50, 10, 100)
   const page = parsePageParam(search.get('page'), 1, 1, 100000)
 
@@ -314,7 +433,7 @@ export async function GET(
   const totalPages = Math.max(1, Math.ceil(total / pageSize))
   const safePage = Math.min(page, totalPages)
   const from = (safePage - 1) * pageSize
-  const pageRows = filteredRows.slice(from, from + pageSize)
+  const pageRows = exportMode ? filteredRows : filteredRows.slice(from, from + pageSize)
 
   const pageSubmissionIds = Array.from(new Set(pageRows.map((row) => row.submission_id)))
   const pageLeadIds = Array.from(new Set(pageRows.map((row) => row.lead_id)))
@@ -391,6 +510,17 @@ export async function GET(
       rejection_detail: row.status === 'denied' ? scoreRow?.failure_detail ?? null : null,
     }
   })
+
+  if (exportMode) {
+    const filename = `request-${request_id.slice(0, 8)}-leads-${statusFilter}.csv`
+    return new NextResponse(buildCsv(leads), {
+      headers: {
+        'Content-Type': 'text/csv; charset=utf-8',
+        'Content-Disposition': `attachment; filename="${filename}"`,
+        'Cache-Control': 'no-store',
+      },
+    })
+  }
 
   return NextResponse.json(
     {

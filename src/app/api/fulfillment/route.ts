@@ -38,11 +38,19 @@ const LEADERBOARD_WINDOW_DAYS = 7
 const LEADERBOARD_ROW_LIMIT = 10_000
 const CONSENSUS_ROW_LIMIT = 25_000
 const REJECTION_SAMPLE_SIZE = 500
+const SUBMISSION_BATCH_SIZE = 1000
+const TOP_MINER_BONUS_PCTS = [5, 3, 1.5] as const
 
 type CachedResponse = {
   data: unknown
   etag: string
   ts: number
+}
+
+type SubmissionLeadCountRow = {
+  submission_id: string
+  lead_hashes: Array<{ lead_id?: string }> | null
+  lead_data: Array<{ lead_id?: string }> | null
 }
 
 let cache: CachedResponse | null = null
@@ -61,6 +69,49 @@ function currentRewardWeekStartUTC(now = new Date()): Date {
   const daysSinceMonday = (day + 6) % 7
   start.setUTCDate(start.getUTCDate() - daysSinceMonday)
   return start
+}
+
+async function countSubmittedLeadsForRequests(
+  supabase: ReturnType<typeof getSupabase>,
+  requestIds: string[] | null,
+): Promise<number> {
+  const submittedLeadKeys = new Set<string>()
+
+  if (requestIds && requestIds.length === 0) return 0
+
+  for (let offset = 0; ; offset += SUBMISSION_BATCH_SIZE) {
+    let query = supabase
+      .from('fulfillment_submissions')
+      .select('submission_id, lead_hashes, lead_data')
+      .order('revealed_at', { ascending: false, nullsFirst: false })
+      .range(offset, offset + SUBMISSION_BATCH_SIZE - 1)
+
+    if (requestIds) {
+      query = query.in('request_id', requestIds)
+    }
+
+    const { data, error } = await query
+
+    if (error) {
+      console.error('[Fulfillment API] submission lead count error:', error)
+      break
+    }
+
+    const batch = (data ?? []) as SubmissionLeadCountRow[]
+    for (const submission of batch) {
+      const leadEntries =
+        submission.lead_data && submission.lead_data.length > 0
+          ? submission.lead_data
+          : submission.lead_hashes ?? []
+      for (const entry of leadEntries) {
+        if (entry.lead_id) submittedLeadKeys.add(`${submission.submission_id}|${entry.lead_id}`)
+      }
+    }
+
+    if (batch.length < SUBMISSION_BATCH_SIZE) break
+  }
+
+  return submittedLeadKeys.size
 }
 
 async function fetchFulfillmentData() {
@@ -89,6 +140,7 @@ async function fetchFulfillmentData() {
 
   // Fetch consensus data + chain-side metadata for ALL active requests.
   const allRequestIds = activeRequests.map(r => r.request_id)
+  const submittedLeadRequestIds = new Set(allRequestIds)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let consensusData: any[] = []
   if (allRequestIds.length > 0) {
@@ -180,6 +232,7 @@ async function fetchFulfillmentData() {
     )
     const supplemental: Array<Record<string, unknown>> = []
     for (const row of chainCanonicalRows) {
+      if (typeof row.request_id === 'string') submittedLeadRequestIds.add(row.request_id)
       const leadId = (row.lead_id as string | undefined) ?? ''
       if (!leadId) continue
       const visibleRid = leadIdToVisibleRid.get(leadId)
@@ -230,6 +283,10 @@ async function fetchFulfillmentData() {
       }
     }
   }
+  const totalSubmittedLeads = await countSubmittedLeadsForRequests(
+    supabase,
+    Array.from(submittedLeadRequestIds),
+  )
   const fulfilledCount = allCounts.filter(r => r.status === 'fulfilled').length
   const recycledCount = allCounts.filter(r => r.status === 'recycled').length
 
@@ -298,7 +355,7 @@ async function fetchFulfillmentData() {
       hotkey,
       wins: stats.wins,
       totalRewardPct: Math.round(stats.totalRewardPct * 10000) / 10000,
-      bonusPct: idx === 0 ? 2.5 : idx === 1 ? 1.0 : idx === 2 ? 0.5 : 0,
+      bonusPct: TOP_MINER_BONUS_PCTS[idx] ?? 0,
     }))
 
   return {
@@ -318,6 +375,7 @@ async function fetchFulfillmentData() {
     },
     stats: {
       activeRequestCount: activeRequests.filter(r => r.status !== 'fulfilled').length,
+      totalSubmittedLeads,
       totalConsensus: consensusData.length,
       totalWinners: consensusData.filter(c => c.is_winner).length,
       fulfilledCount,

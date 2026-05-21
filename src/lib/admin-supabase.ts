@@ -74,6 +74,12 @@ export interface IcpDetails {
   prompt?: string
   industry?: string | string[]
   sub_industry?: string | string[]
+  company_country?: string | string[]
+  company_region?: string
+  contact_country?: string | string[]
+  contact_region?: string
+  // Legacy location fields. The gateway now treats these as company-side
+  // aliases, but historical rows still have them in icp_details.
   country?: string | string[]
   geography?: string
   target_roles?: string[]
@@ -92,10 +98,6 @@ export interface IcpDetails {
   product_service?: string
   excluded_companies?: string[]
   num_leads?: number
-  company_region?: string
-  company_country?: string | string[]
-  contact_region?: string
-  contact_country?: string | string[]
 }
 
 export interface AdminFulfillmentRequest {

@@ -66,27 +66,37 @@ function adminApiUrl(path: string): string {
 }
 
 function normalizeDraft(draft: ParsedIcpDraft): ParsedIcpDraft {
+  const companyCountry = (draft.company_country.length > 0
+    ? draft.company_country
+    : draft.country
+  ).map((s) => s.trim()).filter(Boolean)
+  const companyRegion = (draft.company_region || draft.geography).trim()
   return {
     ...draft,
     prompt: draft.prompt.trim(),
     product_service: draft.product_service.trim(),
     internal_label: draft.internal_label.trim(),
     company: draft.company.trim(),
-    geography: draft.geography.trim(),
     target_seniority: draft.target_seniority.trim(),
     industry: draft.industry.map((s) => s.trim()).filter(Boolean),
     sub_industry: draft.sub_industry.map((s) => s.trim()).filter(Boolean),
     target_roles: draft.target_roles.map((s) => s.trim()).filter(Boolean),
-    country: draft.country.map((s) => s.trim()).filter(Boolean),
+    company_country: companyCountry,
+    company_region: companyRegion,
+    contact_country: draft.contact_country.map((s) => s.trim()).filter(Boolean),
+    contact_region: draft.contact_region.trim(),
+    // Legacy company-side aliases. Keep populated for older gateway code paths.
+    country: companyCountry,
+    geography: companyRegion,
     // Intent signals are structured objects (text + optional required).
     // empty after trim so a stray blank row doesn't reach the gateway.
     intent_signals: draft.intent_signals
       .map((spec) => ({ ...spec, text: spec.text.trim() }))
       .filter((spec) => spec.text.length > 0),
-    required_attributes: {
+    required_attributes: normalizeRequiredAttributes({
       company: draft.required_attributes.company.map((s) => s.trim()).filter(Boolean),
       contact: draft.required_attributes.contact.map((s) => s.trim()).filter(Boolean),
-    },
+    }),
     excluded_companies: draft.excluded_companies.map((s) => s.trim()).filter(Boolean),
     num_leads: Math.max(1, Math.floor(Number(draft.num_leads) || 10)),
   }
@@ -142,8 +152,10 @@ function companyMentionWarnings(draft: ParsedIcpDraft): string[] {
     { label: 'Product / service', values: [draft.product_service] },
     { label: 'Industries', values: draft.industry },
     { label: 'Sub-industries', values: draft.sub_industry },
-    { label: 'Countries', values: draft.country },
-    { label: 'Geography', values: [draft.geography] },
+    { label: 'Company countries', values: draft.company_country },
+    { label: 'Company region', values: [draft.company_region] },
+    { label: 'Contact countries', values: draft.contact_country },
+    { label: 'Contact region', values: [draft.contact_region] },
     { label: 'Target roles', values: draft.target_roles },
     { label: 'Target seniority', values: [draft.target_seniority] },
     {
@@ -536,12 +548,30 @@ export function NewRequestBuilder({
       // any legacy stray keys.
       const rawDraft = body.draft as ParsedIcpDraft & {
         intent_signals?: unknown
-        required_attributes?: unknown
+          required_attributes?: unknown
       }
       const base = emptyDraft()
       const coercedDraft: ParsedIcpDraft = {
         ...base,
         ...rawDraft,
+        company_country:
+          rawDraft.company_country?.length > 0
+            ? rawDraft.company_country
+            : rawDraft.country ?? base.company_country,
+        company_region:
+          rawDraft.company_region ||
+          rawDraft.geography ||
+          base.company_region,
+        contact_country: rawDraft.contact_country ?? base.contact_country,
+        contact_region: rawDraft.contact_region ?? base.contact_region,
+        country:
+          rawDraft.company_country?.length > 0
+            ? rawDraft.company_country
+            : rawDraft.country ?? base.country,
+        geography:
+          rawDraft.company_region ||
+          rawDraft.geography ||
+          base.geography,
         intent_signals: normalizeIntentSignals(rawDraft.intent_signals),
         required_attributes: normalizeRequiredAttributes(rawDraft.required_attributes),
         expand_target_roles:
@@ -638,7 +668,7 @@ export function NewRequestBuilder({
           <div>
             <h2 className="text-sm font-semibold text-slate-100">Paste ICP</h2>
             <p className="mt-1 text-xs text-slate-500">
-              Include client, product, target buyers, industries, geography, employee count, and intent signals.
+              Include client, product, target buyers, industries, company/contact regions, employee count, and intent signals.
             </p>
           </div>
           <div className="flex flex-wrap justify-end gap-2">
@@ -768,15 +798,36 @@ export function NewRequestBuilder({
               resetKey={resetKey}
             />
             <ArrayField
-              label="Countries"
-              value={draft.country}
-              onChange={(v) => update('country', v)}
+              label="Company countries"
+              value={draft.company_country}
+              onChange={(v) => update('company_country', v)}
               placeholder="United States"
+              hint="Company HQ countries. Legacy country/geography filters map here."
               resetKey={resetKey}
             />
             <div>
-              <FieldLabel>Geography</FieldLabel>
-              <TextInput value={draft.geography} onChange={(v) => update('geography', v)} placeholder="Region / state / city if needed" />
+              <FieldLabel hint="Company HQ region/state/city filter.">Company region</FieldLabel>
+              <TextInput
+                value={draft.company_region}
+                onChange={(v) => update('company_region', v)}
+                placeholder="New York, Bay Area, EMEA..."
+              />
+            </div>
+            <ArrayField
+              label="Contact countries"
+              value={draft.contact_country}
+              onChange={(v) => update('contact_country', v)}
+              placeholder="United States"
+              hint="Person/contact country filter."
+              resetKey={resetKey}
+            />
+            <div>
+              <FieldLabel hint="Person/contact region/state/city filter.">Contact region</FieldLabel>
+              <TextInput
+                value={draft.contact_region}
+                onChange={(v) => update('contact_region', v)}
+                placeholder="New Jersey, Pennsylvania, London..."
+              />
             </div>
           </div>
 
@@ -834,7 +885,7 @@ export function NewRequestBuilder({
               value={draft.required_attributes.company}
               onChange={(v) => updateRequiredAttributes('company', v)}
               placeholder="Is an importer or exporter&#10;Operates in manufacturing, retail, or wholesale"
-              hint="Fail-closed company-level gates verified by the gateway before intent scoring."
+              hint="Fail-closed company-level gates. Do not put company HQ location or company size here; use Company region/countries and Employee count."
               splitMode="newline"
               rows={4}
               resetKey={resetKey}
@@ -844,7 +895,7 @@ export function NewRequestBuilder({
               value={draft.required_attributes.contact}
               onChange={(v) => updateRequiredAttributes('contact', v)}
               placeholder="Is a W-2 employee&#10;Earns between $200,000 and $600,000"
-              hint="Fail-closed contact-level gates verified against person/profile evidence."
+              hint="Fail-closed person-level gates. Do not put contact country/region here; use Contact countries/region."
               splitMode="newline"
               rows={4}
               resetKey={resetKey}

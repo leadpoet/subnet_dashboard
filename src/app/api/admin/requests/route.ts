@@ -84,10 +84,11 @@ function summarizeIcp(icp: IcpDetails | null): ChainSummary['icp_summary'] {
     : icp.sub_industry
     ? 1
     : 0
-  const countries = Array.isArray(icp.country)
-    ? icp.country.filter((c) => typeof c === 'string' && c.length > 0)
-    : icp.country
-    ? [icp.country]
+  const rawCountries = icp.company_country ?? icp.country
+  const countries = Array.isArray(rawCountries)
+    ? rawCountries.filter((c) => typeof c === 'string' && c.length > 0)
+    : rawCountries
+    ? [rawCountries]
     : []
   const intent_signals = Array.isArray(icp.intent_signals)
     ? icp.intent_signals.length

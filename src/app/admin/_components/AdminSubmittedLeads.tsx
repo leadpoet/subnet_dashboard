@@ -14,6 +14,7 @@ import {
 import { CheckCircle2, CircleDot, Search, XCircle } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { formatDateTime, shortHotkey } from '@/lib/admin-format'
+import { normalizeRequiredAttributes } from '@/lib/admin-icp-parser'
 
 type SubmittedLeadStatus =
   | 'all'
@@ -1349,6 +1350,7 @@ function LeadDetailPanel({
   onClose: () => void
 }) {
   const icp = lead.requestIcp ?? {}
+  const requiredAttributes = normalizeRequiredAttributes(icp.required_attributes)
   const submittedFields = submittedLeadFields(lead.leadData)
 
   return (
@@ -1437,10 +1439,12 @@ function LeadDetailPanel({
                 <IcpCompare label="Industries" value={icp.industry} />
                 <IcpCompare label="Sub-industries" value={icp.sub_industry} />
                 <IcpCompare label="Employee count" value={icp.employee_count} />
-                <IcpCompare label="Countries" value={icp.country} />
-                <IcpCompare label="Geography" value={icp.geography} />
+                <IcpCompare label="Company countries" value={icp.company_country ?? icp.country} />
+                <IcpCompare label="Company region" value={icp.company_region ?? icp.geography} />
+                <IcpCompare label="Contact countries" value={icp.contact_country} />
+                <IcpCompare label="Contact region" value={icp.contact_region} />
                 <IcpCompare label="Intent signals" value={icp.intent_signals} />
-                <IcpCompare label="Required attributes" value={icp.required_attributes} />
+                <IcpCompare label="Required attributes" value={requiredAttributes} />
               </div>
               <div className="mt-5">
                 <div className="mb-2 text-[10px] uppercase tracking-[0.14em]" style={{ color: 'var(--text-tertiary)' }}>
@@ -1579,13 +1583,16 @@ function rejectionFocus(lead: AdminSubmittedLead, icp: Record<string, unknown>):
 } {
   const reason = lead.rejectionReason ?? ''
   const data = lead.leadData
+  const requiredAttributes = normalizeRequiredAttributes(icp.required_attributes)
 
   if (reason.includes('geography') || reason.includes('location')) {
     return {
       expectedLabel: 'Expected location',
       expected: {
-        geography: icp.geography,
-        countries: icp.country,
+        company_region: icp.company_region ?? icp.geography,
+        company_countries: icp.company_country ?? icp.country,
+        contact_region: icp.contact_region,
+        contact_countries: icp.contact_country,
       },
       submittedLabel: 'Submitted HQ / country',
       submitted: {
@@ -1648,7 +1655,7 @@ function rejectionFocus(lead: AdminSubmittedLead, icp: Record<string, unknown>):
   if (reason.includes('required_attribute')) {
     return {
       expectedLabel: 'Required attributes',
-      expected: icp.required_attributes,
+      expected: requiredAttributes,
       submittedLabel: 'Submitted lead evidence',
       submitted: {
         company: data.business,
@@ -1672,7 +1679,7 @@ function rejectionFocus(lead: AdminSubmittedLead, icp: Record<string, unknown>):
       expected: {
         industries: icp.industry,
         sub_industries: icp.sub_industry,
-        required_attributes: icp.required_attributes,
+        required_attributes: requiredAttributes,
       },
       submittedLabel: 'Submitted company',
       submitted: {

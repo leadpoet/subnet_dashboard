@@ -28,10 +28,16 @@ import { FulfillmentMobile } from './FulfillmentMobile'
 
 interface IcpDetails {
   prompt?: string
+  company_country?: string | string[]
+  company_region?: string
+  contact_country?: string | string[]
+  contact_region?: string
   country?: string
+  geography?: string
   industry?: string
   sub_industry?: string
   target_roles?: string[]
+  target_role_types?: string[]
   company_stage?: string
   employee_count?: string
   intent_signals?: string[]
@@ -96,6 +102,7 @@ interface FulfillmentData {
   scoreTotals: { passed: number; failed: number; sampleSize?: number }
   stats: {
     activeRequestCount: number
+    totalSubmittedLeads?: number
     totalConsensus: number
     totalWinners: number
     fulfilledCount: number
@@ -287,6 +294,10 @@ function asText(v: unknown): string {
   }
   if (v == null) return ''
   return String(v)
+}
+
+function icpCompanyCountry(icp: IcpDetails | undefined): string {
+  return asText(icp?.company_country ?? icp?.country)
 }
 
 // Deterministic, muted color swatch from hotkey. Low saturation keeps the
@@ -654,7 +665,7 @@ export function Fulfillment({ onSync }: { onSync?: () => void } = {}) {
       miners.add(c.miner_hotkey)
     }
     return {
-      submissions: data.allConsensus.length,
+      submissions: data.stats.totalSubmittedLeads ?? data.allConsensus.length,
       fulfilled,
       miners: miners.size,
     }
@@ -713,6 +724,7 @@ export function Fulfillment({ onSync }: { onSync?: () => void } = {}) {
           allConsensus={data.allConsensus}
           leaderboard={data.leaderboard}
           leaderboardWindowDays={data.stats.leaderboardWindowDays ?? 30}
+          totalSubmittedLeads={data.stats.totalSubmittedLeads ?? data.allConsensus.length}
           rejectionBreakdown={data.rejectionBreakdown}
           scoreTotals={data.scoreTotals}
           filter={filter}
@@ -1013,7 +1025,10 @@ function RequestHistoryDialog({
           r.request_id.toLowerCase().includes(q) ||
           asText(icp?.industry).toLowerCase().includes(q) ||
           asText(icp?.sub_industry).toLowerCase().includes(q) ||
-          asText(icp?.country).toLowerCase().includes(q)
+          icpCompanyCountry(icp).toLowerCase().includes(q) ||
+          asText(icp?.company_region ?? icp?.geography).toLowerCase().includes(q) ||
+          asText(icp?.contact_country).toLowerCase().includes(q) ||
+          asText(icp?.contact_region).toLowerCase().includes(q)
         )
       })
       .slice()
@@ -1506,14 +1521,20 @@ function RequestDetailDialog({
               </span>
             )}
           </div>
-          {(asText(icp?.country) ||
+          {(icpCompanyCountry(icp) ||
+            asText(icp?.contact_country) ||
             asText(icp?.employee_count) ||
             asText(icp?.target_seniority) ||
             targetRoles.length > 0) && (
             <div className="flex flex-wrap gap-1.5 pt-1">
-              {asText(icp?.country) && (
+              {icpCompanyCountry(icp) && (
                 <Badge variant="outline" className="text-[9px] border-slate-700/60 text-slate-300">
-                  {asText(icp?.country)}
+                  Co: {icpCompanyCountry(icp)}
+                </Badge>
+              )}
+              {asText(icp?.contact_country) && (
+                <Badge variant="outline" className="text-[9px] border-slate-700/60 text-slate-300">
+                  Contact: {asText(icp?.contact_country)}
                 </Badge>
               )}
               {asText(icp?.employee_count) && (
@@ -1803,7 +1824,10 @@ function MinerDetailDialog({
           s.request_id.toLowerCase().includes(q) ||
           asText(icp?.industry).toLowerCase().includes(q) ||
           asText(icp?.sub_industry).toLowerCase().includes(q) ||
-          asText(icp?.country).toLowerCase().includes(q)
+          icpCompanyCountry(icp).toLowerCase().includes(q) ||
+          asText(icp?.company_region ?? icp?.geography).toLowerCase().includes(q) ||
+          asText(icp?.contact_country).toLowerCase().includes(q) ||
+          asText(icp?.contact_region).toLowerCase().includes(q)
         )
       })
     : list
@@ -2139,9 +2163,9 @@ function ScoreTableRow({
         {score.rep_score.toFixed(1)}
       </span>
       <div className="flex items-center gap-2 text-slate-500 font-mono text-[10px] min-w-0">
-        <span className="truncate" title={[asText(icp?.industry), asText(icp?.country)].filter(Boolean).join(' · ')}>
+        <span className="truncate" title={[asText(icp?.industry), icpCompanyCountry(icp)].filter(Boolean).join(' · ')}>
           {asText(icp?.industry) || '·'}
-          {asText(icp?.country) && <span className="text-slate-600"> · {asText(icp?.country)}</span>}
+          {icpCompanyCountry(icp) && <span className="text-slate-600"> · {icpCompanyCountry(icp)}</span>}
         </span>
         <span className="ml-auto shrink-0 text-slate-600 tabular-nums">{formatRelative(score.scored_at)}</span>
       </div>

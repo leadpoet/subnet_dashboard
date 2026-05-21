@@ -123,8 +123,10 @@ function formatIcpBlock(icp: IcpDetails | null | undefined): string {
     ['Target role types', icp.target_role_types],
     ['Target seniority', icp.target_seniority],
     ['Employee count', icp.employee_count],
-    ['Geography', icp.geography],
-    ['Countries', icp.country],
+    ['Company countries', icp.company_country ?? icp.country],
+    ['Company region', icp.company_region ?? icp.geography],
+    ['Contact countries', icp.contact_country],
+    ['Contact region', icp.contact_region],
     ['Excluded companies', icp.excluded_companies],
   ]
 

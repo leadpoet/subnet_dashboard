@@ -43,6 +43,7 @@ import type {
   DeepResearchSummary,
   DeepResearchFinalStatus,
 } from '@/lib/admin-supabase'
+import { normalizeRequiredAttributes } from '@/lib/admin-icp-parser'
 
 export interface RequestDetailPayload {
   chain: {
@@ -276,9 +277,9 @@ export function AdminRequestDetail({
               }
             />
             <Stat
-              label="Fulfilled leads"
+              label="Final winners"
               value={`${fulfilledLeads.length}`}
-              secondary={`of ${target_num_leads} requested`}
+              secondary="is_winner=true"
               accent={isFulfilled ? 'gold' : 'default'}
               icon={
                 <Target
@@ -1233,12 +1234,13 @@ function Stat({
 const LEAD_FILTERS: Array<{ key: RequestSubmittedLeadStatus; label: string }> = [
   { key: 'all', label: 'All' },
   { key: 'approved', label: 'Approved' },
-  { key: 'fulfilled', label: 'Fulfilled' },
+  { key: 'fulfilled', label: 'Final winners' },
   { key: 'pending', label: 'Pending' },
   { key: 'denied', label: 'Denied' },
 ]
 
 function submittedLeadStatusLabel(status: RequestSubmittedLeadStatus): string {
+  if (status === 'fulfilled') return 'Final winners'
   return status === 'all' ? 'All' : status.charAt(0).toUpperCase() + status.slice(1)
 }
 
@@ -1315,6 +1317,10 @@ function SubmittedLeadsPanel({
   const counts = data.counts
   const start = data.total === 0 ? 0 : (data.page - 1) * data.pageSize + 1
   const end = Math.min(data.page * data.pageSize, data.total)
+  const exportHref = `/api/admin/requests/${requestId}/leads?${new URLSearchParams({
+    status: filter,
+    export: 'csv',
+  }).toString()}`
 
   function setFilterAndReset(nextFilter: RequestSubmittedLeadStatus) {
     setFilter(nextFilter)
@@ -1338,7 +1344,7 @@ function SubmittedLeadsPanel({
             {visible.length}
           </span>
         </div>
-        <div className="flex flex-wrap gap-1">
+        <div className="flex flex-wrap items-center gap-1">
           {LEAD_FILTERS.map((item) => (
             <button
               key={item.key}
@@ -1355,6 +1361,13 @@ function SubmittedLeadsPanel({
               <span className="tabular-nums text-[10px] opacity-70">{counts[item.key]}</span>
             </button>
           ))}
+          <a
+            href={exportHref}
+            className="ml-1 inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-all whitespace-nowrap border-gold-soft bg-gold-soft text-gold hover:bg-gold-tint"
+          >
+            <Download className="h-3 w-3" />
+            Export CSV
+          </a>
         </div>
       </header>
 
@@ -1736,8 +1749,9 @@ function RequiredDetailsSummary({
   icp: IcpDetails | null
   compact?: boolean
 }) {
-  const companyRequired = asList(icp?.required_attributes?.company)
-  const contactRequired = asList(icp?.required_attributes?.contact)
+  const requiredAttributes = normalizeRequiredAttributes(icp?.required_attributes)
+  const companyRequired = requiredAttributes.company
+  const contactRequired = requiredAttributes.contact
   const intentRequired = requiredIntentSignals(icp)
   const matchedSignals = matchedRequiredSignals(lead)
   const hasRequired =
@@ -2624,8 +2638,13 @@ function IcpPanel({ icp }: { icp: IcpDetails | null }) {
       </div>
     )
   }
-  const requiredCompanyAttributes = asList(icp.required_attributes?.company)
-  const requiredContactAttributes = asList(icp.required_attributes?.contact)
+  const requiredAttributes = normalizeRequiredAttributes(icp.required_attributes)
+  const requiredCompanyAttributes = requiredAttributes.company
+  const requiredContactAttributes = requiredAttributes.contact
+  const companyCountry = asList(icp.company_country ?? icp.country)
+  const companyRegion = icp.company_region ?? icp.geography ?? ''
+  const contactCountry = asList(icp.contact_country)
+  const contactRegion = icp.contact_region ?? ''
 
   return (
     <div className="space-y-3">
@@ -2657,22 +2676,15 @@ function IcpPanel({ icp }: { icp: IcpDetails | null }) {
             value={asList(icp.sub_industry).join(', ')}
           />
           <Field
-            label="Countries"
-            value={asList(icp.country).join(', ') || 'Any'}
+            label="Company countries"
+            value={companyCountry.join(', ') || 'Any'}
           />
-          {icp.geography && <Field label="Geography" value={icp.geography} />}
-          {icp.company_region && (
-            <Field label="Company HQ region" value={icp.company_region} />
-          )}
-          {icp.company_country && (
-            <Field label="Company HQ country" value={asList(icp.company_country).join(', ')} />
-          )}
-          {icp.contact_region && (
-            <Field label="Contact region" value={icp.contact_region} />
-          )}
-          {icp.contact_country && (
-            <Field label="Contact country" value={asList(icp.contact_country).join(', ')} />
-          )}
+          <Field label="Company region" value={companyRegion || 'Any'} />
+          <Field
+            label="Contact countries"
+            value={contactCountry.join(', ') || 'Any'}
+          />
+          <Field label="Contact region" value={contactRegion || 'Any'} />
           <Field
             label="Employee count"
             value={asList(icp.employee_count).join(', ')}
