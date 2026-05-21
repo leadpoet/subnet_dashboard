@@ -188,8 +188,7 @@ export async function GET() {
       }
       const seenLeadsByRoot = new Map<string, Set<string>>()
       for (const w of winnerRows) {
-        const approved =
-          w.is_winner || w.is_chain_held || (w.consensus_final_score ?? 0) > 0
+        const approved = w.is_winner || w.is_chain_held
         if (!approved) continue
         const root = reqIdToRoot.get(w.request_id)
         if (!root) continue

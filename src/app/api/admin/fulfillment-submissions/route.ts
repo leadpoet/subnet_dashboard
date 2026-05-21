@@ -677,7 +677,7 @@ export async function GET(request: NextRequest) {
   )
 
   const deniedConsensusRows = baseFilteredConsensus.filter(
-    (row) => !(row.is_winner || row.is_chain_held || (row.consensus_final_score ?? 0) > 0),
+    (row) => !(row.is_winner || row.is_chain_held),
   )
 
   const rejectionMap = new Map<string, RejectionDailyRow>()
@@ -892,10 +892,10 @@ export async function GET(request: NextRequest) {
         submitted: baseFilteredLeads.length,
         committed: baseFilteredLeads.filter((lead) => lead.status === 'committed').length,
         approved: baseFilteredConsensus.filter(
-          (row) => row.is_winner || row.is_chain_held || (row.consensus_final_score ?? 0) > 0,
+          (row) => row.is_winner || row.is_chain_held,
         ).length,
         denied: baseFilteredConsensus.filter(
-          (row) => !(row.is_winner || row.is_chain_held || (row.consensus_final_score ?? 0) > 0),
+          (row) => !(row.is_winner || row.is_chain_held),
         ).length,
         pending: baseFilteredLeads.filter((lead) => lead.status === 'pending').length,
         fulfilled: baseFilteredConsensus.filter((row) => row.is_winner).length,

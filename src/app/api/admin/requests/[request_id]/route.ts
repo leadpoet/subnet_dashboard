@@ -191,7 +191,7 @@ export async function GET(
   const consensusRows = (consensusData || []) as unknown as AdminConsensusRow[]
   const approvedRows = dedupeConsensus(
     consensusRows.filter(
-      (w) => w.is_winner || w.is_chain_held || (w.consensus_final_score ?? 0) > 0,
+      (w) => w.is_winner || w.is_chain_held,
     ),
   )
   const fulfilledRows = dedupeConsensus(consensusRows.filter((w) => w.is_winner))
