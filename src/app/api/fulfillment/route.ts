@@ -39,21 +39,14 @@ const CACHE_TTL = 60_000
 const LEADERBOARD_WINDOW_DAYS = 7
 const LEADERBOARD_ROW_LIMIT = 10_000
 const CONSENSUS_ROW_LIMIT = 25_000
-const REJECTION_SAMPLE_SIZE = 500
-const SUBMISSION_BATCH_SIZE = 1000
 const FULFILLMENT_CHAIN_ROW_LIMIT = 800
+const SCORE_ROW_BATCH_SIZE = 1000
 const TOP_MINER_BONUS_PCTS = [5, 3, 1.5] as const
 
 type CachedResponse = {
   data: unknown
   etag: string
   ts: number
-}
-
-type SubmissionLeadCountRow = {
-  submission_id: string
-  lead_hashes: Array<{ lead_id?: string }> | null
-  lead_data: Array<{ lead_id?: string }> | null
 }
 
 type DeliveredLeadCountRow = {
@@ -63,6 +56,14 @@ type DeliveredLeadCountRow = {
   consensus_final_score: number | null
   is_winner: boolean
   is_chain_held: boolean
+}
+
+type ScoreReasonRow = {
+  request_id: string
+  lead_id: string
+  failure_reason: string | null
+  failure_detail: string | null
+  scored_at: string | null
 }
 
 let cache: CachedResponse | null = null
@@ -87,49 +88,6 @@ function chunks<T>(items: T[], size: number): T[][] {
   const out: T[][] = []
   for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size))
   return out
-}
-
-async function countSubmittedLeadsForRequests(
-  supabase: ReturnType<typeof getSupabase>,
-  requestIds: string[] | null,
-): Promise<number> {
-  const submittedLeadKeys = new Set<string>()
-
-  if (requestIds && requestIds.length === 0) return 0
-
-  for (let offset = 0; ; offset += SUBMISSION_BATCH_SIZE) {
-    let query = supabase
-      .from('fulfillment_submissions')
-      .select('submission_id, lead_hashes, lead_data')
-      .order('revealed_at', { ascending: false, nullsFirst: false })
-      .range(offset, offset + SUBMISSION_BATCH_SIZE - 1)
-
-    if (requestIds) {
-      query = query.in('request_id', requestIds)
-    }
-
-    const { data, error } = await query
-
-    if (error) {
-      console.error('[Fulfillment API] submission lead count error:', error)
-      break
-    }
-
-    const batch = (data ?? []) as SubmissionLeadCountRow[]
-    for (const submission of batch) {
-      const leadEntries =
-        submission.lead_data && submission.lead_data.length > 0
-          ? submission.lead_data
-          : submission.lead_hashes ?? []
-      for (const entry of leadEntries) {
-        if (entry.lead_id) submittedLeadKeys.add(`${submission.submission_id}|${entry.lead_id}`)
-      }
-    }
-
-    if (batch.length < SUBMISSION_BATCH_SIZE) break
-  }
-
-  return submittedLeadKeys.size
 }
 
 async function countDeliveredLeadsForChains(
@@ -185,10 +143,63 @@ async function countDeliveredLeadsForChains(
   return total
 }
 
+async function fetchScoreReasonsForRequests(
+  supabase: ReturnType<typeof getSupabase>,
+  requestIds: string[],
+): Promise<Map<string, ScoreReasonRow>> {
+  const scoreByLead = new Map<string, ScoreReasonRow>()
+  for (const group of chunks(requestIds, 25)) {
+    for (let offset = 0; ; offset += SCORE_ROW_BATCH_SIZE) {
+      const { data, error } = await supabase
+        .from('fulfillment_scores')
+        .select('request_id, lead_id, failure_reason, failure_detail, scored_at')
+        .in('request_id', group)
+        .order('scored_at', { ascending: false })
+        .range(offset, offset + SCORE_ROW_BATCH_SIZE - 1)
+
+      if (error) {
+        console.error('[Fulfillment API] score reason query failed:', error)
+        break
+      }
+
+      const batch = (data ?? []) as ScoreReasonRow[]
+      for (const row of batch) {
+        const key = `${row.request_id}|${row.lead_id}`
+        const prev = scoreByLead.get(key)
+        if (!prev) {
+          scoreByLead.set(key, row)
+          continue
+        }
+        const prevHasReason = Boolean(prev.failure_reason || prev.failure_detail)
+        const rowHasReason = Boolean(row.failure_reason || row.failure_detail)
+        if (!prevHasReason && rowHasReason) scoreByLead.set(key, row)
+      }
+
+      if (batch.length < SCORE_ROW_BATCH_SIZE) break
+    }
+  }
+  return scoreByLead
+}
+
+function rejectionReasonFromScore(row: ScoreReasonRow | undefined): string {
+  const reason = row?.failure_reason?.trim()
+  if (reason) return reason
+
+  const detail = row?.failure_detail?.toLowerCase() ?? ''
+  if (detail.includes('intent')) return 'insufficient_intent'
+  if (detail.includes('geography') || detail.includes('location')) return 'geography_mismatch'
+  if (detail.includes('role')) return 'role_mismatch'
+  if (detail.includes('industry')) return 'industry_mismatch'
+  if (detail.includes('country')) return 'country_mismatch'
+  if (detail.includes('email')) return 'truelist_inline_verification'
+
+  return 'not_selected'
+}
+
 async function fetchFulfillmentData() {
   const supabase = getSupabase()
 
-  const [reqResult, countResult, scoresResult, chainRowsResult] = await Promise.all([
+  const [reqResult, countResult, chainRowsResult] = await Promise.all([
     supabase.from('fulfillment_requests')
       .select('request_id, icp_details, num_leads, window_start, window_end, status, created_at')
       .in('status', ['pending', 'open', 'continued_open', 'commit_closed', 'scoring', 'fulfilled'])
@@ -197,10 +208,6 @@ async function fetchFulfillmentData() {
     supabase.from('fulfillment_requests')
       .select('status')
       .limit(1000),
-    supabase.from('fulfillment_scores')
-      .select('failure_reason')
-      .order('scored_at', { ascending: false })
-      .limit(REJECTION_SAMPLE_SIZE),
     supabase.from('fulfillment_requests')
       .select('request_id, internal_label, company, status, num_leads, icp_details, created_at, window_start, window_end, successor_request_id')
       .order('created_at', { ascending: false })
@@ -212,7 +219,6 @@ async function fetchFulfillmentData() {
 
   const activeRequests = reqResult.data || []
   const allCounts = countResult.data || []
-  const allScores = scoresResult.data || []
   const chainRows: AdminFulfillmentRequest[] = (chainRowsResult.data || []).map((r) => ({
     request_id: r.request_id,
     internal_label: r.internal_label,
@@ -228,7 +234,6 @@ async function fetchFulfillmentData() {
 
   // Fetch consensus data + chain-side metadata for ALL active requests.
   const allRequestIds = activeRequests.map(r => r.request_id)
-  const submittedLeadRequestIds = new Set(allRequestIds)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let consensusData: any[] = []
   if (allRequestIds.length > 0) {
@@ -320,7 +325,6 @@ async function fetchFulfillmentData() {
     )
     const supplemental: Array<Record<string, unknown>> = []
     for (const row of chainCanonicalRows) {
-      if (typeof row.request_id === 'string') submittedLeadRequestIds.add(row.request_id)
       const leadId = (row.lead_id as string | undefined) ?? ''
       if (!leadId) continue
       const visibleRid = leadIdToVisibleRid.get(leadId)
@@ -371,21 +375,26 @@ async function fetchFulfillmentData() {
       }
     }
   }
-  const totalSubmittedLeads = await countSubmittedLeadsForRequests(
-    supabase,
-    Array.from(submittedLeadRequestIds),
-  )
+  // The public dashboard treats "Submitted" as the evaluated lead universe.
+  // Raw submitted payloads can include unrevealed or stuck-in-processing rows,
+  // which makes the topline diverge from the not-fulfilled breakdown.
+  const totalSubmittedLeads = consensusData.length
   const totalDeliveredLeads = await countDeliveredLeadsForChains(supabase, chainRows)
   const fulfilledCount = allCounts.filter(r => r.status === 'fulfilled').length
   const recycledCount = allCounts.filter(r => r.status === 'recycled').length
 
+  const rejectionRequestIds = Array.from(new Set(consensusData.map(c => c.request_id)))
+  const scoreByLead = await fetchScoreReasonsForRequests(supabase, rejectionRequestIds)
   const rejectionCounts: Record<string, number> = {}
-  let passedCount = 0
-  for (const s of allScores) {
-    if (s.failure_reason) {
-      rejectionCounts[s.failure_reason] = (rejectionCounts[s.failure_reason] || 0) + 1
+  let fulfilledEvaluatedCount = 0
+  let unfulfilledEvaluatedCount = 0
+  for (const c of consensusData) {
+    if (c.is_winner) {
+      fulfilledEvaluatedCount++
     } else {
-      passedCount++
+      unfulfilledEvaluatedCount++
+      const reason = rejectionReasonFromScore(scoreByLead.get(`${c.request_id}|${c.lead_id}`))
+      rejectionCounts[reason] = (rejectionCounts[reason] || 0) + 1
     }
   }
   const rejectionBreakdown = Object.entries(rejectionCounts)
@@ -454,13 +463,9 @@ async function fetchFulfillmentData() {
     requestMap,
     rejectionBreakdown,
     leaderboard,
-    // sampleSize tells the client the rejection / score totals were
-    // computed over the last N evaluations, not all-time. UI uses this
-    // to honestly label its rejection panel ("last 500 evaluations").
     scoreTotals: {
-      passed: passedCount,
-      failed: allScores.length - passedCount,
-      sampleSize: REJECTION_SAMPLE_SIZE,
+      passed: fulfilledEvaluatedCount,
+      failed: unfulfilledEvaluatedCount,
     },
     stats: {
       activeRequestCount: activeRequests.filter(r => r.status !== 'fulfilled').length,

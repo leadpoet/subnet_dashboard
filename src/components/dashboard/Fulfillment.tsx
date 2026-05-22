@@ -165,6 +165,7 @@ const REJECTION_LABELS: Record<string, string> = {
   duplicate_company: 'Duplicate company',
   company_excluded: 'Already delivered',
   fabricated_lead: 'Fabricated data',
+  not_selected: 'Not selected',
 }
 
 function readableReason(reason: string): string {
@@ -910,19 +911,14 @@ function RejectionReasonsContent({
     <div className={cn('space-y-3', className)}>
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[10px] font-mono text-slate-500">
         <span>
-          Failed <span className="text-slate-300 tabular-nums">{view.failed}</span>
+          Not fulfilled <span className="text-slate-300 tabular-nums">{view.failed}</span>
         </span>
         <span>
-          Passed <span className="text-slate-300 tabular-nums">{view.passed}</span>
+          Fulfilled <span className="text-slate-300 tabular-nums">{view.passed}</span>
         </span>
         <span>
           Evaluated <span className="text-slate-300 tabular-nums">{totalEvaluated}</span>
         </span>
-        {view.sampleSize && (
-          <span title="Global rejection breakdown is computed from the most recent fulfillment score sample returned by the API.">
-            Sample <span className="text-slate-300 tabular-nums">last {view.sampleSize}</span>
-          </span>
-        )}
       </div>
 
       {view.loading ? (
@@ -1048,11 +1044,11 @@ function RequestHistoryDialog({
                 ? 'Fulfillment activity'
                 : mode === 'leaderboard'
                   ? 'Miner leaderboard'
-                  : 'Rejection reasons'}
+                  : 'Not fulfilled reasons'}
             </DialogTitle>
             {mode === 'rejections' && (
               <span className="ml-auto text-[10px] text-slate-500 font-mono tabular-nums">
-                {rejectionView.failed} failed · {rejectionView.passed} passed
+                {rejectionView.failed} not fulfilled · {rejectionView.passed} fulfilled
               </span>
             )}
           </div>
@@ -1103,7 +1099,7 @@ function RequestHistoryDialog({
                     : 'bg-transparent text-slate-400 border-transparent hover:text-slate-200 hover:bg-slate-800/40'
                 )}
               >
-                <span>Rejection reasons</span>
+                <span>Not fulfilled reasons</span>
                 <span className={cn('text-[10px] font-mono tabular-nums', mode === 'rejections' ? 'text-current/70' : 'text-slate-500')}>
                   {rejectionView.failed}
                 </span>

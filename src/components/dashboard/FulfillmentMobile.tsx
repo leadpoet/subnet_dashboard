@@ -325,9 +325,9 @@ export function FulfillmentMobile({
                   <button
                     key={entry.hotkey}
                     onClick={() => onMinerSelect(entry.hotkey)}
-                    // Match desktop column order: rank · hotkey · bonus% · leads.
+                    // Match desktop order: rank · hotkey · bonus% · fulfilled count.
                     className={cn(
-                      'w-full grid grid-cols-[1.75rem_minmax(0,1fr)_2.75rem_4rem] items-center gap-2.5 px-4 py-3 transition-colors text-left active:bg-slate-800/60',
+                      'w-full grid grid-cols-[1.75rem_minmax(0,1fr)_3.5rem_5.75rem] items-center gap-2 px-4 py-3 transition-colors text-left active:bg-slate-800/60',
                       isFocused ? 'bg-gold-soft' : 'hover-bg-warm'
                     )}
                   >
@@ -343,11 +343,11 @@ export function FulfillmentMobile({
                     <span className="text-[10px] font-mono text-amber-warm tabular-nums text-right opacity-90">
                       {entry.bonusPct > 0 ? `+${entry.bonusPct}%` : ''}
                     </span>
-                    <div className="flex items-baseline justify-end gap-1">
+                    <div className="flex flex-col items-end justify-center leading-none">
                       <span className="text-sm font-semibold text-gold tabular-nums">
                         {entry.wins}
                       </span>
-                      <span className="text-[9px] text-slate-500 uppercase tracking-[0.08em]">
+                      <span className="mt-1 text-[8px] text-slate-500 uppercase tracking-[0.08em]">
                         fulfilled
                       </span>
                     </div>
@@ -358,9 +358,9 @@ export function FulfillmentMobile({
           </section>
         )}
 
-        {/* Rejection reasons */}
+        {/* Not fulfilled reasons */}
         <section className="mobile-section">
-          <SectionHeader title="Rejection reasons" subtitle="All miners" />
+          <SectionHeader title="Not fulfilled reasons" subtitle="Evaluated leads" />
           {rejectionBreakdown.length === 0 ? (
             <div className="px-4 py-6 text-center text-xs text-slate-500">
               No rejection data.
