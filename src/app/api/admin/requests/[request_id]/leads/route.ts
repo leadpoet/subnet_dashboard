@@ -6,6 +6,7 @@ import {
   LeadDataInner,
   LeadDataEntry,
 } from '@/lib/admin-supabase'
+import { buildXlsxArrayBuffer, type XlsxCell } from '@/lib/xlsx-export'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -152,27 +153,25 @@ function countRows(rows: SubmittedLeadIndexRow[]): Record<SubmittedLeadFilter, n
   }
 }
 
-function csvValue(value: unknown): string {
-  if (value == null) return ''
-  const text =
-    typeof value === 'string'
-      ? value
-      : typeof value === 'number' || typeof value === 'boolean'
-      ? String(value)
-      : JSON.stringify(value)
-  return `"${text.replace(/"/g, '""')}"`
-}
-
-function csvLine(values: unknown[]): string {
-  return values.map(csvValue).join(',')
-}
-
 function leadString(lead: LeadDataInner | null, key: keyof LeadDataInner): string {
   const value = lead?.[key]
   return typeof value === 'string' ? value : ''
 }
 
-function buildCsv(leads: Array<{
+function xlsxValue(value: unknown): XlsxCell {
+  if (
+    value == null ||
+    typeof value === 'string' ||
+    typeof value === 'number' ||
+    typeof value === 'boolean' ||
+    value instanceof Date
+  ) {
+    return value
+  }
+  return JSON.stringify(value)
+}
+
+function buildWorkbookData(leads: Array<{
   lead_id: string
   submission_id: string
   request_id: string
@@ -186,7 +185,7 @@ function buildCsv(leads: Array<{
   score: number | null
   rejection_reason: string | null
   rejection_detail: string | null
-}>): string {
+}>): { headers: string[]; rows: XlsxCell[][] } {
   const headers = [
     'status',
     'fulfilled',
@@ -226,7 +225,7 @@ function buildCsv(leads: Array<{
   ]
 
   const rows = leads.map((lead) =>
-    csvLine([
+    [
       lead.status,
       lead.fulfilled,
       lead.lead_id,
@@ -258,14 +257,14 @@ function buildCsv(leads: Array<{
       leadString(lead.lead, 'company_linkedin'),
       leadString(lead.lead, 'description'),
       lead.consensus?.intent_details,
-      lead.consensus?.intent_signal_mapping,
-      lead.consensus?.intent_breakdown,
-      lead.lead,
-      lead.consensus,
-    ]),
+      xlsxValue(lead.consensus?.intent_signal_mapping),
+      xlsxValue(lead.consensus?.intent_breakdown),
+      xlsxValue(lead.lead),
+      xlsxValue(lead.consensus),
+    ],
   )
 
-  return [csvLine(headers), ...rows].join('\n')
+  return { headers, rows }
 }
 
 async function fetchAllConsensusRows(
@@ -330,7 +329,8 @@ export async function GET(
 
   const search = req.nextUrl.searchParams
   const statusFilter = parseFilter(search.get('status'))
-  const exportMode = search.get('export') === 'csv'
+  const exportKind = search.get('export')
+  const exportMode = exportKind === 'csv' || exportKind === 'xlsx'
   const pageSize = parsePageParam(search.get('pageSize'), 50, 10, 100)
   const page = parsePageParam(search.get('page'), 1, 1, 100000)
 
@@ -512,10 +512,11 @@ export async function GET(
   })
 
   if (exportMode) {
-    const filename = `request-${request_id.slice(0, 8)}-leads-${statusFilter}.csv`
-    return new NextResponse(buildCsv(leads), {
+    const filename = `request-${request_id.slice(0, 8)}-leads-${statusFilter}.xlsx`
+    const { headers, rows } = buildWorkbookData(leads)
+    return new NextResponse(buildXlsxArrayBuffer(headers, rows, 'Leads'), {
       headers: {
-        'Content-Type': 'text/csv; charset=utf-8',
+        'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         'Content-Disposition': `attachment; filename="${filename}"`,
         'Cache-Control': 'no-store',
       },

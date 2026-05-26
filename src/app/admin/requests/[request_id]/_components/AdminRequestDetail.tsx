@@ -8,6 +8,7 @@ import {
   Check,
   Globe,
   Building2,
+  ChevronDown,
   ChevronRight,
   Tag,
   Clock,
@@ -20,6 +21,12 @@ import {
   RefreshCw,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import {
   formatDateTime,
   formatRelative,
@@ -250,18 +257,37 @@ export function AdminRequestDetail({
                 Reuse request
               </Link>
               <CopyButton text={requestId} label="Copy request ID" />
-              <a
-                href={`/api/admin/requests/${requestId}/csv`}
-                className="inline-flex items-center gap-2 rounded-md px-3.5 py-2 text-xs font-medium transition-colors border"
-                style={{
-                  borderColor: 'rgba(201, 169, 110, 0.35)',
-                  background: 'var(--brand-soft)',
-                  color: 'var(--brand)',
-                }}
-              >
-                <Download className="h-3.5 w-3.5" />
-                Export CSV
-              </a>
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  className="inline-flex items-center gap-2 rounded-md px-3.5 py-2 text-xs font-medium transition-colors border"
+                  style={{
+                    borderColor: 'rgba(201, 169, 110, 0.35)',
+                    background: 'var(--brand-soft)',
+                    color: 'var(--brand)',
+                  }}
+                >
+                  <Download className="h-3.5 w-3.5" />
+                  Export XLSX
+                  <ChevronDown className="h-3.5 w-3.5" />
+                </DropdownMenuTrigger>
+                <DropdownMenuContent
+                  align="end"
+                  className="border-white/10 bg-[#101013] text-slate-100"
+                >
+                  <DropdownMenuItem asChild>
+                    <a href={`/api/admin/requests/${requestId}/csv`}>
+                      <Download className="h-3.5 w-3.5" />
+                      <span>Full data</span>
+                    </a>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem asChild>
+                    <a href={`/api/admin/requests/${requestId}/csv?format=client-ready`}>
+                      <Download className="h-3.5 w-3.5" />
+                      <span>Client ready</span>
+                    </a>
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
           </div>
 
@@ -1319,7 +1345,7 @@ function SubmittedLeadsPanel({
   const end = Math.min(data.page * data.pageSize, data.total)
   const exportHref = `/api/admin/requests/${requestId}/leads?${new URLSearchParams({
     status: filter,
-    export: 'csv',
+    export: 'xlsx',
   }).toString()}`
 
   function setFilterAndReset(nextFilter: RequestSubmittedLeadStatus) {
@@ -1366,7 +1392,7 @@ function SubmittedLeadsPanel({
             className="ml-1 inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-all whitespace-nowrap border-gold-soft bg-gold-soft text-gold hover:bg-gold-tint"
           >
             <Download className="h-3 w-3" />
-            Export CSV
+            Export XLSX
           </a>
         </div>
       </header>

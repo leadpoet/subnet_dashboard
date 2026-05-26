@@ -425,7 +425,7 @@ export function AdminSubmittedLeads({
   }
   const exportHref = useMemo(() => {
     const params = new URLSearchParams({
-      export: 'csv',
+      export: 'xlsx',
       status: filter,
       q: query,
       rejectReason: rejectReasonFilter,
@@ -837,7 +837,7 @@ export function AdminSubmittedLeads({
               href={submissionsChartExportHref}
               className="rounded-full border border-gold-soft bg-gold-soft px-2.5 py-1 text-[11px] font-medium text-gold"
             >
-              Export chart CSV
+              Export chart XLSX
             </a>
             {data?.fetchedAt && (
               <span className="text-[11px]" style={{ color: 'var(--text-tertiary)' }}>
@@ -933,7 +933,7 @@ export function AdminSubmittedLeads({
               href={rejectsChartExportHref}
               className="rounded-lg border border-gold-soft bg-gold-soft px-3 py-1.5 text-xs font-medium text-gold"
             >
-              Export chart CSV
+              Export chart XLSX
             </a>
           </div>
         </div>
@@ -1026,7 +1026,7 @@ export function AdminSubmittedLeads({
               href={minerChartExportHref}
               className="rounded-lg border border-gold-soft bg-gold-soft px-3 py-1.5 text-xs font-medium text-gold"
             >
-              Export chart CSV
+              Export chart XLSX
             </a>
           </div>
         </div>
@@ -1120,7 +1120,7 @@ export function AdminSubmittedLeads({
             Table filters
           </h2>
           <p className="mt-1 text-xs" style={{ color: 'var(--text-tertiary)' }}>
-            These controls filter the table below and the table CSV export.
+            These controls filter the table below and the table XLSX export.
           </p>
         </div>
         <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center">
@@ -1192,7 +1192,7 @@ export function AdminSubmittedLeads({
           href={exportHref}
           className="inline-flex items-center justify-center rounded-lg border border-gold-strong bg-gold-soft px-3 py-2 text-sm font-medium text-gold transition-colors hover:bg-gold-tint"
         >
-          Export table CSV
+          Export table XLSX
         </a>
         </div>
       </section>

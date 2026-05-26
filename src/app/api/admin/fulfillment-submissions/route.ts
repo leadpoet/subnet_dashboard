@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getAdminSupabase } from '@/lib/admin-supabase'
+import { buildXlsxArrayBuffer, type XlsxCell } from '@/lib/xlsx-export'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -151,11 +152,6 @@ function inDateRange(value: string | null, from: string | null, to: string | nul
   return true
 }
 
-function csvEscape(value: unknown): string {
-  const text = value === null || value === undefined ? '' : String(value)
-  return `"${text.replace(/"/g, '""')}"`
-}
-
 function rejectionReason(row: Pick<ScoreRow, 'failure_reason' | 'failure_detail'> | undefined): string {
   const reason = row?.failure_reason?.trim()
   if (reason) return reason
@@ -175,14 +171,24 @@ function rejectionReason(row: Pick<ScoreRow, 'failure_reason' | 'failure_detail'
   return 'unknown_rejection'
 }
 
-function csvResponse(filename: string, headers: string[], rows: unknown[][]): NextResponse {
-  const csv = [
-    headers.map(csvEscape).join(','),
-    ...rows.map((row) => row.map(csvEscape).join(',')),
-  ].join('\n')
-  return new NextResponse(csv, {
+function xlsxValue(value: unknown): XlsxCell {
+  if (
+    value == null ||
+    typeof value === 'string' ||
+    typeof value === 'number' ||
+    typeof value === 'boolean' ||
+    value instanceof Date
+  ) {
+    return value
+  }
+  return JSON.stringify(value)
+}
+
+function xlsxResponse(filename: string, headers: string[], rows: unknown[][]): NextResponse {
+  const safeRows = rows.map((row) => row.map(xlsxValue))
+  return new NextResponse(buildXlsxArrayBuffer(headers, safeRows, 'Export'), {
     headers: {
-      'Content-Type': 'text/csv; charset=utf-8',
+      'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       'Content-Disposition': `attachment; filename="${filename}"`,
       'Cache-Control': 'no-store',
     },
@@ -470,8 +476,8 @@ export async function GET(request: NextRequest) {
   const dateFrom = normalizeDateBound(searchParams.get('from'))
   const dateTo = normalizeDateBound(searchParams.get('to'), true)
   const bucket = searchParams.get('bucket') === 'hour' ? 'hour' : 'day'
-  const wantsCsv = searchParams.get('export') === 'csv'
   const exportKind = searchParams.get('export') ?? ''
+  const wantsExport = exportKind === 'csv' || exportKind === 'xlsx'
 
   let supabase
   try {
@@ -778,8 +784,8 @@ export async function GET(request: NextRequest) {
   const pageLeads = filteredLeads.slice(start, start + pageSize)
 
   if (exportKind === 'submissions-by-day') {
-    return csvResponse(
-      'submissions-by-day.csv',
+    return xlsxResponse(
+      'submissions-by-day.xlsx',
       ['date', 'submitted', 'committed', 'approved', 'denied', 'pending', 'fulfilled'],
       daily.map((row) => [
         row.date,
@@ -794,16 +800,16 @@ export async function GET(request: NextRequest) {
   }
 
   if (exportKind === 'rejects-by-day') {
-    return csvResponse(
-      'rejects-by-day.csv',
+    return xlsxResponse(
+      'rejects-by-day.xlsx',
       ['date', 'reject_reason', 'count'],
       rejectionDaily.map((row) => [row.date, row.reason, row.count]),
     )
   }
 
   if (exportKind === 'miner-submissions-by-day') {
-    return csvResponse(
-      'miner-submissions-by-day.csv',
+    return xlsxResponse(
+      'miner-submissions-by-day.xlsx',
       ['date', 'miner_hotkey', 'count', 'committed', 'approved', 'denied', 'pending', 'fulfilled'],
       minerDaily.map((row) => [
         row.date,
@@ -818,7 +824,7 @@ export async function GET(request: NextRequest) {
     )
   }
 
-  if (wantsCsv) {
+  if (wantsExport) {
     const headers = [
       'status',
       'fulfilled',
@@ -875,7 +881,7 @@ export async function GET(request: NextRequest) {
       JSON.stringify(lead.requestIcp),
       JSON.stringify(lead.leadData),
     ])
-    return csvResponse('submitted-leads.csv', headers, rows)
+    return xlsxResponse('submitted-leads.xlsx', headers, rows)
   }
 
   return NextResponse.json(

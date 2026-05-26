@@ -35,6 +35,7 @@ import {
   Search,
 } from 'lucide-react'
 import type { EpochStats, MetagraphData } from '@/lib/types'
+import { downloadXlsx } from '@/lib/xlsx-export'
 
 type SortField = 'uid' | 'total' | 'accepted' | 'rejected' | 'acceptanceRate' | 'btIncentive'
 type EpochSortField = 'epochId' | 'total' | 'accepted' | 'rejected' | 'avgRepScore' | 'acceptanceRate'
@@ -282,7 +283,7 @@ export function EpochAnalysis({ epochStats, metagraph, onMinerClick, externalSel
   // Get unique miner count for this epoch (from pre-calculated data)
   const uniqueMiners = epochMinerStats.length
 
-  // Download Epoch Overview CSV
+  // Download Epoch Overview XLSX
   const downloadEpochOverviewCSV = () => {
     const headers = ['Epoch ID', 'Total Validated', 'Accepted', 'Rejected', 'Avg Score', 'Approval Rate%']
     const rows = sortedEpochStats.map(e => [
@@ -293,17 +294,10 @@ export function EpochAnalysis({ epochStats, metagraph, onMinerClick, externalSel
       e.avgRepScore.toFixed(3),
       e.acceptanceRate
     ])
-    const csvContent = [headers, ...rows].map(row => row.join(',')).join('\n')
-    const blob = new Blob([csvContent], { type: 'text/csv' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = 'epoch_overview.csv'
-    a.click()
-    URL.revokeObjectURL(url)
+    downloadXlsx('epoch_overview.xlsx', headers, rows, 'Epoch overview')
   }
 
-  // Download Miners in Epoch CSV
+  // Download Miners in Epoch XLSX
   const downloadMinersInEpochCSV = () => {
     if (!selectedEpoch) return
     const headers = ['UID', 'Hotkey', 'Total Validated', 'Accepted', 'Rejected', 'Approval Rate%', 'Incentive%']
@@ -316,14 +310,7 @@ export function EpochAnalysis({ epochStats, metagraph, onMinerClick, externalSel
       m.acceptanceRate,
       m.btIncentive.toFixed(4)
     ])
-    const csvContent = [headers, ...rows].map(row => row.join(',')).join('\n')
-    const blob = new Blob([csvContent], { type: 'text/csv' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `miners_epoch_${selectedEpoch}.csv`
-    a.click()
-    URL.revokeObjectURL(url)
+    downloadXlsx(`miners_epoch_${selectedEpoch}.xlsx`, headers, rows, 'Miners')
   }
 
   if (epochStats.length === 0) {
@@ -358,7 +345,7 @@ export function EpochAnalysis({ epochStats, metagraph, onMinerClick, externalSel
               className="flex items-center gap-1 px-2 py-1 md:px-3 md:py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-md"
             >
               <Download className="h-3 w-3" />
-              CSV
+              XLSX
             </button>
           </div>
         </CardHeader>
@@ -562,7 +549,7 @@ export function EpochAnalysis({ epochStats, metagraph, onMinerClick, externalSel
                   className="flex items-center gap-1 px-2 py-1 md:px-3 md:py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-md"
                 >
                   <Download className="h-3 w-3" />
-                  CSV
+                  XLSX
                 </button>
               </div>
             </CardHeader>

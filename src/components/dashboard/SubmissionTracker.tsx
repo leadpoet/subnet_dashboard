@@ -39,6 +39,7 @@ import { cn } from '@/lib/utils'
 import { fetchLeadJourney } from '@/lib/supabase'
 import { cleanRejectionReason } from '@/lib/utils-rejection'
 import type { JourneyEvent, MinerStats, EpochStats, MetagraphData } from '@/lib/types'
+import { downloadXlsx } from '@/lib/xlsx-export'
 
 interface SearchResult {
   emailHash: string
@@ -564,7 +565,7 @@ export function SubmissionTracker({ minerStats, epochStats, metagraph, onUidClic
     return <Clock className="h-4 w-4" />
   }
 
-  // Download Lead Search CSV
+  // Download Lead Search XLSX
   const downloadLeadSearchCSV = () => {
     if (sortedResults.length === 0) return
 
@@ -582,14 +583,12 @@ export function SubmissionTracker({ minerStats, epochStats, metagraph, onUidClic
       new Date(lead.timestamp).toISOString(),
     ])
 
-    const csvContent = [headers, ...rows].map(row => row.join(',')).join('\n')
-    const blob = new Blob([csvContent], { type: 'text/csv' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `lead_search_${new Date().toISOString().split('T')[0]}.csv`
-    a.click()
-    URL.revokeObjectURL(url)
+    downloadXlsx(
+      `lead_search_${new Date().toISOString().split('T')[0]}.xlsx`,
+      headers,
+      rows,
+      'Lead search',
+    )
   }
 
   return (
@@ -864,7 +863,7 @@ export function SubmissionTracker({ minerStats, epochStats, metagraph, onUidClic
                   className="flex items-center gap-1 px-2 py-1 md:px-3 md:py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-md"
                 >
                   <Download className="h-3 w-3" />
-                  CSV
+                  XLSX
                 </button>
                 <span className="text-sm">
                   Page {validCurrentPage} of {totalPages}

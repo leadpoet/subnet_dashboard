@@ -19,6 +19,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { Download } from 'lucide-react'
+import { downloadXlsx, type XlsxCell } from '@/lib/xlsx-export'
 import type {
   MinerStats,
   EpochStats,
@@ -123,51 +124,62 @@ export function Export({
     }
   }, [exportType, epochStats, minerStats, incentiveData, inventoryData])
 
-  // Generate CSV content
-  const generateCSV = () => {
-    let csvContent = ''
+  // Generate XLSX content
+  const generateXLSX = () => {
+    let headers: string[] = []
+    let rows: XlsxCell[][] = []
     let filename = ''
 
     switch (exportType) {
       case 'epoch-summary':
-        csvContent = 'Epoch ID,Total,Accepted,Rejected,Acceptance Rate %,Avg Rep Score\n'
-        epochStats.forEach((e) => {
-          csvContent += `${e.epochId},${e.total},${e.accepted},${e.rejected},${e.acceptanceRate},${e.avgRepScore}\n`
-        })
-        filename = `leadpoet_epoch_summary_${new Date().toISOString().split('T')[0]}.csv`
+        headers = ['Epoch ID', 'Total', 'Accepted', 'Rejected', 'Acceptance Rate %', 'Avg Rep Score']
+        rows = epochStats.map((e) => [
+          e.epochId,
+          e.total,
+          e.accepted,
+          e.rejected,
+          e.acceptanceRate,
+          e.avgRepScore,
+        ])
+        filename = `leadpoet_epoch_summary_${new Date().toISOString().split('T')[0]}.xlsx`
         break
 
       case 'miner-summary':
-        csvContent = 'UID,Miner,Total,Accepted,Rejected,Pending,Acceptance Rate %,Avg Rep Score,BT Incentive %\n'
-        minerStats.forEach((m) => {
-          csvContent += `${m.uid || ''},${m.minerHotkey},${m.total},${m.accepted},${m.rejected},${m.pending},${m.acceptanceRate},${m.avgRepScore},${m.btIncentive}\n`
-        })
-        filename = `leadpoet_miner_summary_${new Date().toISOString().split('T')[0]}.csv`
+        headers = ['UID', 'Miner', 'Total', 'Accepted', 'Rejected', 'Pending', 'Acceptance Rate %', 'Avg Rep Score', 'BT Incentive %']
+        rows = minerStats.map((m) => [
+          m.uid || '',
+          m.minerHotkey,
+          m.total,
+          m.accepted,
+          m.rejected,
+          m.pending,
+          m.acceptanceRate,
+          m.avgRepScore,
+          m.btIncentive,
+        ])
+        filename = `leadpoet_miner_summary_${new Date().toISOString().split('T')[0]}.xlsx`
         break
 
       case 'incentive-summary':
-        csvContent = 'UID,Miner,Accepted Leads,Lead Share %,BT Incentive %\n'
-        incentiveData.forEach((i) => {
-          csvContent += `${i.uid || ''},${i.minerHotkey},${i.acceptedLeads},${i.leadSharePct},${i.btIncentivePct}\n`
-        })
-        filename = `leadpoet_incentive_summary_${new Date().toISOString().split('T')[0]}.csv`
+        headers = ['UID', 'Miner', 'Accepted Leads', 'Lead Share %', 'BT Incentive %']
+        rows = incentiveData.map((i) => [
+          i.uid || '',
+          i.minerHotkey,
+          i.acceptedLeads,
+          i.leadSharePct,
+          i.btIncentivePct,
+        ])
+        filename = `leadpoet_incentive_summary_${new Date().toISOString().split('T')[0]}.xlsx`
         break
 
       case 'lead-inventory':
-        csvContent = 'Date,New Valid Leads,Total Valid Inventory\n'
-        inventoryData.forEach((i) => {
-          csvContent += `${i.date},${i.newValidLeads},${i.totalValidInventory}\n`
-        })
-        filename = `leadpoet_lead_inventory_${new Date().toISOString().split('T')[0]}.csv`
+        headers = ['Date', 'New Valid Leads', 'Total Valid Inventory']
+        rows = inventoryData.map((i) => [i.date, i.newValidLeads, i.totalValidInventory])
+        filename = `leadpoet_lead_inventory_${new Date().toISOString().split('T')[0]}.xlsx`
         break
     }
 
-    // Download file
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
-    const link = document.createElement('a')
-    link.href = URL.createObjectURL(blob)
-    link.download = filename
-    link.click()
+    downloadXlsx(filename, headers, rows, 'Export')
   }
 
   return (
@@ -198,9 +210,9 @@ export function Export({
         <CardHeader>
           <CardTitle className="text-lg flex items-center justify-between">
             <span>Preview ({previewData.total} records)</span>
-            <Button onClick={generateCSV} className="gap-2">
+            <Button onClick={generateXLSX} className="gap-2">
               <Download className="h-4 w-4" />
-              Download CSV
+              Download XLSX
             </Button>
           </CardTitle>
         </CardHeader>

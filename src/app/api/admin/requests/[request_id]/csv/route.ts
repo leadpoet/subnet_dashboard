@@ -1,7 +1,7 @@
 /**
  * GET /api/admin/requests/[request_id]/csv
  *
- * Streams every winning lead in the chain as a CSV.  The column set
+ * Streams every winning lead in the chain as an XLSX workbook. The column set
  * mirrors the admin dashboard "Winning leads" table 1:1 — the operator
  * sends this file to the client, so we deliberately exclude every
  * internal / operational column (consensus_final_score,
@@ -18,9 +18,7 @@
  * Signals" cell: Source, Date, Matched ICP Signal, Description, URL,
  * Snippet, Score.
  *
- * The CSV uses field-level quoting on every column so commas / line
- * breaks / quotes inside business descriptions or snippets don't
- * corrupt the output.  We do NOT use a streaming response because
+ * We do NOT use a streaming response because
  * the row count is bounded by `num_leads` (single digits in
  * practice), so the payload is small and the synchronous path is
  * simpler.
@@ -32,18 +30,10 @@ import type {
   IntentSignalMappingEntry,
   IntentBreakdown,
 } from '@/lib/admin-supabase'
+import { buildXlsxArrayBuffer, type XlsxCell } from '@/lib/xlsx-export'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
-
-function csvCell(v: unknown): string {
-  // Coerce to a clean string, then escape per RFC 4180. Always quote
-  // so a future schema addition that introduces commas can't break
-  // existing readers.
-  if (v === null || v === undefined) return '""'
-  const s = String(v)
-  return `"${s.replace(/"/g, '""').replace(/\r?\n/g, ' ')}"`
-}
 
 interface LeadDataLite {
   business?: string
@@ -99,7 +89,7 @@ function resolveSignalDescription(
 }
 
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   ctx: { params: Promise<{ request_id: string }> },
 ) {
   const { request_id } = await ctx.params
@@ -115,7 +105,7 @@ export async function GET(
     return new NextResponse(msg, { status: 503 })
   }
 
-  // Walk the chain so the CSV always includes every winner the
+  // Walk the chain so the workbook always includes every winner the
   // client got, even when they came from a predecessor row.
   // We reuse the simple in-place walk rather than depending on
   // the JSON endpoint so this route stays standalone.
@@ -211,6 +201,9 @@ export async function GET(
     }
   }
 
+  const exportFormat = req.nextUrl.searchParams.get('format')
+  const clientReady = exportFormat === 'client-ready'
+
   // First pass: figure out how many per-signal column blocks we
   // need.  This is the max credited-signal count across every
   // winning lead in the export.  Leads with fewer signals leave
@@ -225,7 +218,7 @@ export async function GET(
 
   // Base lead columns mirror the dashboard table in
   // src/app/admin/requests/[request_id]/_components/AdminRequestDetail.tsx
-  // (TABLE_COLUMNS).  Keep the order identical so the CSV reads
+  // (TABLE_COLUMNS).  Keep the order identical so the workbook reads
   // left-to-right exactly like the UI.
   const baseColumns: string[] = [
     'Name',
@@ -269,8 +262,8 @@ export async function GET(
     }
   }
 
-  const header = [...baseColumns, ...signalColumns]
-  const lines: string[] = [header.map(csvCell).join(',')]
+  const header = clientReady ? baseColumns : [...baseColumns, ...signalColumns]
+  const rows: XlsxCell[][] = []
 
   for (const w of winners) {
     const entry = (leadDataBySub.get(w.submission_id) || []).find(
@@ -278,7 +271,7 @@ export async function GET(
     )
     const ld = entry?.data || {}
 
-    const baseRow: unknown[] = [
+    const baseRow: XlsxCell[] = [
       ld.full_name,
       ld.email,
       ld.role,
@@ -300,7 +293,7 @@ export async function GET(
     ]
 
     const credited = creditedByConsensus.get(w.consensus_id) || []
-    const signalRow: unknown[] = []
+    const signalRow: XlsxCell[] = []
     for (let i = 0; i < maxSignals; i++) {
       const s = credited[i]
       if (!s) {
@@ -334,7 +327,8 @@ export async function GET(
       )
     }
 
-    lines.push([...baseRow, ...signalRow].map(csvCell).join(','))
+    const row = clientReady ? baseRow : [...baseRow, ...signalRow]
+    rows.push(row)
   }
 
   const labelSlug = (rootRow.internal_label || rootRow.company || 'request')
@@ -342,12 +336,15 @@ export async function GET(
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-|-$/g, '')
     .slice(0, 40)
-  const fname = `${labelSlug}-${rootRow.request_id.slice(0, 8)}-winners.csv`
+  const fname = `${labelSlug}-${rootRow.request_id.slice(0, 8)}-${
+    clientReady ? 'client-ready' : 'winners'
+  }.xlsx`
+  const body = buildXlsxArrayBuffer(header, rows, clientReady ? 'Client ready' : 'Full data')
 
-  return new NextResponse(lines.join('\n') + '\n', {
+  return new NextResponse(body, {
     status: 200,
     headers: {
-      'Content-Type': 'text/csv; charset=utf-8',
+      'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       'Content-Disposition': `attachment; filename="${fname}"`,
       'Cache-Control': 'no-store',
     },

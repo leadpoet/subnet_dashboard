@@ -24,6 +24,7 @@ import {
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { MinerStats, MetagraphData } from '@/lib/types'
+import { downloadXlsx } from '@/lib/xlsx-export'
 
 interface MinerTrackerProps {
   minerStats: MinerStats[]
@@ -260,7 +261,7 @@ export function MinerTracker({
     return selectedMinerStats.rejectionReasons
   }, [selectedMinerStats, selectedColdkey, coldkeyStats])
 
-  // Download CSV function for epoch performance
+  // Download XLSX function for epoch performance
   const downloadEpochPerformanceCSV = () => {
     if (minerEpochStats.length === 0) return
     const headers = ['Epoch ID', 'Total', 'Accepted', 'Rejected', 'Acceptance Rate%']
@@ -271,39 +272,25 @@ export function MinerTracker({
       ep.rejected,
       ep.acceptanceRate
     ])
-    const csvContent = [headers, ...rows].map(row => row.join(',')).join('\n')
-    const blob = new Blob([csvContent], { type: 'text/csv' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
     const filename = selectedColdkey
-      ? `coldkey_${selectedColdkey.slice(0, 8)}_epoch_performance.csv`
-      : `miner_${selectedMinerStats?.uid ?? 'unknown'}_epoch_performance.csv`
-    a.download = filename
-    a.click()
-    URL.revokeObjectURL(url)
+      ? `coldkey_${selectedColdkey.slice(0, 8)}_epoch_performance.xlsx`
+      : `miner_${selectedMinerStats?.uid ?? 'unknown'}_epoch_performance.xlsx`
+    downloadXlsx(filename, headers, rows, 'Epoch performance')
   }
 
-  // Download CSV function for miner rejection reasons
+  // Download XLSX function for miner rejection reasons
   const downloadMinerRejectionReasonsCSV = () => {
     if (minerRejectionReasons.length === 0) return
     const headers = ['Reason', 'Count', 'Percentage']
     const rows = minerRejectionReasons.map(r => [
-      `"${r.reason.replace(/"/g, '""')}"`,
+      r.reason,
       r.count,
       r.percentage.toFixed(2) + '%'
     ])
-    const csvContent = [headers, ...rows].map(row => row.join(',')).join('\n')
-    const blob = new Blob([csvContent], { type: 'text/csv' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
     const filename = selectedColdkey
-      ? `coldkey_${selectedColdkey.slice(0, 8)}_rejection_reasons.csv`
-      : `miner_${selectedMinerStats?.uid ?? 'unknown'}_rejection_reasons.csv`
-    a.download = filename
-    a.click()
-    URL.revokeObjectURL(url)
+      ? `coldkey_${selectedColdkey.slice(0, 8)}_rejection_reasons.xlsx`
+      : `miner_${selectedMinerStats?.uid ?? 'unknown'}_rejection_reasons.xlsx`
+    downloadXlsx(filename, headers, rows, 'Rejection reasons')
   }
 
   return (
@@ -481,7 +468,7 @@ export function MinerTracker({
                   className="flex items-center gap-1 px-2 py-1 md:px-3 md:py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-md"
                 >
                   <Download className="h-3 w-3" />
-                  <span className="hidden sm:inline">CSV</span>
+                  <span className="hidden sm:inline">XLSX</span>
                 </button>
               </div>
             </CardHeader>
@@ -500,7 +487,7 @@ export function MinerTracker({
                   className="flex items-center gap-1 px-2 py-1 md:px-3 md:py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-md"
                 >
                   <Download className="h-3 w-3" />
-                  <span className="hidden sm:inline">CSV</span>
+                  <span className="hidden sm:inline">XLSX</span>
                 </button>
               </div>
             </CardHeader>
@@ -601,7 +588,7 @@ export function MinerTracker({
                   className="flex items-center gap-1 px-2 py-1 md:px-3 md:py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-md"
                 >
                   <Download className="h-3 w-3" />
-                  <span className="hidden sm:inline">CSV</span>
+                  <span className="hidden sm:inline">XLSX</span>
                 </button>
               </div>
             </CardHeader>
@@ -620,7 +607,7 @@ export function MinerTracker({
                   className="flex items-center gap-1 px-2 py-1 md:px-3 md:py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-md"
                 >
                   <Download className="h-3 w-3" />
-                  <span className="hidden sm:inline">CSV</span>
+                  <span className="hidden sm:inline">XLSX</span>
                 </button>
               </div>
             </CardHeader>

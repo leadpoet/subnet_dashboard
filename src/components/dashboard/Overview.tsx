@@ -37,6 +37,7 @@ import type {
   MetagraphData,
 } from '@/lib/types'
 import type { WeeklyLeadInventory } from '@/lib/db-precalc'
+import { downloadXlsx } from '@/lib/xlsx-export'
 
 type SortKey = 'uid' | 'minerHotkey' | 'total' | 'accepted' | 'rejected' | 'pending' | 'acceptanceRate' | 'avgRepScore' | 'last20Accepted' | 'last20Rejected' | 'currentAccepted' | 'currentRejected' | 'btIncentive'
 type SortDirection = 'asc' | 'desc'
@@ -238,7 +239,7 @@ export function Overview({
     }
   }
 
-  // Download CSV function for miner leaderboard
+  // Download XLSX function for miner leaderboard
   const downloadMinerCSV = () => {
     const headers = ['UID', 'Hotkey', 'Total', 'Accepted', 'Rejected', 'Pending', 'Approval Rate%', 'Last 20 Epochs Acc', 'Last 20 Epochs Rej', 'Current Epoch Acc', 'Current Epoch Rej', 'Incentive%']
     const rows = sortedLeaderboardData.map(m => [
@@ -255,17 +256,10 @@ export function Overview({
       m.currentRejected,
       m.btIncentive.toFixed(4)
     ])
-    const csvContent = [headers, ...rows].map(row => row.join(',')).join('\n')
-    const blob = new Blob([csvContent], { type: 'text/csv' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = 'miner_leaderboard.csv'
-    a.click()
-    URL.revokeObjectURL(url)
+    downloadXlsx('miner_leaderboard.xlsx', headers, rows, 'Miner leaderboard')
   }
 
-  // Download CSV function for lead distribution (uses precalc totals)
+  // Download XLSX function for lead distribution (uses precalc totals)
   const downloadLeadDistributionCSV = () => {
     const accepted = leadInventoryCount?.accepted ?? totals.accepted
     const rejected = leadInventoryCount?.rejected ?? totals.rejected
@@ -277,63 +271,35 @@ export function Overview({
       ['Rejected', rejected, total > 0 ? ((rejected / total) * 100).toFixed(2) + '%' : '0%'],
       ['Pending', pending, total > 0 ? ((pending / total) * 100).toFixed(2) + '%' : '0%'],
     ]
-    const csvContent = [headers, ...rows].map(row => row.join(',')).join('\n')
-    const blob = new Blob([csvContent], { type: 'text/csv' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = 'lead_distribution.csv'
-    a.click()
-    URL.revokeObjectURL(url)
+    downloadXlsx('lead_distribution.xlsx', headers, rows, 'Lead distribution')
   }
 
-  // Download CSV function for rejection reasons
+  // Download XLSX function for rejection reasons
   const downloadRejectionReasonsCSV = () => {
     const headers = ['Reason', 'Count', 'Percentage']
     const rows = rejectionReasons.map(r => [
-      `"${r.reason.replace(/"/g, '""')}"`,
+      r.reason,
       r.count,
       r.percentage.toFixed(2) + '%'
     ])
-    const csvContent = [headers, ...rows].map(row => row.join(',')).join('\n')
-    const blob = new Blob([csvContent], { type: 'text/csv' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = 'rejection_reasons.csv'
-    a.click()
-    URL.revokeObjectURL(url)
+    downloadXlsx('rejection_reasons.xlsx', headers, rows, 'Rejection reasons')
   }
 
-  // Download CSV function for inventory growth
+  // Download XLSX function for inventory growth
   const downloadInventoryGrowthCSV = () => {
     const headers = ['Date', 'Total Valid Inventory']
     const rows = inventoryData.map(d => [d.date, d.totalValidInventory])
-    const csvContent = [headers, ...rows].map(row => row.join(',')).join('\n')
-    const blob = new Blob([csvContent], { type: 'text/csv' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = 'inventory_growth.csv'
-    a.click()
-    URL.revokeObjectURL(url)
+    downloadXlsx('inventory_growth.xlsx', headers, rows, 'Inventory growth')
   }
 
-  // Download CSV function for weekly leads
+  // Download XLSX function for weekly leads
   const downloadWeeklyLeadsCSV = () => {
     const headers = ['Week Start', 'Period End', 'Is Complete', 'Leads Added']
     const rows = weeklyInventoryData.map(d => [d.week_start, d.period_end, d.is_complete, d.leads_added])
-    const csvContent = [headers, ...rows].map(row => row.join(',')).join('\n')
-    const blob = new Blob([csvContent], { type: 'text/csv' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = 'weekly_lead_inventory.csv'
-    a.click()
-    URL.revokeObjectURL(url)
+    downloadXlsx('weekly_lead_inventory.xlsx', headers, rows, 'Weekly leads')
   }
 
-  // Download CSV function for miner incentive distribution
+  // Download XLSX function for miner incentive distribution
   const downloadMinerIncentiveCSV = () => {
     const headers = ['Rank', 'UID', 'Hotkey', 'Incentive%']
     const sorted = [...minerStatsForIncentiveChart].sort((a, b) => b.btIncentive - a.btIncentive)
@@ -343,14 +309,7 @@ export function Overview({
       m.minerHotkey,
       m.btIncentive.toFixed(4)
     ])
-    const csvContent = [headers, ...rows].map(row => row.join(',')).join('\n')
-    const blob = new Blob([csvContent], { type: 'text/csv' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = 'miner_incentive_distribution.csv'
-    a.click()
-    URL.revokeObjectURL(url)
+    downloadXlsx('miner_incentive_distribution.xlsx', headers, rows, 'Miner incentives')
   }
 
   return (
@@ -385,7 +344,7 @@ export function Overview({
                   className="flex items-center gap-1 px-2 py-1 md:px-3 md:py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-md flex-shrink-0"
                 >
                   <Download className="h-3 w-3" />
-                  <span className="hidden sm:inline">CSV</span>
+                  <span className="hidden sm:inline">XLSX</span>
                 </button>
               </div>
             </CardHeader>
@@ -403,7 +362,7 @@ export function Overview({
                   className="flex items-center gap-1 px-2 py-1 md:px-3 md:py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-md flex-shrink-0"
                 >
                   <Download className="h-3 w-3" />
-                  <span className="hidden sm:inline">CSV</span>
+                  <span className="hidden sm:inline">XLSX</span>
                 </button>
               </div>
             </CardHeader>
@@ -425,7 +384,7 @@ export function Overview({
                 className="flex items-center gap-1 px-2 py-1 md:px-3 md:py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-md"
               >
                 <Download className="h-3 w-3" />
-                <span className="hidden sm:inline">CSV</span>
+                <span className="hidden sm:inline">XLSX</span>
               </button>
             </div>
           </CardHeader>
@@ -480,7 +439,7 @@ export function Overview({
                 className="flex items-center gap-1 px-2 py-1 md:px-3 md:py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-md"
               >
                 <Download className="h-3 w-3" />
-                <span className="hidden sm:inline">CSV</span>
+                <span className="hidden sm:inline">XLSX</span>
               </button>
             </div>
           </CardHeader>
@@ -500,7 +459,7 @@ export function Overview({
               className="flex items-center gap-1 px-2 py-1 md:px-3 md:py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-md flex-shrink-0"
             >
               <Download className="h-3 w-3" />
-              <span className="hidden sm:inline">CSV</span>
+              <span className="hidden sm:inline">XLSX</span>
             </button>
           </div>
         </CardHeader>
@@ -519,7 +478,7 @@ export function Overview({
               className="flex items-center gap-1 px-3 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-md"
             >
               <Download className="h-3 w-3" />
-              CSV
+              XLSX
             </button>
           </div>
         </CardHeader>
