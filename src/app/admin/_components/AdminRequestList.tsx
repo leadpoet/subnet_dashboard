@@ -29,6 +29,7 @@ export interface ChainSummary {
   status: string
   target_num_leads: number
   delivered_count: number
+  submitted_leads_count: number
   cycle_count: number
   icp_summary: {
     industries: number
@@ -75,7 +76,7 @@ function StatusPill({ status }: { status: string }) {
   return (
     <span
       className={cn(
-        'inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] uppercase tracking-[0.14em] font-medium',
+        'inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 py-1 text-[10px] uppercase tracking-[0.14em] font-medium',
         cls,
       )}
     >
@@ -87,10 +88,12 @@ function StatusPill({ status }: { status: string }) {
 
 function ApprovalProgress({
   approved,
+  submitted,
   target,
   status,
 }: {
   approved: number
+  submitted: number
   target: number
   status: string
 }) {
@@ -103,7 +106,7 @@ function ApprovalProgress({
   const isFinalFulfilled = statusTone(status) === 'fulfilled'
 
   return (
-    <div className="min-w-[170px] space-y-1.5">
+    <div className="min-w-[190px] space-y-1.5">
       <div className="flex items-baseline justify-between gap-3">
         <span
           className="text-[10px] uppercase tracking-[0.14em]"
@@ -132,6 +135,9 @@ function ApprovalProgress({
         <span className="whitespace-nowrap text-[10px] tabular-nums text-slate-500">
           {remaining === 0 ? (isFinalFulfilled ? 'complete' : 'target met') : `${remaining} left`}
         </span>
+      </div>
+      <div className="text-[10px] tabular-nums" style={{ color: 'var(--text-tertiary)' }}>
+        Submitted <span className="text-slate-300">{submitted.toLocaleString()}</span>
       </div>
     </div>
   )
@@ -419,6 +425,7 @@ function ChainRow({ chain }: { chain: ChainSummary }) {
         {/* Approved lead count */}
         <ApprovalProgress
           approved={chain.delivered_count}
+          submitted={chain.submitted_leads_count}
           target={chain.target_num_leads}
           status={chain.status}
         />

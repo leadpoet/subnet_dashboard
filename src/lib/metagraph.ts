@@ -230,7 +230,7 @@ async function fetchMetagraphFromPython(): Promise<MetagraphData> {
   )
 
   if (stderr) {
-    console.error('Python stderr:', stderr)
+    console.log('Python stderr:', stderr)
   }
 
   const data = JSON.parse(stdout) as MetagraphData

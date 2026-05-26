@@ -43,7 +43,7 @@ export function statusLabel(status: string | null | undefined): string {
     case 'continued_open':
       return 'Continued'
     case 'commit_closed':
-      return 'Commits closed'
+      return 'Commit closed'
     case 'partially_fulfilled':
       return 'Partially fulfilled'
     case 'fulfilled':

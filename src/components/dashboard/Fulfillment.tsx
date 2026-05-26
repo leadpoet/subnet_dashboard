@@ -1337,7 +1337,7 @@ function HistoryRow({
     <button
       type="button"
       onClick={onSelect}
-      className="w-full grid grid-cols-[2rem_5.5rem_minmax(0,1fr)_5rem_6rem_7rem] gap-3 items-center px-5 py-2.5 text-[11px] text-left border-b border-slate-800/40 hover:bg-slate-900/60 transition-colors focus:outline-none focus-visible:bg-slate-900/60"
+      className="w-full grid grid-cols-[2rem_5.5rem_minmax(0,1fr)_5rem_7.25rem_7rem] gap-3 items-center px-5 py-2.5 text-[11px] text-left border-b border-slate-800/40 hover:bg-slate-900/60 transition-colors focus:outline-none focus-visible:bg-slate-900/60"
       title={`Open request ${request.request_id}`}
     >
       <span className="text-slate-500 font-mono tabular-nums">{index}</span>
@@ -1392,15 +1392,29 @@ function StatusPill({
   isFulfilled: boolean
 }) {
   const label = readableStatus(status)
+  const isCommitClosed = status === 'commit_closed'
+  const showDot = isPending || isCommitClosed
   const cls = isFulfilled
     ? 'bg-gold-soft text-gold border-gold-soft'
-    : isPending
+    : isCommitClosed
+      ? 'bg-cream-soft text-cream border-cream-soft'
+      : isPending
       ? 'bg-cream-soft text-cream border-cream-soft'
       : 'bg-slate-700/40 text-slate-300 border-slate-600/40'
   return (
-    <span className={cn('inline-flex items-center gap-1 text-[10px] rounded px-1.5 py-0.5 border font-medium', cls)}>
-      {isPending && (
-        <span className="inline-block w-1 h-1 rounded-full dot-amber live-pulse" />
+    <span
+      className={cn(
+        'inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-2 py-1 text-[10px] font-medium leading-none shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]',
+        cls
+      )}
+    >
+      {showDot && (
+        <span
+          className={cn(
+            'inline-block h-1.5 w-1.5 rounded-full dot-amber',
+            !isCommitClosed && 'live-pulse'
+          )}
+        />
       )}
       {label}
     </span>
@@ -1415,7 +1429,7 @@ function readableStatus(status: string): string {
     case 'continued_open':
       return 'Open'
     case 'commit_closed':
-      return 'Commits closed'
+      return 'Commit closed'
     case 'scoring':
       return 'Scoring'
     case 'fulfilled':
@@ -1441,6 +1455,7 @@ function RequestDetailDialog({
   if (!request) return null
 
   const isFulfilled = request.status === 'fulfilled'
+  const isCommitClosed = request.status === 'commit_closed'
   const winners = leads.filter((l) => l.is_winner).length
   const heldCount = request.held_count ?? 0
   const remaining = Math.max(0, request.num_leads - heldCount)
@@ -1465,14 +1480,19 @@ function RequestDetailDialog({
             <CopyButton text={request.request_id} />
             <span
               className={cn(
-                'ml-auto inline-flex items-center gap-1.5 text-[10px] rounded px-1.5 py-0.5 border',
-                isFulfilled
+                'ml-auto inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-2 py-1 text-[10px] font-medium leading-none',
+                isFulfilled || isCommitClosed
                   ? 'text-cream border-cream-soft bg-cream-soft'
                   : 'text-amber-warm border-amber-warm-soft bg-amber-warm-soft'
               )}
             >
               {!isFulfilled && (
-                <span className="inline-block w-1.5 h-1.5 rounded-full dot-amber live-pulse" />
+                <span
+                  className={cn(
+                    'inline-block h-1.5 w-1.5 rounded-full dot-amber',
+                    !isCommitClosed && 'live-pulse'
+                  )}
+                />
               )}
               {readableStatus(request.status)}
             </span>

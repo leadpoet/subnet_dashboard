@@ -567,6 +567,7 @@ function RequestMobileCard({
 }) {
   const isFulfilled = request.status === 'fulfilled'
   const isPending = PENDING_STATUSES.includes(request.status)
+  const isCommitClosed = request.status === 'commit_closed'
   const heldCount = request.held_count ?? 0
   const icp = request.icp_details
   const industry = asText(icp?.industry)
@@ -587,16 +588,23 @@ function RequestMobileCard({
           <div className="flex items-center gap-2 mb-1.5">
             <span
               className={cn(
-                'inline-flex items-center gap-1 text-[10px] rounded px-1.5 py-0.5 border font-medium',
+                'inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-2 py-1 text-[10px] font-medium leading-none',
                 isFulfilled
                   ? 'bg-cream-soft text-cream border-cream-soft'
-                  : isPending
+                  : isCommitClosed
+                    ? 'bg-cream-soft text-cream border-cream-soft'
+                    : isPending
                     ? 'bg-amber-warm-soft text-amber-warm border-amber-warm-soft'
                     : 'bg-slate-700/40 text-slate-300 border-slate-600/40'
               )}
             >
-              {isPending && (
-                <span className="inline-block w-1 h-1 rounded-full dot-amber live-pulse" />
+              {(isPending || isCommitClosed) && (
+                <span
+                  className={cn(
+                    'inline-block h-1.5 w-1.5 rounded-full dot-amber',
+                    !isCommitClosed && 'live-pulse'
+                  )}
+                />
               )}
               {readableStatus(request.status)}
             </span>

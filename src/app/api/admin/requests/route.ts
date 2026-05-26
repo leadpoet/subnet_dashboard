@@ -53,6 +53,9 @@ interface ChainSummary {
   // odd "13 of 10" overshoot when a chain partially overdelivers
   // before a recycle dedup pass.
   delivered_count: number
+  // Number of individual submitted leads across every submission in
+  // the chain. This counts lead IDs, not submission batches/miners.
+  submitted_leads_count: number
   // Length of the chain (1 = single cycle, 2 = one recycle, etc).
   cycle_count: number
   // ICP basics surfaced for the list view (country, industry list
@@ -100,6 +103,24 @@ function chunks<T>(items: T[], size: number): T[][] {
   const out: T[][] = []
   for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size))
   return out
+}
+
+type SubmissionLeadCountRow = {
+  request_id: string
+  submission_id: string
+  lead_hashes: Array<{ lead_id?: string | null }> | null
+  lead_data: Array<{ lead_id?: string | null }> | null
+}
+
+function submittedLeadCount(row: SubmissionLeadCountRow): number {
+  const leadIds = new Set<string>()
+  for (const entry of row.lead_hashes ?? []) {
+    if (entry.lead_id) leadIds.add(entry.lead_id)
+  }
+  for (const entry of row.lead_data ?? []) {
+    if (entry.lead_id) leadIds.add(entry.lead_id)
+  }
+  return leadIds.size
 }
 
 export async function GET() {
@@ -151,6 +172,11 @@ export async function GET() {
     ...c.predecessors.map((p) => p.request_id),
     c.leaf.request_id,
   ])
+  const reqIdToRoot = new Map<string, string>()
+  for (const c of chains) {
+    for (const r of c.predecessors) reqIdToRoot.set(r.request_id, c.rootId)
+    reqIdToRoot.set(c.leaf.request_id, c.rootId)
+  }
 
   let winnerCounts: Map<string, number> = new Map()
   const latestWinnerAt: Map<string, string> = new Map()
@@ -182,11 +208,6 @@ export async function GET() {
       // Map a request_id back to its chain's root, then dedupe winners
       // by lead_id within the chain (a held lead can appear in
       // multiple chain generations).
-      const reqIdToRoot = new Map<string, string>()
-      for (const c of chains) {
-        for (const r of c.predecessors) reqIdToRoot.set(r.request_id, c.rootId)
-        reqIdToRoot.set(c.leaf.request_id, c.rootId)
-      }
       const seenLeadsByRoot = new Map<string, Set<string>>()
       for (const w of winnerRows) {
         const approved = w.is_winner || w.is_chain_held
@@ -207,6 +228,32 @@ export async function GET() {
       winnerCounts = new Map(
         [...seenLeadsByRoot.entries()].map(([root, set]) => [root, set.size]),
       )
+    }
+  }
+
+  const submittedLeadCounts = new Map<string, number>()
+  if (allChainRequestIds.length > 0) {
+    let submissionsErr: { message: string } | null = null
+    for (const group of chunks(allChainRequestIds, 25)) {
+      const { data, error } = await supabase
+        .from('fulfillment_submissions')
+        .select('request_id, submission_id, lead_hashes, lead_data')
+        .in('request_id', group)
+      if (error) {
+        submissionsErr = { message: error.message || 'submission batch failed' }
+        break
+      }
+      for (const row of (data ?? []) as SubmissionLeadCountRow[]) {
+        const root = reqIdToRoot.get(row.request_id)
+        if (!root) continue
+        submittedLeadCounts.set(
+          root,
+          (submittedLeadCounts.get(root) ?? 0) + submittedLeadCount(row),
+        )
+      }
+    }
+    if (submissionsErr) {
+      console.error('[admin] submitted lead count query failed', submissionsErr)
     }
   }
 
@@ -231,6 +278,7 @@ export async function GET() {
       // Cap so we never show "12 of 10". Overshoot can happen briefly
       // mid-cycle before dedup; the client only ever gets `target`.
       delivered_count: Math.min(delivered, target),
+      submitted_leads_count: submittedLeadCounts.get(c.rootId) ?? 0,
       cycle_count: c.predecessors.length + 1,
       icp_summary: summarizeIcp(leaf.icp_details ?? root.icp_details ?? null),
       created_at: root.created_at,
