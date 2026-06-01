@@ -179,9 +179,17 @@ ${EMPLOYEE_COUNT_BUCKETS.map((v) => `  - ${v}`).join('\n')}
 - Do NOT put company HQ, company region, contact region, country, geography, employee count, company size, or headcount rules into required_attributes. Use the dedicated fields above.
 - "intent_signals" must be a list of plain strings — each one a concrete observable event miners can verify from web content. Avoid vague signals like "has budget" or "high intent". Do NOT infer required-vs-optional; the operator will toggle "Required" per signal in the admin UI after reviewing your draft.
 - "required_attributes" is optional fail-closed criteria. This is the ONLY place for must-have criteria / required attributes / required criteria / hard requirements that are not already covered by role, role type, industry, company_country, company_region, contact_country, contact_region, employee_count, or intent_signals.
-- Use required_attributes.company for company-level gates, e.g. "Is an importer or exporter", "Has SOC 2 certification", "Uses Salesforce", "Operates in manufacturing, retail, or wholesale".
-- Use required_attributes.contact for person-level gates, e.g. "Is a W-2 employee", "Owns procurement", "Has budget authority", "Works in the US".
-- Preserve each required attribute as a standalone sentence. Do not split commas inside one criterion. Only include attributes explicitly stated by the operator; otherwise return {"company":[],"contact":[]}.
+- Use required_attributes.company for company-level gates, use required_attributes.contact for person-level gates.
+- Each attribute MUST be written as a clear, descriptive explanation that defines exactly what the criterion means in plain language. A validator who has never seen the original request should be able to read the attribute and understand precisely what qualifies. Do NOT use shorthand labels. Instead, write a full description:
+  - WRONG: "Is a family office"
+  - RIGHT: "The company operates as a family office — a private firm that manages investments and wealth for a single high-net-worth family or a small group of families, rather than serving external clients as a fund or advisory firm."
+  - WRONG: "Has SOC 2 certification"
+  - RIGHT: "The company holds a current SOC 2 Type I or Type II certification for security, availability, and confidentiality controls."
+  - WRONG: "Is a W-2 employee"
+  - RIGHT: "The contact is a full-time employee of the company with a permanent role, not a contractor, consultant, freelancer, or agency partner."
+  - WRONG: "Uses Salesforce"
+  - RIGHT: "The company uses Salesforce as its primary CRM platform."
+- Only include attributes explicitly stated by the operator; otherwise return {"company":[],"contact":[]}.
 - "product_service" describes what the client sells, not just the buyer pain.
 - "num_leads" defaults to 10 if unspecified.
 - "excluded_companies" is optional; include only explicitly named excluded prospect companies.
