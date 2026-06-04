@@ -395,7 +395,7 @@ function IntentSignalEditor({
     onChange(value.filter((_, i) => i !== idx))
   }
   function addRow() {
-    onChange([...value, { text: '', required: false }])
+    onChange([...value, { text: '', required: false, recency_cap_days: null }])
   }
 
   return (
@@ -431,7 +431,7 @@ function IntentSignalEditor({
                   ×
                 </button>
               </div>
-              <div className="mt-2 flex flex-wrap gap-3 pl-0.5">
+              <div className="mt-2 flex flex-wrap items-center gap-3 pl-0.5">
                 <label className="inline-flex items-center gap-1.5 text-[11px] text-slate-300">
                   <input
                     type="checkbox"
@@ -448,6 +448,40 @@ function IntentSignalEditor({
                   >
                     (must pass)
                   </span>
+                </label>
+                <label
+                  className="inline-flex items-center gap-1.5 text-[11px] text-slate-300"
+                  title="Max age of supporting evidence in days. Blank = no cap (timeless attribute like tech stack or headcount). Suggested: 45 (30d), 75 (60d), 105 (90d), 200 (6mo), 400 (12mo), 770 (2y)."
+                >
+                  Max evidence age (days)
+                  <input
+                    type="number"
+                    min={1}
+                    step={1}
+                    list={`recency-suggest-${idx}`}
+                    value={spec.recency_cap_days ?? ''}
+                    placeholder="no cap"
+                    onChange={(e) => {
+                      const v = e.target.value.trim()
+                      if (v === '') {
+                        updateRow(idx, { recency_cap_days: null })
+                      } else {
+                        const n = Number(v)
+                        if (Number.isFinite(n) && n > 0) {
+                          updateRow(idx, { recency_cap_days: Math.trunc(n) })
+                        }
+                      }
+                    }}
+                    className="premium-focus w-24 rounded-md border border-slate-800/70 bg-slate-950/60 px-2 py-1 text-[11px] text-slate-100 placeholder:text-slate-600"
+                  />
+                  <datalist id={`recency-suggest-${idx}`}>
+                    <option value="45">30 days</option>
+                    <option value="75">60 days</option>
+                    <option value="105">90 days</option>
+                    <option value="200">6 months</option>
+                    <option value="400">12 months</option>
+                    <option value="770">2 years</option>
+                  </datalist>
                 </label>
                 {spec.required ? (
                   <span className="rounded-full border border-gold-soft bg-gold-soft px-2 py-0.5 text-[10px] uppercase tracking-wider text-gold">

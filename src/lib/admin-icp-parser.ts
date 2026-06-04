@@ -47,6 +47,13 @@ import type { IntentSignalSpec, RequiredAttributes } from './admin-supabase'
  *
  * Always returns a clean, defaulted array — never throws.
  */
+function coerceRecencyCap(value: unknown): number | null {
+  if (value === null || value === undefined || value === '') return null
+  const n = typeof value === 'number' ? value : Number(value)
+  if (!Number.isFinite(n) || n <= 0) return null
+  return Math.trunc(n)
+}
+
 export function normalizeIntentSignals(
   value: unknown,
 ): IntentSignalSpec[] {
@@ -57,7 +64,7 @@ export function normalizeIntentSignals(
     if (typeof entry === 'string') {
       const t = entry.trim()
       if (!t) continue
-      out.push({ text: t, required: false })
+      out.push({ text: t, required: false, recency_cap_days: null })
       continue
     }
     if (entry && typeof entry === 'object') {
@@ -72,6 +79,7 @@ export function normalizeIntentSignals(
       out.push({
         text: t,
         required: typeof obj.required === 'boolean' ? obj.required : false,
+        recency_cap_days: coerceRecencyCap(obj.recency_cap_days),
       })
     }
   }

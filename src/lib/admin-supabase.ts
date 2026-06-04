@@ -63,6 +63,10 @@ export function getAdminSupabase(): SupabaseClient {
 export interface IntentSignalSpec {
   text: string
   required: boolean
+  /** Maximum age in days for supporting evidence. null = no cap (timeless
+   * attribute like tech stack or headcount).  Set by the admin parser
+   * from the operator's wording, overridable in the UI. */
+  recency_cap_days: number | null
 }
 
 export interface RequiredAttributes {
