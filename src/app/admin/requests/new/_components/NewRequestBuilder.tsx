@@ -907,6 +907,11 @@ export function NewRequestBuilder({
             onChange={(v) => update('target_role_types', v)}
             hint="Must use gateway-valid role types."
           />
+          {draft.target_role_types.length === 1 && draft.target_role_types[0] === 'C-Level Executive' && (
+            <p className="mt-1 text-[11px] text-amber-400">
+              ⚠ &quot;C-Level Executive&quot; alone is too narrow — many C-suite contacts are classified under functional role types (Sales, Marketing, Finance, etc.). Add the relevant functional types to avoid role_type mismatches.
+            </p>
+          )}
 
           <MultiCheckboxField<EmployeeBucket>
             label="Employee count"
