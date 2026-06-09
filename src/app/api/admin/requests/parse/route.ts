@@ -166,7 +166,7 @@ Schema:
   "target_role_types": string[],
   "target_seniority": string,
   "employee_count": string[],
-  "intent_signals": [{"text": string, "recency_cap_days": number | null, "evidence_type": "HIRING" | "FUNDING" | "SOCIAL_POSTING" | "CASE_STUDY" | "OTHER" | "PODCAST_APPEARANCE" | null}],
+  "intent_signals": [{"text": string, "recency_cap_days": number | null, "evidence_type": "HIRING" | "FUNDING" | "SOCIAL_POSTING" | "CASE_STUDY" | "OTHER" | "PODCAST_APPEARANCE" | "TECHSTACK" | null}],
   "required_attributes": {"company": string[], "contact": string[]},
   "product_service": string,
   "num_leads": number,
@@ -288,9 +288,31 @@ ${EMPLOYEE_COUNT_BUCKETS.map((v) => `  - ${v}`).join('\n')}
             "Founder interviewed on YouTube about Q3 expansion"     -> PODCAST_APPEARANCE
             "Head of Sales was a guest on the Sales Engagement
              podcast within the past 90 days"                       -> PODCAST_APPEARANCE
-       f) OTHER — recognisable but not one of the above (acquisitions,
-          partnerships, product launches, etc.).
-       g) null — cannot classify confidently.
+       f) TECHSTACK — signal asks whether the company USES a specific
+          tool / CRM / sales tech / marketing automation / data platform.
+          Pick this when the signal names a tool (Salesforce, HubSpot,
+          Outreach, Salesloft, Marketo, ZoomInfo, etc.) OR a category
+          ("uses a CRM", "deployed sales engagement tool") AND asks
+          whether the target company uses it.  Job postings that
+          REQUIRE a tool (e.g. "Salesforce admin required") are still
+          TECHSTACK — the underlying intent is tool usage, even though
+          the URL will be a job posting.  Examples:
+            "Company uses Salesforce as their primary CRM"          -> TECHSTACK
+            "Tech stack includes HubSpot and Marketo"               -> TECHSTACK
+            "Job postings require Salesforce administration"        -> TECHSTACK
+            "BuiltWith shows adoption of sales engagement tools"    -> TECHSTACK
+            "Deployed Outreach for outbound prospecting"            -> TECHSTACK
+          Do NOT use TECHSTACK for signals that mention a tool only
+          tangentially (e.g. "Company in the Salesforce ecosystem"
+          where the intent is partnership not internal usage) — use
+          OTHER in those cases.
+       g) OTHER — recognisable but not one of the above (acquisitions,
+          partnerships, product launches, M&A, geographic expansion,
+          regulatory milestones, etc.).
+       h) null — cannot classify confidently.  PREFER picking a category
+          over null when there is ANY reasonable fit — the gateway will
+          REJECT request creation for any null evidence_type that its
+          own classifier also can't resolve.
 - "required_attributes" is optional fail-closed criteria. This is the ONLY place for must-have criteria / required attributes / required criteria / hard requirements that are not already covered by role, role type, industry, company_country, company_region, contact_country, contact_region, employee_count, or intent_signals.
 - Use required_attributes.company for company-level gates, use required_attributes.contact for person-level gates.
 - Each attribute MUST be written as a clear, descriptive explanation that defines exactly what the criterion means in plain language. A validator who has never seen the original request should be able to read the attribute and understand precisely what qualifies. Do NOT use shorthand labels. Instead, write a full description:

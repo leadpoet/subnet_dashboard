@@ -61,6 +61,7 @@ const VALID_EVIDENCE_TYPES = new Set([
   'CASE_STUDY',
   'OTHER',
   'PODCAST_APPEARANCE',
+  'TECHSTACK',
 ])
 
 function coerceEvidenceType(

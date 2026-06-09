@@ -78,6 +78,7 @@ export interface IntentSignalSpec {
     | 'CASE_STUDY'
     | 'OTHER'
     | 'PODCAST_APPEARANCE'
+    | 'TECHSTACK'
     | null
 }
 
