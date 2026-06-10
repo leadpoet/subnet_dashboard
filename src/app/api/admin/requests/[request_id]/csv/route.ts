@@ -9,14 +9,13 @@
  * computed_at, lead_id).  Those still exist in Supabase for ops; they
  * just don't belong in a client-facing artifact.
  *
- * Intent signals are exploded into per-signal columns (one set of
- * columns per credited signal) instead of being collapsed into a
- * single JSON-ish cell.  The column count is sized to the lead with
- * the most credited signals in this export, and leads with fewer
- * signals leave their trailing signal columns blank.  Each signal
- * gets seven columns matching the cards in the dashboard's "Intent
- * Signals" cell: Source, Date, Matched ICP Signal, Description, URL,
- * Snippet, Score.
+ * Full-data exports explode intent signals into per-signal columns
+ * (one set of columns per credited signal) instead of collapsing them
+ * into a single JSON-ish cell.  Client-ready exports keep the compact
+ * client-facing column set and append EVERY signal in the mapping
+ * (credited or not) with its full field set to the Intent Details
+ * cell — post-processing downstream finalizes leads from this file,
+ * so no signal data may be dropped.
  *
  * We do NOT use a streaming response because
  * the row count is bounded by `num_leads` (single digits in
@@ -86,6 +85,81 @@ function resolveSignalDescription(
     }
   }
   return byIdx.get(i) || credited[i]?.description || ''
+}
+
+function appendField(lines: string[], label: string, value: string | null | undefined) {
+  const cleaned = value?.trim()
+  if (cleaned) lines.push(`${label}: ${cleaned}`)
+}
+
+function formatNumber(value: number | undefined, decimals = 2): string {
+  return typeof value === 'number' ? value.toFixed(decimals) : ''
+}
+
+/**
+ * Render EVERY signal in the mapping (credited or not) with the
+ * complete field set.  Client-ready exports feed downstream
+ * post-processing that finalizes leads, so nothing may be dropped.
+ *
+ * ``breakdown.per_signal[].source_index`` indexes into the *credited*
+ * subset (mirrors IntentSignalsList in AdminRequestDetail.tsx), so we
+ * map each full-mapping index to its credited index before looking up
+ * the LLM-written per-signal details.
+ */
+function formatIntentSignalsForDetails(
+  mapping: IntentSignalMappingEntry[] | null | undefined,
+  breakdown: IntentBreakdown | null,
+): string {
+  if (!Array.isArray(mapping) || mapping.length === 0) return ''
+
+  const credited = creditedSignals(mapping)
+  const creditedIdxOf = new Map<IntentSignalMappingEntry, number>()
+  credited.forEach((s, i) => creditedIdxOf.set(s, i))
+
+  return mapping
+    .map((signal, i) => {
+      const creditedIdx = creditedIdxOf.get(signal)
+      const isCredited = creditedIdx !== undefined
+      const lines = [`Intent Signal ${i + 1}:`]
+      appendField(lines, 'Source', signal.source || 'web')
+      appendField(lines, 'Date', signal.date ?? undefined)
+      appendField(lines, 'Date Status', signal.date_status)
+      appendField(lines, 'Matched ICP Signal', signal.matched_icp_signal ?? undefined)
+      if (typeof signal.matched_icp_signal_required === 'boolean') {
+        lines.push(`Required: ${signal.matched_icp_signal_required ? 'yes' : 'no'}`)
+      }
+      lines.push(`Credited: ${isCredited ? 'yes' : 'no'}`)
+      appendField(lines, 'Raw Score', formatNumber(signal.raw_score))
+      appendField(lines, 'Decay Multiplier', formatNumber(signal.decay_multiplier))
+      appendField(lines, 'Score (after decay)', formatNumber(signal.after_decay_score))
+      appendField(lines, 'Confidence', formatNumber(signal.confidence))
+      appendField(
+        lines,
+        'Description',
+        isCredited
+          ? resolveSignalDescription(credited, breakdown, creditedIdx)
+          : signal.description || '',
+      )
+      appendField(lines, 'URL', signal.url)
+      appendField(lines, 'Snippet', signal.snippet)
+      return lines.join('\n')
+    })
+    .join('\n\n')
+}
+
+function buildClientIntentDetails(
+  intentDetails: string | null,
+  mapping: IntentSignalMappingEntry[] | null | undefined,
+  breakdown: IntentBreakdown | null,
+): string {
+  const sections: string[] = []
+  const details = intentDetails?.trim()
+  if (details) sections.push(details)
+
+  const signals = formatIntentSignalsForDetails(mapping, breakdown)
+  if (signals) sections.push(`Intent Signals:\n${signals}`)
+
+  return sections.join('\n\n')
 }
 
 export async function GET(
@@ -270,6 +344,7 @@ export async function GET(
       (e) => e.lead_id === w.lead_id,
     )
     const ld = entry?.data || {}
+    const credited = creditedByConsensus.get(w.consensus_id) || []
 
     const baseRow: XlsxCell[] = [
       ld.full_name,
@@ -288,11 +363,16 @@ export async function GET(
       ld.company_hq_country,
       ld.employee_count,
       ld.description,
-      w.intent_details,
+      clientReady
+        ? buildClientIntentDetails(
+            w.intent_details,
+            w.intent_signal_mapping,
+            w.intent_breakdown,
+          )
+        : w.intent_details,
       ld.phone ?? '',
     ]
 
-    const credited = creditedByConsensus.get(w.consensus_id) || []
     const signalRow: XlsxCell[] = []
     for (let i = 0; i < maxSignals; i++) {
       const s = credited[i]
