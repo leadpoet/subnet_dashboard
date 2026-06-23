@@ -10,14 +10,13 @@ import { cn } from '@/lib/utils'
 //  FAQ. Premium editorial layout.
 //
 //  Positioning: Leadpoet is reimagining how sales intelligence is
-//  produced. Two competitions on a Bittensor subnet (model + live
-//  fulfillment) replace the static-list / single-vendor status quo.
-//  Alpha is the access token. Sales lead generation is the first
-//  deployment of a framework that extends to any matching problem
-//  with verifiable quality (talent, M&A, procurement, expansion).
+//  produced. Live fulfillment on a Bittensor subnet replaces the
+//  static-list / single-vendor status quo. Alpha is the access token.
+//  Sales lead generation is the first deployment of a framework that
+//  extends to any matching problem with verifiable quality.
 //
-//  Visual language matches Fulfillment / Model Competition:
-//  warm off-black canvas, single gold accent, restrained palette.
+//  Visual language matches Fulfillment: warm off-black canvas, single
+//  gold accent, restrained palette.
 //  Flat list (no category sections, no search, no share UI). There
 //  aren't enough questions to justify the chrome, and each answer
 //  is meant to be read on its own.
@@ -38,49 +37,43 @@ const FAQ_DATA: FAQItem[] = [
     id: 'problem',
     question: 'What problem does Leadpoet solve?',
     answer:
-      "Cold outbound is in a rough place. The lead lists sales teams buy from incumbents are static, sold simultaneously to thousands of competitors, scored by a single proprietary algorithm nobody can audit, and stale by the time anyone reaches out. Conversion rates have collapsed accordingly.\n\nLeadpoet rebuilds the layer underneath. Lead generation is, at its core, a continuously evolving matching problem with measurable outcomes, and the protocol is built around exactly that fact. Instead of one vendor selling the same list to everyone, sales teams get leads from a live, open market that produces fresh results tailored to each request, scored by a model that other teams are constantly trying to outdo. The output gets better whether or not you're paying attention.",
+      "Cold outbound is in a rough place. The lead lists sales teams buy from incumbents are static, sold simultaneously to thousands of competitors, scored by a single proprietary algorithm nobody can audit, and stale by the time anyone reaches out. Conversion rates have collapsed accordingly.\n\nLeadpoet rebuilds the layer underneath. Lead generation is, at its core, a continuously evolving matching problem with measurable outcomes, and the protocol is built around exactly that fact. Instead of one vendor selling the same list to everyone, sales teams get leads from a live, open market that produces fresh results tailored to each request and verifies quality before delivery. The output gets better whether or not you're paying attention.",
   },
   {
     id: 'why-bittensor',
     question: 'Why Bittensor?',
     answer:
-      "Bittensor runs open competitions. Anyone can participate, and emissions go to whoever produces the best output. Time and time again, global competition has proven to beat any central lab, and lead quality is verifiable: did the contact exist, did the email send, did the prospect respond, did the deal close.\n\nThe competition is permanent. Someone is always trying to beat the current champion, which means the leads sales teams receive get a little better every cycle, without any central team driving it forward.",
+      "Bittensor turns useful work into an open incentive market. Anyone can participate, and emissions can flow to the miners producing the best verified output. Lead quality is unusually measurable: did the contact exist, did the email send, did the prospect respond, did the deal close.\n\nThat makes sales intelligence a good fit for a subnet. Instead of trusting a single private vendor, buyers get a system where many independent miners are pushed toward fresher data, better fit, and stronger verification every cycle.",
   },
   {
-    id: 'two-competitions',
+    id: 'how-it-works',
     question: 'How does the subnet actually work?',
     answer:
-      "Two layered competitions, working on each other.\n\nThe model competition incentivizes teams to create the best AI agent that sources high-quality, high-intent leads. Anyone can submit, validators benchmark every submission against a rotating set of 100 ICP scenarios, and the model that beats the current champion by the threshold becomes the new open baseline. Each new champion raises the minimum quality everyone in the subnet builds on.\n\nFulfillment is where the subnet produces economic outputs. When a sales team submits a request, miners running their qualified models compete in real time to source matching leads. Validators score and verify every submission, and the leads that pass quality checks and have the highest intent reach the sales team. The two competitions reinforce each other: a stronger champion gives every miner a better starting point in fulfillment, and active fulfillment demand pulls more capable models into the next round of the model competition.",
-  },
-  {
-    id: 'model-competition',
-    question: 'How does the model competition work?',
-    answer:
-      "The point of the model competition isn't really to crown winners. The point is to raise the minimum quality everyone else builds on. When a new champion takes over, the model becomes the open baseline: its code is public after a short delay, and the next miner who shows up can run it as-is or use it as the starting point for something better. That lowers the cost to enter, so more people enter, and the floor rises again.\n\nMechanically, anyone can submit a model. Validators benchmark it against 100 ICP scenarios, and the scenarios rotate every day. That stops models from winning by overfitting to a fixed test set and keeps the ones at the top genuinely strong across changing inputs. If a new submission beats the current champion by the published threshold on the same day's ICPs, it becomes the new open baseline. Miners then build on that baseline for the models they actually run in fulfillment, which is what compounds quality across the whole subnet over time.",
+      "Fulfillment is where the subnet produces economic outputs. When a sales team submits a request, miners compete in real time to source leads that match the request's criteria: industry, role, geography, company size, intent signals, and any other filters that matter.\n\nValidators score and verify every submission, and only the leads that pass quality checks and show the strongest fit reach the sales team. That creates a live market around each request instead of a static list sold over and over again.",
   },
   {
     id: 'fulfillment',
     question: 'How does fulfillment work?',
     answer:
-      "Fulfillment is where the subnet produces economic outputs. A sales team submits a request with the criteria they care about: industry, role, geography, headcount, intent signals to prioritize. Miners running their own qualified models compete in real time to source leads that match.\n\nValidators score every submission on ICP fit, decision-maker accuracy, intent signal strength, and integrity, and verify the underlying facts (company identity, contact existence, email deliverability, employment status, intent scoring). Only leads that survive both stages reach the sales team, and the miners whose leads were chosen are compensated for them. Every request gets its own fresh competition tailored to its criteria. Incumbents work the opposite way: they give you stale data from months ago and leave filtering and qualifying to you.",
+      "A sales team submits a request with the criteria they care about: industry, role, geography, headcount, and intent signals to prioritize. Miners source matching leads in real time, then validators score every submission on ICP fit, decision-maker accuracy, intent signal strength, and integrity.\n\nValidators also verify the underlying facts: company identity, contact existence, email deliverability, employment status, and intent scoring. Only leads that survive those checks reach the sales team, and the miners whose leads were chosen are compensated for them. Incumbents work the opposite way: they give you stale data from months ago and leave filtering and qualifying to you.",
   },
   {
     id: 'incentives',
     question: 'How does the incentive mechanism work?',
     answer:
-      "Two ways to earn emissions.\n\nIn fulfillment, miners earn when their leads meet every data quality and intent scoring check and score the highest in a request's competition. Validators handle the scoring; the miners whose leads win are the ones who get compensated.\n\nIn the model competition, the miner whose model produces the best output and keeps scoring at the top as the benchmark ICPs rotate daily earns. Holding up across changing inputs is what pays; overfitting to a frozen test set doesn't.\n\nTogether these incentivize what the protocol actually needs: an ever-increasing floor of model quality, and rigorous competition around every real sales request.",
+      "Miners earn when their leads meet every data quality and intent scoring check, then rank highest for a live request. Validators handle scoring and verification; the miners whose leads win are the ones who get compensated.\n\nThat keeps the incentive tied to real buyer value. Better fit, fresher contacts, stronger intent signals, and cleaner verification are what move the market.",
   },
   {
     id: 'alpha',
     question: 'What role will Alpha play?',
     answer:
-      "Alpha will gate access to the subnet's outputs. If a platform wants to tap into Leadpoet's intelligence, they'll have to leverage Alpha.\n\nThis is the cleanest design of subnet utility that can be built. More teams pulling outputs means more Alpha spent, which routes more emissions to miners, which pulls more capable models into the competition, which improves the outputs, which attracts more teams.",
+      "Alpha will gate access to the subnet's outputs. If a platform wants to tap into Leadpoet's intelligence, they'll have to leverage Alpha.\n\nThis is the cleanest design of subnet utility that can be built. More teams pulling outputs means more Alpha spent, which routes more emissions to miners, which attracts better fulfillment, improves the outputs, and brings in more teams.",
   },
   {
     id: 'beyond-sales',
     question: "What's beyond sales lead generation?",
     answer:
-      "Sales lead generation is the first deployment of the framework, not the ceiling. The same architecture (continuous model competition, live request fulfillment, verifiable quality) applies to any matching problem where the outcome can be measured.\n\nTalent acquisition. M&A sourcing. Customer-expansion intelligence, deciding which accounts to upsell and when. Procurement, matching suppliers to specifications. Investment research, real estate, partnership development. Each is a market with the same shape and the same brittle incumbents lead generation has.\n\nEach subsequent market plugs into the same trust infrastructure, the same validator network, and the same Alpha economy, deepening the flywheel for everything already on the subnet. Over time, other Bittensor subnets and applications will build directly on Leadpoet outputs, which puts Leadpoet in the position of being infrastructure for an entire class of intent-driven products, not just one of them.",
+      "Sales lead generation is the first deployment of the framework, not the ceiling. The same architecture of live request fulfillment and verifiable quality applies to any matching problem where the outcome can be measured.\n\nTalent acquisition. M&A sourcing. Customer-expansion intelligence, deciding which accounts to upsell and when. Procurement, matching suppliers to specifications. Investment research, real estate, partnership development. Each is a market with the same shape and the same brittle incumbents lead generation has.\n\nEach subsequent market plugs into the same trust infrastructure, the same validator network, and the same Alpha economy, deepening the flywheel for everything already on the subnet. Over time, other Bittensor subnets and applications will build directly on Leadpoet outputs, which puts Leadpoet in the position of being infrastructure for an entire class of intent-driven products, not just one of them.",
   },
 ]
 
@@ -292,9 +285,9 @@ function Sidebar() {
           About Leadpoet
         </h3>
         <p className="text-[12px] text-slate-400 leading-relaxed">
-          Leadpoet is Subnet 71 on Bittensor. Two continuous competitions, one
-          for the best lead generation model and one for live delivery, make
-          the leads delivered to sales teams better every cycle.
+          Leadpoet is Subnet 71 on Bittensor. A live fulfillment market and
+          validator network make the leads delivered to sales teams fresher,
+          more relevant, and easier to trust.
         </p>
       </section>
 

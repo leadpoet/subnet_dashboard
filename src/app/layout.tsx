@@ -25,7 +25,7 @@ export const metadata: Metadata = {
     template: '%s · Leadpoet',
   },
   description:
-    'Real-time fulfillment, model competition, and validator transparency for Leadpoet on Bittensor Subnet 71.',
+    'Real-time fulfillment reporting and FAQ for Leadpoet on Bittensor Subnet 71.',
   applicationName: 'Leadpoet Subnet Dashboard',
   icons: {
     icon: '/icon.png',
@@ -36,7 +36,7 @@ export const metadata: Metadata = {
     siteName: 'Leadpoet',
     title: 'Leadpoet · Live Subnet Dashboard',
     description:
-      'Real-time fulfillment, model competition, and validator transparency for Bittensor Subnet 71.',
+      'Real-time fulfillment reporting and FAQ for Bittensor Subnet 71.',
     url: SITE_URL,
     images: [
       {
@@ -51,7 +51,7 @@ export const metadata: Metadata = {
     card: 'summary',
     title: 'Leadpoet · Live Subnet Dashboard',
     description:
-      'Real-time fulfillment, model competition, and validator transparency for Bittensor Subnet 71.',
+      'Real-time fulfillment reporting and FAQ for Bittensor Subnet 71.',
     images: ['/icon-64.png'],
   },
   robots: {

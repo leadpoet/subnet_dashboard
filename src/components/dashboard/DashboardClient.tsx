@@ -21,23 +21,18 @@ import { cn } from '@/lib/utils'
 // =================================================================
 // Tab routing config
 // =================================================================
-// Single source of truth for which tabs exist, their valid URL keys,
-// and which subset is live in the launch product. Set
-// `NEXT_PUBLIC_LAUNCH_MODE=full` in dev to expose all tabs.
-const LAUNCH_TABS = ['fulfillment', 'model-competition', 'faq'] as const
-const FULL_TABS = [
-  'fulfillment',
-  'model-competition',
-  'overview',
-  'miner-tracker',
-  'epoch-analysis',
-  'submission-tracker',
-  'faq',
-] as const
-type TabKey = (typeof FULL_TABS)[number]
-const LAUNCH_MODE = process.env.NEXT_PUBLIC_LAUNCH_MODE ?? 'launch'
-const VISIBLE_TABS: readonly TabKey[] =
-  LAUNCH_MODE === 'full' ? FULL_TABS : LAUNCH_TABS
+type TabKey =
+  | 'fulfillment'
+  | 'model-competition'
+  | 'overview'
+  | 'miner-tracker'
+  | 'epoch-analysis'
+  | 'submission-tracker'
+  | 'faq'
+// Single source of truth for the public dashboard tabs. Legacy tab code stays
+// in this file for now, but tabs not listed here cannot be opened from the UI
+// or by an old ?tab=... URL.
+const VISIBLE_TABS: readonly TabKey[] = ['fulfillment', 'faq'] as const
 const DEFAULT_TAB: TabKey = VISIBLE_TABS[0]
 
 function isValidTab(value: string | null): value is TabKey {
@@ -315,8 +310,6 @@ export function DashboardClient({ initialData, metagraph: initialMetagraph }: Da
     setActiveTab('miner-tracker')
   }
 
-  const isLaunchMode = LAUNCH_MODE !== 'full'
-
   return (
     <div className="min-h-screen bg-background">
       {/* Main Content */}
@@ -331,7 +324,7 @@ export function DashboardClient({ initialData, metagraph: initialMetagraph }: Da
           </div>
         </header>
 
-        {/* Tabs: gated by launch mode. */}
+        {/* Tabs: gated by the public tab registry above. */}
         <Tabs value={activeTab} onValueChange={handleTabChange} className="space-y-4 md:space-y-6">
           <TabsList
             className={cn(
@@ -351,7 +344,7 @@ export function DashboardClient({ initialData, metagraph: initialMetagraph }: Da
                 shortLabel="Model"
               />
             )}
-            {/* Below this point: only rendered in `full` mode. */}
+            {/* Legacy tabs stay registered in code, but are not publicly visible. */}
             {VISIBLE_TABS.includes('overview') && (
               <DashboardTabTrigger
                 value="overview"
@@ -424,10 +417,10 @@ export function DashboardClient({ initialData, metagraph: initialMetagraph }: Da
             </TabsContent>
           )}
 
-          {/* Non-launch tabs: keepMounted is intentional here so the
+          {/* Legacy tabs: keepMounted is intentional here so the
               chart-heavy Overview / MinerTracker views don't lose state
-              when admins switch back-and-forth. Only rendered in full mode. */}
-          {!isLaunchMode && VISIBLE_TABS.includes('overview') && (
+              if they are re-enabled later. */}
+          {VISIBLE_TABS.includes('overview') && (
             <TabsContent value="overview" keepMounted>
               <Overview
                 metrics={metrics}
@@ -445,7 +438,7 @@ export function DashboardClient({ initialData, metagraph: initialMetagraph }: Da
             </TabsContent>
           )}
 
-          {!isLaunchMode && VISIBLE_TABS.includes('miner-tracker') && (
+          {VISIBLE_TABS.includes('miner-tracker') && (
             <TabsContent value="miner-tracker" keepMounted>
               <MinerTracker
                 minerStats={minerStats}
@@ -457,7 +450,7 @@ export function DashboardClient({ initialData, metagraph: initialMetagraph }: Da
             </TabsContent>
           )}
 
-          {!isLaunchMode && VISIBLE_TABS.includes('epoch-analysis') && (
+          {VISIBLE_TABS.includes('epoch-analysis') && (
             <TabsContent value="epoch-analysis" keepMounted>
               <EpochAnalysis
                 epochStats={epochStats}
@@ -469,7 +462,7 @@ export function DashboardClient({ initialData, metagraph: initialMetagraph }: Da
             </TabsContent>
           )}
 
-          {!isLaunchMode && VISIBLE_TABS.includes('submission-tracker') && (
+          {VISIBLE_TABS.includes('submission-tracker') && (
             <TabsContent value="submission-tracker" keepMounted>
               <SubmissionTracker
                 minerStats={minerStats}
