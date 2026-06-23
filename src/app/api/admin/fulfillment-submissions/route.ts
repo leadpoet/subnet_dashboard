@@ -6,7 +6,7 @@ export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
 const SUBMISSION_BATCH_SIZE = 100
-const MAX_SUBMISSIONS = 10000
+const MAX_SUBMISSIONS = 4000
 const CONSENSUS_BATCH_SIZE = 1000
 const SCORE_BATCH_SIZE = 1000
 const MAX_SCORE_ROWS = 10000
@@ -381,47 +381,49 @@ async function loadAnalyticsDataset(
     const submissionIds = submissions.map((s) => s.submission_id)
     const requestIds = Array.from(new Set(submissions.map((s) => s.request_id)))
 
-    const commitAtBySubmission = new Map<string, string>()
-    if (submissionIds.length > 0) {
-      const { data: commitData } = await supabase
-        .from('transparency_log')
-        .select('ts, payload')
-        .eq('event_type', 'FULFILLMENT_COMMIT')
-        .order('ts', { ascending: false })
-        .limit(MAX_SUBMISSIONS * 2)
+    // Run independent queries in parallel for faster load
+    const [commitResult, consensusResult, requestResult] = await Promise.all([
+      submissionIds.length > 0
+        ? supabase
+            .from('transparency_log')
+            .select('ts, payload')
+            .eq('event_type', 'FULFILLMENT_COMMIT')
+            .order('ts', { ascending: false })
+            .limit(MAX_SUBMISSIONS * 2)
+        : Promise.resolve({ data: [] }),
+      submissionIds.length > 0
+        ? fetchConsensusRows(supabase, submissionIds)
+        : Promise.resolve({ data: [] as ConsensusRow[], error: null }),
+      requestIds.length > 0
+        ? fetchRequestRows(supabase, requestIds)
+        : Promise.resolve({ data: [] as RequestRow[], error: null }),
+    ])
 
-      for (const row of (commitData ?? []) as TransparencyCommitRow[]) {
-        const submissionId = row.payload?.submission_id
-        if (!submissionId || !submissionIds.includes(submissionId)) continue
-        commitAtBySubmission.set(
-          submissionId,
-          row.payload?.submission_timestamp ?? row.ts,
-        )
-      }
+    const commitAtBySubmission = new Map<string, string>()
+    const submissionIdSet = new Set(submissionIds)
+    for (const row of ((commitResult as { data: TransparencyCommitRow[] }).data ?? []) as TransparencyCommitRow[]) {
+      const submissionId = row.payload?.submission_id
+      if (!submissionId || !submissionIdSet.has(submissionId)) continue
+      commitAtBySubmission.set(
+        submissionId,
+        row.payload?.submission_timestamp ?? row.ts,
+      )
     }
 
     const consensusByLead = new Map<string, ConsensusRow>()
-    if (submissionIds.length > 0) {
-      const { data: consensusData, error: consensusErr } =
-        await fetchConsensusRows(supabase, submissionIds)
-      if (consensusErr) {
-        throw new Error(`Supabase consensus error: ${consensusErr.message}`)
-      }
-      for (const row of consensusData) {
-        consensusByLead.set(`${row.submission_id}:${row.lead_id}`, row)
-      }
+    if ('error' in consensusResult && consensusResult.error) {
+      throw new Error(`Supabase consensus error: ${consensusResult.error.message}`)
+    }
+    for (const row of consensusResult.data) {
+      consensusByLead.set(`${row.submission_id}:${row.lead_id}`, row)
     }
 
     const requestById = new Map<string, RequestRow>()
-    if (requestIds.length > 0) {
-      const { data: requestData, error: requestErr } =
-        await fetchRequestRows(supabase, requestIds)
-      if (requestErr) {
-        throw new Error(`Supabase request error: ${requestErr.message}`)
-      }
-      for (const row of requestData) {
-        requestById.set(row.request_id, row)
-      }
+    if ('error' in requestResult && requestResult.error) {
+      throw new Error(`Supabase request error: ${requestResult.error.message}`)
+    }
+    for (const row of requestResult.data) {
+      requestById.set(row.request_id, row)
     }
     const requestOptions: RequestOption[] = Array.from(requestById.values())
       .map((request) => ({
@@ -431,11 +433,26 @@ async function loadAnalyticsDataset(
       }))
       .sort((a, b) => a.label.localeCompare(b.label))
 
-    const { data: chartConsensusRows, error: chartConsensusErr } =
-      await fetchChartConsensusRows(supabase)
-    if (chartConsensusErr) {
-      throw new Error(`Supabase chart consensus error: ${chartConsensusErr.message}`)
+    // Run chart consensus + cumulative stats in parallel
+    const [chartConsensusResult, totalConsensusResult, totalApprovedResult, totalWinnersResult] = await Promise.all([
+      fetchChartConsensusRows(supabase),
+      supabase.from('fulfillment_score_consensus')
+        .select('*', { count: 'exact', head: true }),
+      supabase.from('fulfillment_score_consensus')
+        .select('*', { count: 'exact', head: true })
+        .or('is_winner.eq.true,is_chain_held.eq.true'),
+      supabase.from('fulfillment_score_consensus')
+        .select('*', { count: 'exact', head: true })
+        .eq('is_winner', true),
+    ])
+    if (chartConsensusResult.error) {
+      throw new Error(`Supabase chart consensus error: ${chartConsensusResult.error.message}`)
     }
+    const chartConsensusRows = chartConsensusResult.data
+    const totalConsensus = totalConsensusResult.count ?? 0
+    const totalApproved = totalApprovedResult.count ?? 0
+    const totalFulfilled = totalWinnersResult.count ?? 0
+    const totalDenied = totalConsensus - totalApproved
 
     const scoreByLead = new Map<string, ScoreRow>()
     const scoreRequestIds = Array.from(
@@ -458,23 +475,6 @@ async function loadAnalyticsDataset(
         if (!prevHasDetail && rowHasDetail) scoreByLead.set(key, row)
       }
     }
-
-    // Global cumulative stats via DB COUNT — no row limits, always accurate.
-    // All counts use { count: 'exact', head: true } which transfers zero rows.
-    const [totalConsensusResult, totalApprovedResult, totalWinnersResult] = await Promise.all([
-      supabase.from('fulfillment_score_consensus')
-        .select('*', { count: 'exact', head: true }),
-      supabase.from('fulfillment_score_consensus')
-        .select('*', { count: 'exact', head: true })
-        .or('is_winner.eq.true,is_chain_held.eq.true'),
-      supabase.from('fulfillment_score_consensus')
-        .select('*', { count: 'exact', head: true })
-        .eq('is_winner', true),
-    ])
-    const totalConsensus = totalConsensusResult.count ?? 0
-    const totalApproved = totalApprovedResult.count ?? 0
-    const totalFulfilled = totalWinnersResult.count ?? 0
-    const totalDenied = totalConsensus - totalApproved
 
     const cumulativeStats: CumulativeStats = {
       totalSubmitted: totalConsensus,
