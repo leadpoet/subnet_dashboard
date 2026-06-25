@@ -70,14 +70,15 @@ const REQUEST_RADIUS = 9
 const MINER_RADIUS = 3.2
 const PENDING_COMPLETED_BUFFER = 72
 
-// Editorial palette. Warm off-whites, dusty amber, brand gold.
-// Cyan/emerald/rose stocks from Tailwind defaults have been retired here.
-const COLOR_WIN_EDGE = '#c9a96e'                      // warm gold for winning leads
-const COLOR_LOSS_EDGE = 'rgba(245, 240, 232, 0.18)'   // faint warm gray for submitted-only
-const COLOR_REQUEST_PENDING = '#7a766e'               // muted warm gray, waiting
-const COLOR_REQUEST_COMPLETED = '#e8e1d4'             // warm cream/white, finalized
-const COLOR_MINER = '#5e5a52'                         // warm gray, neutral miner
-const COLOR_MINER_WINNING = '#b89868'                 // muted gold, miner with wins
+// Platinum-monochrome palette. Hierarchy by brightness, never hue:
+// fulfilled (the win) is the rationed near-white accent; everything
+// else is a warm-neutral grey. No gold, amber, or saturated chroma.
+const COLOR_WIN_EDGE = '#e8f0ff'                      // near-white, fulfilled leads (the win)
+const COLOR_LOSS_EDGE = 'rgba(236, 234, 230, 0.16)'  // faint platinum-grey, submitted-only
+const COLOR_REQUEST_PENDING = '#6c6b66'              // muted neutral, waiting
+const COLOR_REQUEST_COMPLETED = '#ededec'            // platinum, finalized
+const COLOR_MINER = '#56544e'                        // neutral grey miner
+const COLOR_MINER_WINNING = '#b8b6b0'               // light platinum, miner with wins
 
 const PENDING_STATUSES = new Set(['pending', 'open', 'continued_open', 'commit_closed', 'scoring'])
 
@@ -723,7 +724,7 @@ export function FulfillmentCosmos({
               a sliver brighter than the base so nodes feel slightly dimensional
               without looking glossy or "designed". */}
           <radialGradient id="cosmos-grad-completed" cx="50%" cy="50%" r="50%">
-            <stop offset="0%" stopColor="#fbf6ec" stopOpacity="1" />
+            <stop offset="0%" stopColor="#ffffff" stopOpacity="1" />
             <stop offset="100%" stopColor={COLOR_REQUEST_COMPLETED} stopOpacity="1" />
           </radialGradient>
           <radialGradient id="cosmos-grad-pending" cx="50%" cy="50%" r="50%">
@@ -731,7 +732,7 @@ export function FulfillmentCosmos({
             <stop offset="100%" stopColor={COLOR_REQUEST_PENDING} stopOpacity="1" />
           </radialGradient>
           <radialGradient id="cosmos-grad-miner-win" cx="50%" cy="50%" r="50%">
-            <stop offset="0%" stopColor="#d4b889" stopOpacity="1" />
+            <stop offset="0%" stopColor="#d6d4cd" stopOpacity="1" />
             <stop offset="100%" stopColor={COLOR_MINER_WINNING} stopOpacity="1" />
           </radialGradient>
           <radialGradient id="cosmos-grad-miner" cx="50%" cy="50%" r="50%">
@@ -1003,7 +1004,7 @@ export function FulfillmentCosmos({
                     left: `${x - 3}px`,
                     top: `${y - 3}px`,
                     animationDelay: `${i * 100}ms`,
-                    background: 'rgba(201, 169, 110, 0.8)',
+                    background: 'rgba(232, 240, 255, 0.7)',
                   }}
                 />
               )

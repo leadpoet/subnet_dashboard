@@ -1,0 +1,613 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Leadpoet — Research Lab</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --canvas:#0a0908;
+    --canvas-2:#0d0c0a;
+    --line:rgba(236,234,230,.07);
+    --line-2:rgba(236,234,230,.12);
+    --line-3:rgba(236,234,230,.18);
+    --white:#e8f0ff;
+    --platinum:#ededec;
+    --muted:#8a8a86;
+    --muted-2:#6c6b66;
+    --faint:#525049;
+    --display:'Space Grotesk',sans-serif;
+    --ui:'Inter',sans-serif;
+    --mono:'IBM Plex Mono',monospace;
+    --max:1080px;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+  body{
+    background:var(--canvas);
+    color:var(--platinum);
+    font-family:var(--ui);
+    font-size:15px;
+    line-height:1.6;
+    font-feature-settings:"tnum" 1,"cv01" 1;
+    letter-spacing:-0.01em;
+  }
+  body::before{
+    content:"";position:fixed;inset:0;pointer-events:none;z-index:0;
+    background:radial-gradient(115% 75% at 50% -12%, rgba(232,240,255,.032), transparent 58%);
+  }
+  .wrap{position:relative;z-index:1;max-width:var(--max);margin:0 auto;padding:0 40px}
+  .sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)}
+  .num{font-family:var(--display);font-feature-settings:"tnum" 1;letter-spacing:-0.02em}
+  .mono{font-family:var(--mono);font-feature-settings:"tnum" 1}
+  .hr{height:1px;background:var(--line);border:0;width:100%}
+
+  .seclabel{display:flex;align-items:baseline;gap:16px;margin-bottom:36px}
+  .seclabel .ix{font-family:var(--mono);font-size:10.5px;letter-spacing:.18em;color:var(--muted-2);flex:none}
+  .seclabel .stitle{font-family:var(--display);font-weight:500;font-size:17px;letter-spacing:-0.02em;color:var(--platinum);flex:none}
+  .seclabel .sline{flex:1;height:1px;background:var(--line);align-self:center}
+  .seclabel .ssub{font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted-2);flex:none}
+
+  header.mast{padding-top:36px;padding-bottom:24px}
+  .mast-row{display:flex;align-items:center;justify-content:space-between;gap:24px}
+  .brand{display:flex;align-items:baseline;gap:14px}
+  .wordmark{font-family:var(--display);font-weight:600;font-size:19px;letter-spacing:-0.02em;color:var(--white)}
+  .brand-sec{font-family:var(--mono);font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--muted-2)}
+  .mast-right{display:flex;align-items:center;gap:18px}
+  .chip{font-family:var(--mono);font-size:10.5px;letter-spacing:.06em;color:var(--muted);border:1px solid var(--line-2);border-radius:999px;padding:5px 12px;white-space:nowrap}
+  .synced{display:flex;align-items:center;gap:9px;font-family:var(--mono);font-size:11px;color:var(--muted);letter-spacing:.04em}
+  .dot{position:relative;width:7px;height:7px;border-radius:50%;background:var(--white);flex:none}
+  .dot::after{content:"";position:absolute;inset:0;border-radius:50%;border:1px solid var(--white);opacity:.6;animation:pulse 2.6s cubic-bezier(.4,0,.2,1) infinite}
+  @keyframes pulse{0%{transform:scale(1);opacity:.6}70%{transform:scale(2.6);opacity:0}100%{opacity:0}}
+
+  nav.seg{display:flex;gap:0;padding:26px 0 0}
+  .tab{font-family:var(--mono);font-size:11px;font-weight:400;color:var(--muted-2);letter-spacing:.1em;text-transform:uppercase;padding:10px 0;margin-right:34px;background:none;border:0;cursor:pointer;position:relative;transition:color .2s}
+  .tab.active{color:var(--white)}
+  .tab.active::after{content:"";position:absolute;left:0;right:0;bottom:-1px;height:1.5px;background:var(--white)}
+  .tab:not(.active):hover{color:var(--platinum)}
+  .navline{height:1px;background:var(--line);margin-top:-1px}
+
+  section.hero{padding:78px 0 68px}
+  .hero-eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--muted-2);margin-bottom:30px}
+  .hero-head{font-family:var(--display);font-weight:500;font-size:33px;line-height:1.16;letter-spacing:-0.025em;color:var(--platinum);max-width:560px}
+  .hero-grid{display:grid;grid-template-columns:1fr 358px;gap:68px;margin-top:52px;align-items:start}
+  .score-line{display:flex;align-items:flex-end;gap:18px}
+  .score-big{font-family:var(--display);font-weight:500;font-size:122px;line-height:.84;letter-spacing:-0.045em;color:var(--white)}
+  .score-of{font-family:var(--display);font-weight:400;font-size:25px;color:var(--faint);letter-spacing:-0.02em;padding-bottom:15px}
+  .score-meta{display:flex;flex-direction:column;gap:11px;padding-bottom:13px}
+  .band{font-family:var(--mono);font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--canvas);background:var(--white);padding:4px 10px;border-radius:3px;align-self:flex-start;font-weight:500}
+  .delta{font-family:var(--mono);font-size:11.5px;color:var(--muted);letter-spacing:.04em}
+  .delta b{color:var(--platinum);font-weight:500}
+  .narrative{margin-top:36px;max-width:520px;color:var(--muted);font-size:14px;line-height:1.72}
+  .narrative b{color:var(--platinum);font-weight:500}
+  .next-bench{margin-top:24px;font-family:var(--mono);font-size:11px;color:var(--faint);letter-spacing:.06em}
+
+  .spark-card{padding-top:2px}
+  .spark-top{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:16px}
+  .spark-label{font-family:var(--mono);font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted-2)}
+  .spark-val{font-family:var(--mono);font-size:11px;color:var(--muted);letter-spacing:.03em}
+  svg.spark{width:100%;height:122px;display:block;overflow:visible}
+  .spark-foot{display:flex;justify-content:space-between;margin-top:14px;font-family:var(--mono);font-size:10px;color:var(--faint);letter-spacing:.08em;text-transform:uppercase}
+
+  section.kpis{padding:6px 0 60px}
+  .kpi-grid{display:grid;grid-template-columns:repeat(4,1fr)}
+  .kpi{padding:6px 28px 6px 0;position:relative}
+  .kpi+.kpi{padding-left:28px}
+  .kpi+.kpi::before{content:"";position:absolute;left:0;top:2px;bottom:2px;width:1px;background:var(--line)}
+  .kpi-label{font-family:var(--mono);font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted-2);margin-bottom:18px}
+  .kpi-val{font-family:var(--display);font-weight:500;font-size:44px;letter-spacing:-0.035em;color:var(--platinum);line-height:1}
+  .kpi-sub{font-family:var(--mono);font-size:10.5px;color:var(--faint);margin-top:14px;letter-spacing:.03em}
+
+  .sec{padding:62px 0}
+  .verify{display:flex;align-items:center;gap:22px;flex-wrap:wrap;padding:0 0 36px}
+  .verify-tag{display:flex;align-items:center;gap:9px;font-family:var(--mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--platinum)}
+  .verify-tag .vdot{width:6px;height:6px;border-radius:50%;background:var(--white)}
+  .hashbox{display:flex;align-items:center;gap:11px}
+  .hash{font-family:var(--mono);font-size:12px;color:var(--muted);letter-spacing:.03em}
+  .copy{display:inline-flex;align-items:center;gap:6px;background:none;border:1px solid var(--line-2);border-radius:4px;color:var(--muted);cursor:pointer;font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;padding:5px 9px;transition:all .18s}
+  .copy:hover{color:var(--white);border-color:var(--line-3);background:rgba(232,240,255,.04)}
+  .copy svg{width:11px;height:11px;display:block}
+  .methlink{font-family:var(--mono);font-size:11px;color:var(--muted);text-decoration:none;border-bottom:1px solid var(--line-2);padding-bottom:2px;transition:color .2s;letter-spacing:.04em;margin-left:auto}
+  .methlink:hover{color:var(--platinum)}
+
+  .dist{margin:6px 0 50px}
+  .dist-head{font-family:var(--mono);font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted-2);margin-bottom:20px}
+  .dist-bar{display:flex;gap:4px;height:88px;align-items:flex-end}
+  .dist-cell{flex:1;display:flex;flex-direction:column;justify-content:flex-end}
+  .dist-fill{width:100%;background:rgba(236,234,230,.15);border-radius:2px 2px 0 0;transform:scaleY(0);transform-origin:bottom;transition:transform 1s cubic-bezier(.22,1,.36,1)}
+  .dist-fill.peak{background:var(--white)}
+  .dist-keys{display:flex;gap:4px;margin-top:16px}
+  .dist-key{flex:1}
+  .dist-key .dk-label{font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted-2)}
+  .dist-key .dk-count{font-family:var(--display);font-weight:500;font-size:17px;color:var(--muted);margin-top:7px;letter-spacing:-0.02em}
+  .dist-key.peak .dk-label{color:var(--platinum)}
+  .dist-key.peak .dk-count{color:var(--white)}
+
+  .lb{display:flex;flex-direction:column}
+  .lb-head{display:grid;grid-template-columns:34px 1fr 100px 150px;gap:20px;padding:0 16px 14px;font-family:var(--mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted-2);border-bottom:1px solid var(--line)}
+  .lb-row{display:grid;grid-template-columns:34px 1fr 100px 150px;gap:20px;align-items:center;padding:22px 16px;border-bottom:1px solid var(--line);transition:background .2s,transform .2s;position:relative}
+  .lb-row:hover{background:rgba(232,240,255,.018);transform:translateY(-1px)}
+  .lb-row.top::before{content:"";position:absolute;left:-16px;top:0;bottom:0;width:2px;background:var(--white)}
+  .lb-rank{font-family:var(--mono);font-size:12px;color:var(--muted-2);letter-spacing:.04em}
+  .lb-row.top .lb-rank{color:var(--white)}
+  .lb-title{font-family:var(--ui);font-size:14px;font-weight:500;color:var(--platinum);letter-spacing:-0.01em;line-height:1.4}
+  .lb-row.top .lb-title{color:var(--white)}
+  .lb-tags{font-family:var(--mono);font-size:11px;color:var(--muted-2);margin-top:7px;letter-spacing:.02em}
+  .lb-signal{font-family:var(--ui);font-size:12px;color:var(--muted);margin-top:9px;display:flex;align-items:center;gap:8px}
+  .lb-signal::before{content:"";width:4px;height:4px;border-radius:50%;background:var(--muted-2);flex:none}
+  .lb-score{display:flex;flex-direction:column;gap:9px}
+  .lb-score-num{font-family:var(--display);font-weight:500;font-size:22px;letter-spacing:-0.025em;color:var(--platinum);line-height:1}
+  .lb-row.top .lb-score-num{color:var(--white);font-size:26px}
+  .lb-track{height:2px;background:var(--line-2);border-radius:2px;overflow:hidden}
+  .lb-fill{height:100%;background:rgba(236,234,230,.4);border-radius:2px;width:0;transition:width 1.1s cubic-bezier(.22,1,.36,1)}
+  .lb-row.top .lb-fill{background:var(--white)}
+  .lb-co{font-family:var(--mono);font-size:11px;color:var(--muted);letter-spacing:.03em;text-align:left}
+  .lb-co b{color:var(--platinum);font-weight:500}
+
+  .live-pill{display:inline-flex;align-items:center;gap:9px;font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+  .live-pill .dot{width:6px;height:6px}
+  .live-pill b{color:var(--platinum);font-weight:500}
+  .act{display:flex;flex-direction:column}
+  .act-row{display:grid;grid-template-columns:140px 1fr auto;gap:24px;align-items:center;padding:20px 16px;border-bottom:1px solid var(--line);transition:background .2s}
+  .act-row:hover{background:rgba(232,240,255,.018)}
+  .act-hash{font-family:var(--mono);font-size:12.5px;color:var(--platinum);letter-spacing:.02em}
+  .act-area{font-family:var(--ui);font-size:13.5px;color:var(--muted);display:flex;align-items:center;gap:13px}
+  .obadge{font-family:var(--mono);font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;padding:4px 10px;border-radius:4px;white-space:nowrap;border:1px solid transparent}
+  .obadge.promoted{color:var(--canvas);background:var(--white);font-weight:500}
+  .obadge.promising{color:var(--platinum);border-color:var(--line-3)}
+  .obadge.nogain{color:var(--muted-2);border-color:var(--line)}
+  .act-meta{font-family:var(--mono);font-size:11px;color:var(--faint);letter-spacing:.03em;text-align:right;white-space:nowrap}
+  .act-meta b{color:var(--muted)}
+
+  .dir-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--line);border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+  .dir{background:var(--canvas);padding:32px 30px 30px}
+  .dir:first-child{padding-left:0}
+  .dir-name{font-family:var(--display);font-weight:500;font-size:15px;color:var(--platinum);letter-spacing:-0.015em}
+  .dir-stats{display:flex;gap:22px;margin-top:20px}
+  .dir-stat{display:flex;flex-direction:column;gap:6px}
+  .dir-stat .ds-n{font-family:var(--display);font-weight:500;font-size:21px;color:var(--platinum);letter-spacing:-0.025em}
+  .dir-stat .ds-l{font-family:var(--mono);font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted-2)}
+  .dir-prog{margin-top:26px}
+  .dir-track{height:2px;background:var(--line-2);border-radius:2px;overflow:hidden}
+  .dir-fill{height:100%;background:rgba(236,234,230,.36);width:0;transition:width 1.1s cubic-bezier(.22,1,.36,1)}
+  .dir-pct{font-family:var(--mono);font-size:10.5px;color:var(--muted);margin-top:11px;letter-spacing:.06em}
+
+  .tiers{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--line);border:1px solid var(--line)}
+  .tier{background:var(--canvas);padding:28px 26px 30px;display:flex;flex-direction:column}
+  .tier-n{font-family:var(--mono);font-size:9.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--muted-2);margin-bottom:20px}
+  .tier-h{font-family:var(--display);font-weight:500;font-size:15px;color:var(--platinum);letter-spacing:-0.015em;margin-bottom:13px}
+  .tier-d{font-family:var(--ui);font-size:12.5px;color:var(--muted);line-height:1.62}
+  .prov{margin-top:34px;font-family:var(--mono);font-size:11px;color:var(--faint);line-height:1.9;letter-spacing:.03em}
+  .prov b{color:var(--muted);font-weight:500}
+
+  footer.foot{padding:50px 0 70px}
+  .foot-row{display:flex;justify-content:space-between;align-items:center;gap:20px;flex-wrap:wrap}
+  .foot-mark{font-family:var(--display);font-weight:600;font-size:14px;color:var(--muted);letter-spacing:-0.01em}
+  .foot-meta{font-family:var(--mono);font-size:10px;color:var(--faint);letter-spacing:.1em;text-transform:uppercase}
+
+  @media(max-width:920px){
+    .wrap{padding:0 24px}
+    .hero-grid{grid-template-columns:1fr;gap:48px}
+    .kpi-grid,.dir-grid,.tiers{grid-template-columns:repeat(2,1fr)}
+    .dir:first-child{padding-left:30px}
+    .score-big{font-size:96px}
+    .lb-head,.lb-row{grid-template-columns:28px 1fr 82px}
+    .lb-head .c-co,.lb-row .lb-co{display:none}
+    .act-row{grid-template-columns:108px 1fr;gap:14px}
+    .act-meta{grid-column:1/-1;text-align:left}
+  }
+</style>
+</head>
+<body>
+<h2 class="sr-only">Leadpoet Research Lab benchmark dashboard showing a current model score of 72.4 out of 100, a KPI rail, a ranked ICP leaderboard, live research activity, research directions, and the four-tier scoring methodology.</h2>
+
+<div class="wrap">
+
+  <header class="mast">
+    <div class="mast-row">
+      <div class="brand">
+        <span class="wordmark">Leadpoet</span>
+        <span class="brand-sec">Research Lab</span>
+      </div>
+      <div class="mast-right">
+        <span class="chip">Subnet 71 / Bittensor</span>
+        <span class="synced"><span class="dot"></span>Synced just now</span>
+      </div>
+    </div>
+    <nav class="seg" role="tablist" aria-label="Sections">
+      <button class="tab active" role="tab" aria-selected="true">Research Lab</button>
+      <button class="tab" role="tab" aria-selected="false">Fulfillment</button>
+      <button class="tab" role="tab" aria-selected="false">FAQ</button>
+    </nav>
+  </header>
+  <div class="navline"></div>
+
+  <section class="hero">
+    <div class="hero-eyebrow">Current model benchmark / v2026.06</div>
+    <h1 class="hero-head">Autonomous lead research, scored in the open.</h1>
+
+    <div class="hero-grid">
+      <div>
+        <div class="score-line">
+          <span class="score-big num" id="heroScore">0.0</span>
+          <span class="score-of">/100</span>
+          <div class="score-meta">
+            <span class="band">Strong</span>
+            <span class="delta"><b>+3.1</b> since last cycle</span>
+          </div>
+        </div>
+        <p class="narrative">
+          Evaluated on a rolling <b>7-day window</b> of live client ICPs, produced by a
+          <b>four-tier validator pipeline</b>, and independently verifiable from the benchmark hash.
+        </p>
+        <div class="next-bench">Next benchmark in 2d 14h</div>
+      </div>
+
+      <div class="spark-card">
+        <div class="spark-top">
+          <span class="spark-label">12-cycle trend</span>
+          <span class="spark-val">61.2 &rarr; 72.4</span>
+        </div>
+        <svg class="spark" viewBox="0 0 358 122" preserveAspectRatio="none" aria-hidden="true">
+          <defs>
+            <linearGradient id="sparkGrad" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stop-color="#e8f0ff" stop-opacity="0.16"/>
+              <stop offset="100%" stop-color="#e8f0ff" stop-opacity="0"/>
+            </linearGradient>
+          </defs>
+          <path id="sparkArea" fill="url(#sparkGrad)" stroke="none" opacity="0"/>
+          <path id="sparkLine" fill="none" stroke="#e8f0ff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+          <circle id="sparkDot" r="3" fill="#e8f0ff" opacity="0"/>
+        </svg>
+        <div class="spark-foot"><span>12 cycles ago</span><span>now</span></div>
+      </div>
+    </div>
+  </section>
+  <div class="hr"></div>
+
+  <section class="kpis">
+    <div class="kpi-grid">
+      <div class="kpi"><div class="kpi-label">Active loops</div><div class="kpi-val num" data-count="18" data-dec="0">0</div><div class="kpi-sub">research runs in progress</div></div>
+      <div class="kpi"><div class="kpi-label">Scored this cycle</div><div class="kpi-val num" data-count="142" data-dec="0">0</div><div class="kpi-sub">+22% week over week</div></div>
+      <div class="kpi"><div class="kpi-label">Companies researched</div><div class="kpi-val num" data-count="3847" data-dec="0">0</div><div class="kpi-sub">all-time, verified</div></div>
+      <div class="kpi"><div class="kpi-label">Active contributors</div><div class="kpi-val num" data-count="9" data-dec="0">0</div><div class="kpi-sub">running loops now</div></div>
+    </div>
+  </section>
+  <div class="hr"></div>
+
+  <section class="sec">
+    <div class="seclabel">
+      <span class="ix">01</span>
+      <span class="stitle">Benchmark detail</span>
+      <span class="sline"></span>
+      <span class="ssub">Jun 25, 2026 / rolling 7-day window</span>
+    </div>
+
+    <div class="verify">
+      <span class="verify-tag"><span class="vdot"></span>Verifiable</span>
+      <div class="hashbox">
+        <span class="hash">sha256 5a9957&hellip;4e30</span>
+        <button class="copy" id="copyHash" aria-label="Copy benchmark hash">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>
+          <span id="copyText">Copy</span>
+        </button>
+      </div>
+      <a class="methlink" href="#methodology">Methodology &#8599;</a>
+    </div>
+
+    <div class="dist">
+      <div class="dist-head">Score distribution / 50 ICPs</div>
+      <div class="dist-bar" id="distBar">
+        <div class="dist-cell"><div class="dist-fill" data-h="14"></div></div>
+        <div class="dist-cell"><div class="dist-fill" data-h="32"></div></div>
+        <div class="dist-cell"><div class="dist-fill" data-h="68"></div></div>
+        <div class="dist-cell"><div class="dist-fill peak" data-h="78"></div></div>
+        <div class="dist-cell"><div class="dist-fill" data-h="37"></div></div>
+      </div>
+      <div class="dist-keys">
+        <div class="dist-key"><div class="dk-label">Zero</div><div class="dk-count num">3</div></div>
+        <div class="dist-key"><div class="dk-label">Weak</div><div class="dk-count num">7</div></div>
+        <div class="dist-key"><div class="dk-label">Fair</div><div class="dk-count num">15</div></div>
+        <div class="dist-key peak"><div class="dk-label">Strong</div><div class="dk-count num">17</div></div>
+        <div class="dist-key"><div class="dk-label">Frontier</div><div class="dk-count num">8</div></div>
+      </div>
+    </div>
+
+    <div class="lb" id="leaderboard">
+      <div class="lb-head">
+        <span>#</span><span>Ideal customer profile</span><span>Score</span><span class="c-co">Companies</span>
+      </div>
+
+      <div class="lb-row top">
+        <span class="lb-rank">01</span>
+        <div>
+          <div class="lb-title">Data &amp; Analytics / Cloud Data Platforms / BI &amp; analytics tooling</div>
+          <div class="lb-tags">United States &middot; 200&ndash;500 &middot; Data leaders</div>
+          <div class="lb-signal">Launched or announced a new product</div>
+        </div>
+        <div class="lb-score">
+          <span class="lb-score-num num">88.2</span>
+          <div class="lb-track"><div class="lb-fill" data-w="88.2"></div></div>
+        </div>
+        <span class="lb-co"><b>34</b> companies</span>
+      </div>
+
+      <div class="lb-row">
+        <span class="lb-rank">02</span>
+        <div>
+          <div class="lb-title">Information Technology / Managed IT &amp; Cloud Infrastructure</div>
+          <div class="lb-tags">United States &middot; 200&ndash;500 &middot; IT directors</div>
+          <div class="lb-signal">Expanded to new markets</div>
+        </div>
+        <div class="lb-score">
+          <span class="lb-score-num num">81.5</span>
+          <div class="lb-track"><div class="lb-fill" data-w="81.5"></div></div>
+        </div>
+        <span class="lb-co"><b>28</b> companies</span>
+      </div>
+
+      <div class="lb-row">
+        <span class="lb-rank">03</span>
+        <div>
+          <div class="lb-title">Professional Services / Management &amp; Technology Consulting</div>
+          <div class="lb-tags">United States &middot; 500&ndash;1000 &middot; Ops VPs</div>
+          <div class="lb-signal">Acquired another company</div>
+        </div>
+        <div class="lb-score">
+          <span class="lb-score-num num">76.0</span>
+          <div class="lb-track"><div class="lb-fill" data-w="76.0"></div></div>
+        </div>
+        <span class="lb-co"><b>21</b> companies</span>
+      </div>
+
+      <div class="lb-row">
+        <span class="lb-rank">04</span>
+        <div>
+          <div class="lb-title">Transportation / Logistics &amp; Mobility Technology</div>
+          <div class="lb-tags">United States &middot; 10&ndash;50 &middot; Founders</div>
+          <div class="lb-signal">Recent facility or store opening</div>
+        </div>
+        <div class="lb-score">
+          <span class="lb-score-num num">69.3</span>
+          <div class="lb-track"><div class="lb-fill" data-w="69.3"></div></div>
+        </div>
+        <span class="lb-co"><b>12</b> companies</span>
+      </div>
+
+      <div class="lb-row">
+        <span class="lb-rank">05</span>
+        <div>
+          <div class="lb-title">Information Technology / IT Services &amp; Consulting</div>
+          <div class="lb-tags">United States &middot; 50&ndash;200 &middot; CTOs</div>
+          <div class="lb-signal">Just closed a funding round</div>
+        </div>
+        <div class="lb-score">
+          <span class="lb-score-num num">64.8</span>
+          <div class="lb-track"><div class="lb-fill" data-w="64.8"></div></div>
+        </div>
+        <span class="lb-co"><b>9</b> companies</span>
+      </div>
+    </div>
+  </section>
+  <div class="hr"></div>
+
+  <section class="sec">
+    <div class="seclabel">
+      <span class="ix">02</span>
+      <span class="stitle">Live research activity</span>
+      <span class="sline"></span>
+      <span class="live-pill"><span class="dot"></span><b>18</b> running</span>
+    </div>
+    <div class="act">
+      <div class="act-row">
+        <span class="act-hash mono">5F3a&hellip;9kQ2</span>
+        <div class="act-area">Cloud Data Platforms <span class="obadge promoted">Promoted</span></div>
+        <div class="act-meta"><b>240</b> candidates / <b>31</b> scored / 4m ago</div>
+      </div>
+      <div class="act-row">
+        <span class="act-hash mono">5Gw7&hellip;pL4x</span>
+        <div class="act-area">Logistics Tech <span class="obadge promising">Promising</span></div>
+        <div class="act-meta"><b>180</b> candidates / <b>22</b> scored / 11m ago</div>
+      </div>
+      <div class="act-row">
+        <span class="act-hash mono">5Dn2&hellip;rT8v</span>
+        <div class="act-area">IT Services <span class="obadge nogain">No gain</span></div>
+        <div class="act-meta"><b>95</b> candidates / <b>12</b> scored / 26m ago</div>
+      </div>
+    </div>
+  </section>
+  <div class="hr"></div>
+
+  <section class="sec">
+    <div class="seclabel">
+      <span class="ix">03</span>
+      <span class="stitle">Research directions</span>
+      <span class="sline"></span>
+      <span class="ssub">running / scored / promising</span>
+    </div>
+    <div class="dir-grid">
+      <div class="dir">
+        <div class="dir-name">Cloud Data Platforms</div>
+        <div class="dir-stats">
+          <div class="dir-stat"><span class="ds-n num">6</span><span class="ds-l">Running</span></div>
+          <div class="dir-stat"><span class="ds-n num">18</span><span class="ds-l">Scored</span></div>
+          <div class="dir-stat"><span class="ds-n num">4</span><span class="ds-l">Promising</span></div>
+        </div>
+        <div class="dir-prog">
+          <div class="dir-track"><div class="dir-fill" data-w="72"></div></div>
+          <div class="dir-pct">72%</div>
+        </div>
+      </div>
+      <div class="dir">
+        <div class="dir-name">Managed IT &amp; Cloud</div>
+        <div class="dir-stats">
+          <div class="dir-stat"><span class="ds-n num">4</span><span class="ds-l">Running</span></div>
+          <div class="dir-stat"><span class="ds-n num">12</span><span class="ds-l">Scored</span></div>
+          <div class="dir-stat"><span class="ds-n num">2</span><span class="ds-l">Promising</span></div>
+        </div>
+        <div class="dir-prog">
+          <div class="dir-track"><div class="dir-fill" data-w="48"></div></div>
+          <div class="dir-pct">48%</div>
+        </div>
+      </div>
+      <div class="dir">
+        <div class="dir-name">Logistics &amp; Mobility Tech</div>
+        <div class="dir-stats">
+          <div class="dir-stat"><span class="ds-n num">3</span><span class="ds-l">Running</span></div>
+          <div class="dir-stat"><span class="ds-n num">9</span><span class="ds-l">Scored</span></div>
+          <div class="dir-stat"><span class="ds-n num">1</span><span class="ds-l">Promising</span></div>
+        </div>
+        <div class="dir-prog">
+          <div class="dir-track"><div class="dir-fill" data-w="34"></div></div>
+          <div class="dir-pct">34%</div>
+        </div>
+      </div>
+    </div>
+  </section>
+  <div class="hr"></div>
+
+  <section class="sec" id="methodology">
+    <div class="seclabel">
+      <span class="ix">04</span>
+      <span class="stitle">How every score is produced</span>
+      <span class="sline"></span>
+      <span class="ssub">four-tier validator pipeline</span>
+    </div>
+    <div class="tiers">
+      <div class="tier">
+        <div class="tier-n">Tier 1</div>
+        <div class="tier-h">ICP fit</div>
+        <div class="tier-d">Industry, role, seniority, geography and company size matched against the target profile.</div>
+      </div>
+      <div class="tier">
+        <div class="tier-n">Tier 2</div>
+        <div class="tier-h">Data accuracy</div>
+        <div class="tier-d">Email and company data verified against live APIs at evaluation time.</div>
+      </div>
+      <div class="tier">
+        <div class="tier-n">Tier 3</div>
+        <div class="tier-h">Attribute proof</div>
+        <div class="tier-d">Required attributes confirmed through independent web evidence, not self-reported.</div>
+      </div>
+      <div class="tier">
+        <div class="tier-n">Tier 4</div>
+        <div class="tier-h">Intent signal</div>
+        <div class="tier-d">Buying-intent evidence captured and time-decayed toward the present cycle.</div>
+      </div>
+    </div>
+    <p class="prov">
+      <b>Subnet 71</b> / epoch <b>1428</b> / commit-reveal scored on-chain<br>
+      benchmark <b>5a9957&hellip;4e30</b> verifiable by any validator
+    </p>
+  </section>
+
+  <footer class="foot">
+    <div class="hr" style="margin-bottom:40px"></div>
+    <div class="foot-row">
+      <span class="foot-mark">Leadpoet &middot; Research Lab</span>
+      <span class="foot-meta">v2026.06 &middot; epoch 1428 &middot; synced just now</span>
+    </div>
+  </footer>
+
+</div>
+
+<script>
+(function(){
+  var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  var series=[61.2,62.0,63.5,62.8,64.9,66.1,67.4,68.0,69.6,70.2,71.0,72.4];
+  var W=358,H=122,pad=8;
+  var min=60,max=74;
+  var pts=series.map(function(v,i){
+    var x=pad+(W-pad*2)*(i/(series.length-1));
+    var y=pad+(H-pad*2)*(1-(v-min)/(max-min));
+    return [x,y];
+  });
+  function smooth(p){
+    var d="M"+p[0][0].toFixed(2)+","+p[0][1].toFixed(2);
+    for(var i=0;i<p.length-1;i++){
+      var x0=p[i][0],y0=p[i][1],x1=p[i+1][0],y1=p[i+1][1];
+      var mx=(x0+x1)/2;
+      d+=" C"+mx.toFixed(2)+","+y0.toFixed(2)+" "+mx.toFixed(2)+","+y1.toFixed(2)+" "+x1.toFixed(2)+","+y1.toFixed(2);
+    }
+    return d;
+  }
+  var line=document.getElementById('sparkLine');
+  var area=document.getElementById('sparkArea');
+  var dot=document.getElementById('sparkDot');
+  if(line){
+    var dPath=smooth(pts);
+    line.setAttribute('d',dPath);
+    var last=pts[pts.length-1];
+    area.setAttribute('d',dPath+" L"+last[0].toFixed(2)+","+(H-1)+" L"+pts[0][0].toFixed(2)+","+(H-1)+" Z");
+    dot.setAttribute('cx',last[0]); dot.setAttribute('cy',last[1]);
+    if(reduce){
+      area.style.opacity=1;dot.style.opacity=1;
+    }else{
+      var len=line.getTotalLength();
+      line.style.strokeDasharray=len; line.style.strokeDashoffset=len;
+      requestAnimationFrame(function(){
+        line.style.transition='stroke-dashoffset 1.6s cubic-bezier(.22,1,.36,1)';
+        line.style.strokeDashoffset=0;
+      });
+      setTimeout(function(){area.style.transition='opacity .8s ease';area.style.opacity=1;},700);
+      setTimeout(function(){dot.style.transition='opacity .5s ease';dot.style.opacity=1;},1400);
+    }
+  }
+
+  function easeOut(t){return 1-Math.pow(1-t,3);}
+  function countUp(el,target,dec,dur){
+    if(reduce){el.textContent=dec?target.toFixed(dec):Math.round(target).toLocaleString('en-US');return;}
+    var start=null;
+    function step(now){
+      if(!start)start=now;
+      var t=Math.min((now-start)/dur,1);
+      var v=target*easeOut(t);
+      el.textContent=dec?v.toFixed(dec):Math.round(v).toLocaleString('en-US');
+      if(t<1)requestAnimationFrame(step);
+      else el.textContent=dec?target.toFixed(dec):Math.round(target).toLocaleString('en-US');
+    }
+    requestAnimationFrame(step);
+  }
+  countUp(document.getElementById('heroScore'),72.4,1,1500);
+  document.querySelectorAll('.kpi-val[data-count]').forEach(function(el){
+    countUp(el,parseFloat(el.getAttribute('data-count')),parseInt(el.getAttribute('data-dec'),10),1300);
+  });
+
+  function fillLinear(){
+    document.querySelectorAll('.lb-fill').forEach(function(b){b.style.width=b.getAttribute('data-w')+'%';});
+    document.querySelectorAll('.dir-fill').forEach(function(b){b.style.width=b.getAttribute('data-w')+'%';});
+  }
+  function fillDist(){
+    document.querySelectorAll('.dist-fill').forEach(function(b,i){
+      var h=parseFloat(b.getAttribute('data-h'));
+      b.style.height=h+'px';
+      setTimeout(function(){b.style.transform='scaleY(1)';},reduce?0:80*i);
+    });
+  }
+  if(reduce){fillLinear();fillDist();}
+  else{
+    setTimeout(fillLinear,300);
+    if('IntersectionObserver' in window){
+      var io=new IntersectionObserver(function(es){es.forEach(function(e){if(e.isIntersecting){fillDist();io.disconnect();}});},{threshold:0.25});
+      var db=document.getElementById('distBar');if(db)io.observe(db);
+      setTimeout(fillDist,1200);
+    }else{setTimeout(fillDist,400);}
+  }
+
+  var btn=document.getElementById('copyHash');
+  var label=document.getElementById('copyText');
+  if(btn){
+    btn.addEventListener('click',function(){
+      var txt='sha256:5a9957d2c1b84f7e0a3699e4f1c8b25d7a0f4e30';
+      var done=function(){var o=label.textContent;label.textContent='Copied';setTimeout(function(){label.textContent=o;},1400);};
+      if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(txt).then(done,done);}else{done();}
+    });
+  }
+})();
+</script>
+</body>
+</html>

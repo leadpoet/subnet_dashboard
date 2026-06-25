@@ -1,16 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
-import {
-  Activity,
-  AlertCircle,
-  BarChart3,
-  Clock3,
-  FlaskConical,
-  Loader2,
-  Target,
-} from 'lucide-react'
-import { Badge } from '@/components/ui/badge'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { cn } from '@/lib/utils'
 
 type ResearchLabData = {
@@ -125,430 +115,635 @@ export function ResearchLab({ onSync }: { onSync?: () => void } = {}) {
 
   const benchmark = data?.benchmark ?? null
 
-  if (loading) return <ResearchLabLoading />
+  if (loading && !data) return <ResearchLabLoading />
 
-  if (error) {
+  if (error && !data) {
     return (
-      <div className="rounded-xl border border-burgundy-soft bg-burgundy-soft p-6 text-slate-200">
-        <div className="flex items-center gap-2 text-sm font-semibold text-cream">
-          <AlertCircle className="h-4 w-4 text-burgundy" />
-          Research Lab data unavailable
+      <div className="mx-auto max-w-[1080px]">
+        <div className="border-l-2 border-l-[var(--line-3)] pl-5 py-6">
+          <div className="font-mono text-[10.5px] uppercase tracking-[0.16em] text-[var(--muted-2)]">
+            Research Lab
+          </div>
+          <p className="mt-3 text-[14px] text-[var(--muted)]">{error}</p>
         </div>
-        <p className="mt-2 text-sm text-slate-400">{error}</p>
       </div>
     )
   }
 
   return (
-    <div className="space-y-5">
-      <header className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+    <div className="mx-auto max-w-[1080px]">
+      <header className="flex items-end justify-between gap-4">
         <div>
-          <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.22em] text-gold">
-            <FlaskConical className="h-3.5 w-3.5" />
+          <div className="font-mono text-[11px] uppercase tracking-[0.2em] text-[var(--muted-2)]">
             Research Lab
           </div>
-          <h2 className="mt-2 text-2xl md:text-3xl font-semibold tracking-tight text-slate-100">
+          <h2 className="mt-3 font-display text-[26px] md:text-[30px] font-medium leading-[1.12] tracking-[-0.025em] text-[var(--platinum)] max-w-[600px]">
             Current model benchmark and live research activity
           </h2>
         </div>
-        <div className="text-xs font-mono text-slate-500">
-          {data?.fetchedAt ? `Updated ${formatRelative(data.fetchedAt)}` : null}
-        </div>
+        {data?.fetchedAt ? (
+          <div className="font-mono text-[11px] text-[var(--muted-2)] shrink-0">
+            Updated {formatRelative(data.fetchedAt)}
+          </div>
+        ) : null}
       </header>
 
-      <section className="grid gap-3 md:grid-cols-3">
-        <MetricPanel
-          label="Current model score"
-          value={benchmark ? formatScore(benchmark.aggregateScore) : 'Pending'}
-          detail={benchmark ? 'Latest published benchmark' : 'No published benchmark'}
-          tone="gold"
-        />
-        <MetricPanel
-          label="Active loops"
-          value={`${data?.stats.activeLoopCount ?? 0}`}
-          detail="Research runs in progress"
-        />
-        <MetricPanel
-          label="Scored loops"
-          value={`${data?.stats.scoredLoopCount ?? 0}`}
-          detail="Recently evaluated"
-        />
-      </section>
+      <Hero benchmark={benchmark} />
 
-      <section className="grid gap-5 xl:grid-cols-[minmax(0,1.1fr)_minmax(380px,0.9fr)]">
-        <BenchmarkPanel benchmark={benchmark} />
-        <ActivityPanel benchmark={benchmark} loops={data?.loops ?? []} topicGroups={data?.topicGroups ?? []} />
-      </section>
+      <KpiRail stats={data?.stats ?? { activeLoopCount: 0, scoredLoopCount: 0, promisingLoopCount: 0, totalBenchmarkIcpCount: 0 }} />
+
+      <BenchmarkSection benchmark={benchmark} />
+
+      <ModelIssuesSection issues={benchmark?.issues ?? []} />
+
+      <ActivitySection loops={data?.loops ?? []} activeCount={data?.stats.activeLoopCount ?? 0} />
+
+      <DirectionsSection groups={data?.topicGroups ?? []} />
+
+      <MethodologyFooter />
     </div>
   )
 }
 
+/* ============================================================
+ * Loading
+ * ============================================================ */
 function ResearchLabLoading() {
   return (
-    <div className="rounded-xl border border-slate-800/70 bg-slate-950/40 p-8 text-center text-slate-400">
-      <Loader2 className="mx-auto h-5 w-5 animate-spin text-gold" />
-      <div className="mt-3 text-sm">Loading Research Lab data</div>
-    </div>
-  )
-}
-
-function MetricPanel({
-  label,
-  value,
-  detail,
-  tone = 'neutral',
-}: {
-  label: string
-  value: string
-  detail: string
-  tone?: 'gold' | 'neutral'
-}) {
-  return (
-    <div className="rounded-lg border border-slate-800/70 bg-slate-950/45 px-4 py-3">
-      <div className="text-[10px] uppercase tracking-[0.16em] text-slate-500">{label}</div>
-      <div className={cn('mt-2 text-2xl font-semibold tabular-nums', tone === 'gold' ? 'text-gold' : 'text-slate-100')}>
-        {value}
+    <div className="mx-auto max-w-[1080px]">
+      <div className="font-mono text-[11px] uppercase tracking-[0.2em] text-[var(--muted-2)]">
+        Research Lab
       </div>
-      <div className="mt-1 text-xs text-slate-500">{detail}</div>
+      <div className="mt-10 space-y-4">
+        <div className="h-20 w-48 shimmer rounded-md" />
+        <div className="h-4 w-96 max-w-full shimmer rounded" />
+      </div>
     </div>
   )
 }
 
-function BenchmarkPanel({ benchmark }: { benchmark: BenchmarkReport | null }) {
-  const publicIcps = benchmark?.publicIcps ?? []
-  const hiddenIcpCount = Math.max(0, (benchmark?.itemCount ?? 0) - publicIcps.length)
-
-  return (
-    <div className="rounded-xl border border-slate-800/70 bg-slate-950/40 overflow-hidden">
-      <div className="flex items-center justify-between gap-3 border-b border-slate-800/70 px-4 py-3">
-        <div>
-          <div className="flex items-center gap-2 text-sm font-semibold text-slate-100">
-            <BarChart3 className="h-4 w-4 text-gold" />
-            Current benchmark
-          </div>
-          <div className="mt-1 text-xs text-slate-500">
-            {benchmark ? `${formatDate(benchmark.benchmarkDate)} · ${shortHash(benchmark.rollingWindowHash)}` : 'No published report yet'}
-          </div>
+/* ============================================================
+ * Hero — the benchmark score, bound to real data only.
+ * ============================================================ */
+function Hero({ benchmark }: { benchmark: BenchmarkReport | null }) {
+  if (!benchmark) {
+    return (
+      <section className="pt-12 pb-14">
+        <div className="font-display font-medium leading-[0.84] tracking-[-0.045em] text-[clamp(40px,6vw,72px)] text-[var(--faint)]">
+          Pending
         </div>
-        {benchmark && (
-          <Badge className="border-gold-soft bg-gold-soft text-gold">
-            {benchmark.aggregateScoreBand.replace(/_/g, ' ')}
-          </Badge>
-        )}
+        <p className="mt-7 max-w-[560px] text-[14px] leading-[1.7] text-[var(--muted)]">
+          No benchmark has been published yet. When the first Research Lab benchmark is
+          published, the model score and the ideal customer profiles it was measured on
+          will appear here.
+        </p>
+      </section>
+    )
+  }
+
+  const score = numberOr(benchmark.aggregateScore, 0)
+  const tone = scoreTone(score)
+
+  return (
+    <section className="pt-12 pb-14">
+      <div className="flex items-end gap-5">
+        <div
+          className="font-display font-medium leading-[0.84] tracking-[-0.045em] text-[clamp(52px,9vw,104px)]"
+          style={{ color: tone }}
+        >
+          <CountUp value={score} decimals={1} />
+          <span className="ml-3.5 align-baseline font-display text-[22px] md:text-[26px] tracking-normal text-[var(--faint)]">
+            /100
+          </span>
+        </div>
+        <div className="pb-3">
+          <span
+            className="inline-block rounded-[3px] border px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.16em]"
+            style={{ color: tone, borderColor: 'var(--line-2)' }}
+          >
+            {readableTag(benchmark.aggregateScoreBand)}
+          </span>
+        </div>
       </div>
 
+      <p className="mt-7 max-w-[560px] text-[14px] leading-[1.7] text-[var(--muted)]">
+        The current benchmark score for Leadpoet&apos;s sales agent
+        {benchmark.itemCount > 0 ? (
+          <>
+            , measured across{' '}
+            <b className="font-medium text-[var(--platinum)]">{benchmark.itemCount}</b> ideal
+            customer profiles
+          </>
+        ) : null}
+        . Research loops are scored against this baseline.
+      </p>
+
+      <div className="mt-6 font-mono text-[11px] text-[var(--muted-2)]">
+        Published {formatDate(benchmark.benchmarkDate)}
+      </div>
+    </section>
+  )
+}
+
+/* ============================================================
+ * KPI rail — real stats only, hairline-separated.
+ * ============================================================ */
+function KpiRail({ stats }: { stats: ResearchLabData['stats'] }) {
+  const items = [
+    { label: 'Active loops', value: stats.activeLoopCount, sub: 'research runs in progress' },
+    { label: 'Scored loops', value: stats.scoredLoopCount, sub: 'evaluated against benchmark' },
+    { label: 'Promising loops', value: stats.promisingLoopCount, sub: 'matched or beat baseline' },
+  ]
+  return (
+    <section className="grid grid-cols-3 border-y border-[var(--line)]">
+      {items.map((it, i) => (
+        <div
+          key={it.label}
+          className={cn(
+            'px-4 py-5 md:px-7 md:py-6',
+            i !== 0 && 'border-l border-[var(--line)]'
+          )}
+        >
+          <div className="font-mono text-[10.5px] uppercase tracking-[0.14em] text-[var(--muted-2)]">
+            {it.label}
+          </div>
+          <div className="mt-4 font-display text-[34px] font-medium leading-none tracking-[-0.03em] text-[var(--platinum)] md:text-[40px]">
+            <CountUp value={it.value} />
+          </div>
+          <div className="mt-3 font-mono text-[10.5px] text-[var(--faint)]">{it.sub}</div>
+        </div>
+      ))}
+    </section>
+  )
+}
+
+/* ============================================================
+ * Benchmark detail — distribution + ICP leaderboard.
+ * ============================================================ */
+function BenchmarkSection({ benchmark }: { benchmark: BenchmarkReport | null }) {
+  const publicIcps = benchmark?.publicIcps ?? []
+  return (
+    <section className="pt-16">
+      <SecLabel
+        index="01"
+        title="Benchmark detail"
+        sub={benchmark ? formatDate(benchmark.benchmarkDate) : 'no report'}
+      />
       {!benchmark ? (
-        <div className="p-6 text-sm text-slate-400">The first Research Lab benchmark has not been published yet.</div>
+        <p className="text-[14px] text-[var(--muted)]">
+          The first Research Lab benchmark has not been published yet.
+        </p>
       ) : (
         <>
-          <div className="border-b border-slate-800/70 p-4">
-            <div className="rounded-lg border border-slate-800/60 bg-slate-900/35 p-3">
-              <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
-                <div>
-                  <div className="text-[10px] uppercase tracking-[0.14em] text-slate-500">Benchmark details</div>
-                  <div className="mt-2 text-sm text-slate-400">
-                    Visible rows include exact ICP criteria and model scores. Blurred rows are withheld.
-                  </div>
-                </div>
-                <div className="text-right text-xs text-slate-500">Latest report</div>
-              </div>
-              <div className="mt-2 flex flex-wrap gap-1.5">
-                {Object.entries(benchmark.failureCategoryCounts).slice(0, 4).map(([key, count]) => (
-                  <Badge key={key} className="border-slate-700/70 bg-slate-900/60 text-slate-300">
-                    {readableTag(key)} {count}
-                  </Badge>
-                ))}
-                {Object.keys(benchmark.failureCategoryCounts).length === 0 && (
-                  <span className="text-xs text-slate-500">None recorded</span>
-                )}
-              </div>
-            </div>
+          {benchmark.scoreBandCounts && <DistributionStrip counts={benchmark.scoreBandCounts} />}
+          <div className="grid grid-cols-[28px_minmax(0,1fr)_132px_64px] gap-4 border-b border-[var(--line)] pb-3 pl-3 font-mono text-[10px] uppercase tracking-[0.12em] text-[var(--muted-2)]">
+            <span>#</span>
+            <span>Ideal customer profile</span>
+            <span>Score</span>
+            <span className="text-right">Leads</span>
           </div>
-
-          <div className="max-h-[720px] overflow-auto">
-            <div className="grid grid-cols-[88px_minmax(0,1fr)_96px] gap-3 border-b border-slate-800/60 px-4 py-2 text-[10px] uppercase tracking-[0.14em] text-slate-500">
-              <span>Score</span>
-              <span>ICP</span>
-              <span className="text-right">Leads</span>
-            </div>
-            {publicIcps.map((icp) => (
-              <PublicIcpRow key={icp.icp_ref || icp.icp_hash || icp.item_rank} icp={icp} />
-            ))}
-            {Array.from({ length: hiddenIcpCount }, (_, index) => (
-              <HiddenIcpRow key={`hidden-icp-${index}`} />
-            ))}
-          </div>
+          {publicIcps.length === 0 ? (
+            <p className="py-6 text-[13px] text-[var(--muted-2)]">No public ICPs in this report.</p>
+          ) : (
+            publicIcps.map((icp, i) => (
+              <LeaderboardRow key={icp.icp_ref || icp.icp_hash || i} icp={icp} rank={i + 1} />
+            ))
+          )}
         </>
       )}
+    </section>
+  )
+}
+
+function DistributionStrip({ counts }: { counts: Record<string, number> }) {
+  const order = ['80_plus', '60_79', '40_59', '1_39', 'zero']
+  const labelMap: Record<string, string> = {
+    '80_plus': '80+',
+    '60_79': '60–79',
+    '40_59': '40–59',
+    '1_39': '1–39',
+    zero: '0',
+  }
+  const toneMap: Record<string, string> = {
+    '80_plus': 'var(--white)',
+    '60_79': 'var(--platinum)',
+    '40_59': 'var(--muted)',
+    '1_39': 'var(--muted-2)',
+    zero: 'var(--faint)',
+  }
+  const total = order.reduce((sum, k) => sum + (counts[k] ?? 0), 0)
+  if (total === 0) return null
+  return (
+    <div className="mb-10">
+      <div className="flex h-2 w-full gap-[2px] overflow-hidden rounded-[3px]">
+        {order.map((k) => {
+          const c = counts[k] ?? 0
+          if (!c) return null
+          return (
+            <span
+              key={k}
+              className="rounded-[2px]"
+              style={{ width: `${(c / total) * 100}%`, background: toneMap[k] }}
+            />
+          )
+        })}
+      </div>
+      <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1.5 font-mono text-[10.5px] text-[var(--muted-2)]">
+        {order.map((k) =>
+          (counts[k] ?? 0) > 0 ? (
+            <span key={k} className="inline-flex items-center gap-1.5">
+              <span className="h-2 w-2 rounded-[2px]" style={{ background: toneMap[k] }} />
+              <span className="text-[var(--muted)]">{counts[k]}</span> {labelMap[k]}
+            </span>
+          ) : null
+        )}
+      </div>
     </div>
   )
 }
 
-function PublicIcpRow({ icp }: { icp: PublicIcp }) {
+function LeaderboardRow({ icp, rank }: { icp: PublicIcp; rank: number }) {
   const doc = icp.icp ?? {}
   const signals = intentSignals(doc.intent_signals)
-  const title = compactParts([
-    textValue(doc.industry),
-    textValue(doc.sub_industry),
-    textValue(doc.product_service),
-  ]) || 'Benchmark ICP'
+  const title =
+    compactParts([
+      textValue(doc.industry),
+      textValue(doc.sub_industry),
+      textValue(doc.product_service),
+    ]) || 'Benchmark ICP'
   const geography = compactParts([
     textValue(doc.company_region),
     textValue(doc.company_country ?? doc.country ?? doc.target_geography),
   ])
   const companySize = textValue(doc.employee_count ?? doc.company_size)
   const roles = arrayText(doc.target_roles ?? doc.target_role_types)
+  const score = numberOr(icp.score, 0)
+  const top = rank === 1
 
   return (
-    <div className="grid grid-cols-[88px_minmax(0,1fr)_96px] gap-3 border-b border-slate-800/45 px-4 py-3 last:border-b-0">
-      <div>
-        <div className="text-lg font-semibold tabular-nums text-gold">
-          {formatScore(numberOr(icp.score, 0))}
-        </div>
-        <div className="mt-1 text-[10px] uppercase tracking-[0.12em] text-slate-500">
-          score
-        </div>
-      </div>
+    <div
+      className={cn(
+        'grid grid-cols-[28px_minmax(0,1fr)_132px_64px] items-start gap-4 border-b border-l-2 py-5 pl-3 transition-colors last:border-b-0',
+        top
+          ? 'border-l-[var(--white)] border-b-[var(--line)] bg-[rgba(232,240,255,0.025)]'
+          : 'border-l-transparent border-[var(--line)] hover-bg-warm'
+      )}
+    >
+      <span
+        className="mt-0.5 font-mono text-[12px]"
+        style={{ color: top ? 'var(--white)' : 'var(--muted-2)' }}
+      >
+        {String(rank).padStart(2, '0')}
+      </span>
       <div className="min-w-0">
-        <div className="truncate text-sm font-medium text-slate-100">{title}</div>
-        <div className="mt-1 flex flex-wrap gap-1.5 text-xs text-slate-500">
+        <div className="text-[13.5px] font-medium leading-snug text-[var(--platinum)]">{title}</div>
+        <div className="mt-2 flex flex-wrap gap-1.5">
           {geography && <Tag>{geography}</Tag>}
           {companySize && <Tag>{companySize}</Tag>}
           {roles && <Tag>{roles}</Tag>}
         </div>
         {signals.length > 0 && (
-          <div className="mt-2 space-y-1">
-            {signals.slice(0, 3).map((signal, index) => (
-              <div key={`${icp.icp_ref}-signal-${index}`} className="text-xs leading-relaxed text-slate-400">
-                <span className="text-slate-600">signal</span> {signal}
+          <div className="mt-2.5 space-y-1">
+            {signals.slice(0, 2).map((signal, index) => (
+              <div key={index} className="text-[11.5px] leading-relaxed text-[var(--muted-2)]">
+                <span className="mr-1.5 font-mono text-[9px] uppercase tracking-[0.1em] text-[var(--muted)]">
+                  signal
+                </span>
+                {signal}
               </div>
             ))}
           </div>
         )}
-        {(icp.diagnostics?.failure_categories?.length ?? 0) > 0 && (
-          <div className="mt-2 flex flex-wrap gap-1.5">
-            {icp.diagnostics?.failure_categories?.slice(0, 3).map((failure) => (
-              <Badge key={failure} className="border-burgundy-soft bg-burgundy-soft text-slate-300">
-                {readableTag(failure)}
-              </Badge>
-            ))}
-          </div>
-        )}
+      </div>
+      <div className="flex flex-col gap-1.5 pt-0.5">
+        <span
+          className="font-display text-[15px] font-medium tabular-nums"
+          style={{ color: top ? 'var(--white)' : 'var(--platinum)' }}
+        >
+          {formatScore(score)}
+        </span>
+        <span className="h-[3px] overflow-hidden rounded-full bg-[rgba(236,234,230,0.06)]">
+          <span
+            className="block h-full rounded-full"
+            style={{
+              width: `${Math.max(0, Math.min(100, score))}%`,
+              background: top ? 'var(--white)' : 'var(--muted)',
+            }}
+          />
+        </span>
       </div>
       <div className="text-right">
-        <div className="text-sm font-semibold text-slate-100 tabular-nums">{numberOr(icp.company_count, 0)}</div>
-        <div className="mt-1 text-[10px] uppercase tracking-[0.12em] text-slate-500">companies</div>
-      </div>
-    </div>
-  )
-}
-
-function HiddenIcpRow() {
-  return (
-    <div className="grid grid-cols-[88px_minmax(0,1fr)_96px] gap-3 border-b border-slate-800/45 px-4 py-3 last:border-b-0">
-      <div className="select-none blur-sm">
-        <div className="h-6 w-12 rounded bg-slate-700/50" />
-        <div className="mt-2 h-3 w-9 rounded bg-slate-800/80" />
-      </div>
-      <div className="min-w-0 select-none blur-sm">
-        <div className="h-4 w-2/3 rounded bg-slate-700/50" />
-        <div className="mt-2 flex gap-1.5">
-          <div className="h-5 w-24 rounded border border-slate-800/80 bg-slate-900/70" />
-          <div className="h-5 w-20 rounded border border-slate-800/80 bg-slate-900/70" />
+        <div className="font-display text-[15px] font-medium tabular-nums text-[var(--platinum)]">
+          {numberOr(icp.company_count, 0)}
         </div>
-        <div className="mt-3 h-3 w-4/5 rounded bg-slate-800/80" />
-        <div className="mt-2 h-3 w-3/5 rounded bg-slate-800/80" />
-      </div>
-      <div className="select-none text-right blur-sm">
-        <div className="ml-auto h-5 w-8 rounded bg-slate-700/50" />
-        <div className="mt-2 ml-auto h-3 w-16 rounded bg-slate-800/80" />
-      </div>
-    </div>
-  )
-}
-
-function ActivityPanel({
-  benchmark,
-  loops,
-  topicGroups,
-}: {
-  benchmark: BenchmarkReport | null
-  loops: ResearchLoop[]
-  topicGroups: TopicGroup[]
-}) {
-  return (
-    <div className="space-y-5">
-      <ModelIssuesPanel issues={benchmark?.issues ?? []} />
-
-      <div className="rounded-xl border border-slate-800/70 bg-slate-950/40 overflow-hidden">
-        <div className="flex items-center justify-between gap-3 border-b border-slate-800/70 px-4 py-3">
-          <div className="flex items-center gap-2 text-sm font-semibold text-slate-100">
-            <Activity className="h-4 w-4 text-gold" />
-            Recent research activity
-          </div>
-          <span className="text-xs text-slate-500">{loops.length} loops</span>
-        </div>
-        <div className="max-h-[440px] overflow-auto">
-          {loops.length === 0 ? (
-            <div className="p-5 text-sm text-slate-400">No Research Lab loop activity yet.</div>
-          ) : (
-            loops.map((loop) => <LoopRow key={loop.cardId} loop={loop} />)
-          )}
-        </div>
-      </div>
-
-      <div className="rounded-xl border border-slate-800/70 bg-slate-950/40 overflow-hidden">
-        <div className="flex items-center gap-2 border-b border-slate-800/70 px-4 py-3 text-sm font-semibold text-slate-100">
-          <Target className="h-4 w-4 text-gold" />
-          Research directions
-        </div>
-        <div className="divide-y divide-slate-800/50">
-          {topicGroups.length === 0 ? (
-            <div className="p-5 text-sm text-slate-400">No grouped research directions yet.</div>
-          ) : (
-            topicGroups.slice(0, 8).map((group) => <TopicGroupRow key={group.topicSignatureHash} group={group} />)
-          )}
+        <div className="mt-1 font-mono text-[9px] uppercase tracking-[0.1em] text-[var(--muted-2)]">
+          companies
         </div>
       </div>
     </div>
   )
 }
 
-function ModelIssuesPanel({ issues }: { issues: BenchmarkIssue[] }) {
+/* ============================================================
+ * Model issues
+ * ============================================================ */
+function ModelIssuesSection({ issues }: { issues: BenchmarkIssue[] }) {
   return (
-    <div className="rounded-xl border border-slate-800/70 bg-slate-950/40 overflow-hidden">
-      <div className="flex items-center justify-between gap-3 border-b border-slate-800/70 px-4 py-3">
-        <div className="flex items-center gap-2 text-sm font-semibold text-slate-100">
-          <AlertCircle className="h-4 w-4 text-gold" />
-          Model issues
+    <section className="pt-16">
+      <SecLabel index="02" title="Model issues" sub={`${issues.length} categories`} />
+      {issues.length === 0 ? (
+        <p className="text-[13px] text-[var(--muted-2)]">No repeated benchmark issues recorded yet.</p>
+      ) : (
+        <div>
+          {issues.slice(0, 8).map((issue) => (
+            <IssueRow key={issue.key} issue={issue} />
+          ))}
         </div>
-        <span className="text-xs text-slate-500">{issues.length} categories</span>
-      </div>
-      <div className="divide-y divide-slate-800/50">
-        {issues.length === 0 ? (
-          <div className="p-5 text-sm text-slate-400">No repeated benchmark issues recorded yet.</div>
-        ) : (
-          issues.slice(0, 6).map((issue) => <IssueRow key={issue.key} issue={issue} />)
-        )}
-      </div>
-    </div>
+      )}
+    </section>
   )
 }
 
 function IssueRow({ issue }: { issue: BenchmarkIssue }) {
+  const tone = severityTone(issue.severity)
   return (
-    <div className="px-4 py-3">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="text-sm font-medium text-slate-100">{issue.label}</div>
-          <p className="mt-1 text-xs leading-relaxed text-slate-500">{issue.description}</p>
-        </div>
-        <div className="shrink-0 text-right">
-          <div className="text-sm font-semibold tabular-nums text-slate-100">{issue.count}</div>
-          <div className="mt-1">
-            <IssueSeverityBadge severity={issue.severity} />
-          </div>
-        </div>
+    <div className="flex items-start justify-between gap-5 border-b border-[var(--line)] py-4 last:border-b-0">
+      <div className="min-w-0">
+        <div className="text-[13.5px] font-medium text-[var(--platinum)]">{issue.label}</div>
+        <p className="mt-1.5 text-[12px] leading-relaxed text-[var(--muted-2)]">{issue.description}</p>
       </div>
-    </div>
-  )
-}
-
-function IssueSeverityBadge({ severity }: { severity: BenchmarkIssue['severity'] }) {
-  const className =
-    severity === 'high'
-      ? 'border-burgundy-soft bg-burgundy-soft text-slate-300'
-      : severity === 'medium'
-        ? 'border-amber-warm-soft bg-amber-warm-soft text-amber-warm'
-        : 'border-slate-700/70 bg-slate-900/70 text-slate-300'
-  return (
-    <Badge className={cn('capitalize', className)}>
-      {severity}
-    </Badge>
-  )
-}
-
-function LoopRow({ loop }: { loop: ResearchLoop }) {
-  return (
-    <div className="border-b border-slate-800/45 px-4 py-3 last:border-b-0">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="min-w-0">
-          <div className="break-all font-mono text-xs text-slate-300">{loop.minerHotkey}</div>
-          <div className="mt-1 flex flex-wrap gap-1.5">
-            {loop.topicTags.slice(0, 3).map((tag) => <Tag key={tag}>{readableTag(tag)}</Tag>)}
-          </div>
-        </div>
-        <OutcomeBadge label={loop.outcomeLabel} band={loop.outcomeBand} />
-      </div>
-      {loop.researchFocusSummary && (
-        <p className="mt-2 line-clamp-2 text-sm leading-relaxed text-slate-400">{loop.researchFocusSummary}</p>
-      )}
-      {loop.bestCandidatePublicSummary && (
-        <p className="mt-2 line-clamp-2 text-xs leading-relaxed text-slate-500">{loop.bestCandidatePublicSummary}</p>
-      )}
-      <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-slate-500">
-        <span>{loop.candidateCount} candidates</span>
-        <span>{loop.scoredCandidateCount} scored</span>
-        <span className="inline-flex items-center gap-1">
-          <Clock3 className="h-3 w-3" />
-          {formatRelative(loop.lastActivityAt)}
+      <div className="flex shrink-0 items-center gap-3">
+        <span className="font-display text-[15px] font-medium tabular-nums text-[var(--platinum)]">
+          {issue.count}
+        </span>
+        <span
+          className="rounded-[3px] border px-2 py-0.5 font-mono text-[9.5px] uppercase tracking-[0.1em]"
+          style={{ color: tone.color, borderColor: tone.border }}
+        >
+          {issue.severity}
         </span>
       </div>
     </div>
   )
 }
 
-function TopicGroupRow({ group }: { group: TopicGroup }) {
+/* ============================================================
+ * Live research activity
+ * ============================================================ */
+function ActivitySection({ loops, activeCount }: { loops: ResearchLoop[]; activeCount: number }) {
   return (
-    <div className="px-4 py-3">
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex flex-wrap gap-1.5">
-          {group.topicTags.slice(0, 3).map((tag) => <Tag key={tag}>{readableTag(tag)}</Tag>)}
+    <section className="pt-16">
+      <SecLabel index="03" title="Live research activity" />
+      {activeCount > 0 ? (
+        <div className="-mt-3 mb-6 inline-flex items-center gap-2 font-mono text-[11px] text-[var(--muted)]">
+          <span className="live-ring inline-block h-1.5 w-1.5 rounded-full bg-[var(--white)]" />
+          {activeCount} running
         </div>
-        <span className="text-sm font-semibold text-slate-100 tabular-nums">{group.total}</span>
+      ) : null}
+      {loops.length === 0 ? (
+        <p className="text-[13px] text-[var(--muted-2)]">No research loop activity yet.</p>
+      ) : (
+        <div>
+          {loops.map((loop) => (
+            <LoopRow key={loop.cardId} loop={loop} />
+          ))}
+        </div>
+      )}
+    </section>
+  )
+}
+
+function LoopRow({ loop }: { loop: ResearchLoop }) {
+  return (
+    <div className="border-b border-[var(--line)] py-4 transition-colors last:border-b-0 hover-bg-warm">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="min-w-0">
+          <span className="break-all font-mono text-[11px] text-[var(--muted)]">{loop.minerHotkey}</span>
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {loop.topicTags.slice(0, 3).map((tag) => (
+              <Tag key={tag}>{readableTag(tag)}</Tag>
+            ))}
+          </div>
+        </div>
+        <OutcomeBadge label={loop.outcomeLabel} band={loop.outcomeBand} />
       </div>
-      <div className="mt-2 grid grid-cols-4 gap-2 text-[11px] text-slate-500">
-        <span>{group.running} running</span>
-        <span>{group.scored} scored</span>
-        <span className="text-gold">{group.promisingOrPromoted} promising</span>
-        <span className="text-burgundy">{group.noGainOrFailed} no gain</span>
+      {loop.researchFocusSummary && (
+        <p className="mt-2.5 line-clamp-2 text-[13px] leading-relaxed text-[var(--muted)]">
+          {loop.researchFocusSummary}
+        </p>
+      )}
+      {loop.bestCandidatePublicSummary && (
+        <p className="mt-2 line-clamp-2 text-[12px] leading-relaxed text-[var(--muted-2)]">
+          {loop.bestCandidatePublicSummary}
+        </p>
+      )}
+      <div className="mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-1 font-mono text-[10.5px] text-[var(--muted-2)]">
+        <span>
+          <span className="text-[var(--muted)]">{loop.candidateCount}</span> candidates
+        </span>
+        <span>
+          <span className="text-[var(--muted)]">{loop.scoredCandidateCount}</span> scored
+        </span>
+        <span>{formatRelative(loop.lastActivityAt)}</span>
       </div>
     </div>
   )
 }
 
 function OutcomeBadge({ label, band }: { label: string; band: string }) {
-  const tone =
-    band === 'promoted' || band === 'passed_threshold'
-      ? 'gold'
-      : band === 'small_gain'
-        ? 'amber'
-        : band === 'failed' || band === 'no_gain'
-          ? 'burgundy'
-          : 'neutral'
+  const tone = outcomeTone(band)
   return (
-    <Badge
-      className={cn(
-        'capitalize',
-        tone === 'gold' && 'border-gold-soft bg-gold-soft text-gold',
-        tone === 'amber' && 'border-amber-warm-soft bg-amber-warm-soft text-amber-warm',
-        tone === 'burgundy' && 'border-burgundy-soft bg-burgundy-soft text-slate-300',
-        tone === 'neutral' && 'border-slate-700/70 bg-slate-900/70 text-slate-300'
-      )}
+    <span
+      className="shrink-0 rounded-[3px] border px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.06em]"
+      style={{ color: tone.color, borderColor: tone.border, background: tone.bg }}
     >
       {readableTag(label)}
-    </Badge>
+    </span>
+  )
+}
+
+/* ============================================================
+ * Research directions
+ * ============================================================ */
+function DirectionsSection({ groups }: { groups: TopicGroup[] }) {
+  return (
+    <section className="pt-16">
+      <SecLabel index="04" title="Research directions" sub="grouped by topic" />
+      {groups.length === 0 ? (
+        <p className="text-[13px] text-[var(--muted-2)]">No grouped research directions yet.</p>
+      ) : (
+        <div>
+          {groups.slice(0, 8).map((group) => (
+            <DirectionRow key={group.topicSignatureHash} group={group} />
+          ))}
+        </div>
+      )}
+    </section>
+  )
+}
+
+function DirectionRow({ group }: { group: TopicGroup }) {
+  const progress = group.total > 0 ? (group.promisingOrPromoted / group.total) * 100 : 0
+  return (
+    <div className="border-b border-[var(--line)] py-4 last:border-b-0">
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex flex-wrap gap-1.5">
+          {group.topicTags.slice(0, 3).map((tag) => (
+            <Tag key={tag}>{readableTag(tag)}</Tag>
+          ))}
+        </div>
+        <span className="font-display text-[15px] font-medium tabular-nums text-[var(--platinum)]">
+          {group.total}
+        </span>
+      </div>
+      <div className="mt-2.5 h-[3px] overflow-hidden rounded-full bg-[rgba(236,234,230,0.06)]">
+        <span
+          className="block h-full rounded-full bg-[var(--muted)]"
+          style={{ width: `${Math.max(0, Math.min(100, progress))}%` }}
+        />
+      </div>
+      <div className="mt-2.5 flex flex-wrap gap-x-4 gap-y-1 font-mono text-[10px] text-[var(--muted-2)]">
+        <span>{group.running} running</span>
+        <span>{group.scored} scored</span>
+        <span className="text-[var(--platinum)]">{group.promisingOrPromoted} promising</span>
+        <span>{group.noGainOrFailed} no gain</span>
+      </div>
+    </div>
+  )
+}
+
+/* ============================================================
+ * Methodology footer — truthful, sourced from the README.
+ * ============================================================ */
+function MethodologyFooter() {
+  const points = [
+    {
+      n: 'I',
+      title: 'Loops',
+      body: 'Miners fund hosted auto-research loops that try to improve Leadpoet’s sales agent.',
+    },
+    {
+      n: 'II',
+      title: 'Benchmark',
+      body: 'Each candidate improvement is scored against the current model benchmark.',
+    },
+    {
+      n: 'III',
+      title: 'Rewards',
+      body: 'Verified compute is reimbursed; candidates that beat the benchmark earn improvement rewards.',
+    },
+  ]
+  return (
+    <section className="mt-20 border-t border-[var(--line)] pt-10">
+      <div className="font-mono text-[10.5px] uppercase tracking-[0.16em] text-[var(--muted-2)]">
+        How the Research Lab works
+      </div>
+      <div className="mt-7 grid gap-8 md:grid-cols-3">
+        {points.map((p) => (
+          <div key={p.n}>
+            <div className="font-mono text-[10px] uppercase tracking-[0.1em] text-[var(--muted-2)]">
+              {p.n}
+            </div>
+            <div className="mt-2 text-[13px] font-medium text-[var(--platinum)]">{p.title}</div>
+            <p className="mt-1.5 text-[12px] leading-relaxed text-[var(--muted-2)]">{p.body}</p>
+          </div>
+        ))}
+      </div>
+    </section>
+  )
+}
+
+/* ============================================================
+ * Shared bits
+ * ============================================================ */
+function SecLabel({ index, title, sub }: { index: string; title: string; sub?: string }) {
+  return (
+    <div className="seclabel mb-8">
+      <span className="ix">{index}</span>
+      <span className="stitle">{title}</span>
+      <span className="sline" />
+      {sub ? <span className="ssub">{sub}</span> : null}
+    </div>
   )
 }
 
 function Tag({ children }: { children: string }) {
   return (
-    <span className="inline-flex max-w-full rounded border border-slate-800/80 bg-slate-900/55 px-1.5 py-0.5 text-[11px] text-slate-400">
+    <span className="inline-flex max-w-full rounded-[5px] border border-[var(--line-2)] bg-[rgba(236,234,230,0.02)] px-1.5 py-0.5 font-mono text-[10px] text-[var(--muted)]">
       <span className="truncate">{children}</span>
     </span>
   )
 }
 
+function CountUp({
+  value,
+  decimals = 0,
+  className,
+}: {
+  value: number
+  decimals?: number
+  className?: string
+}) {
+  const [display, setDisplay] = useState(0)
+  const fromRef = useRef(0)
+  useEffect(() => {
+    const from = fromRef.current
+    const to = Number.isFinite(value) ? value : 0
+    if (from === to) {
+      setDisplay(to)
+      return
+    }
+    let raf = 0
+    const start = performance.now()
+    const dur = 900
+    const tick = (now: number) => {
+      const t = Math.min(1, (now - start) / dur)
+      const eased = 1 - Math.pow(1 - t, 3)
+      const next = from + (to - from) * eased
+      setDisplay(next)
+      if (t < 1) raf = requestAnimationFrame(tick)
+      else fromRef.current = to
+    }
+    raf = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(raf)
+  }, [value])
+  const text = decimals > 0 ? display.toFixed(decimals) : Math.round(display).toLocaleString()
+  return <span className={cn('tabular-nums', className)}>{text}</span>
+}
+
+/* ============================================================
+ * Tone helpers — brightness, never hue.
+ * ============================================================ */
+function scoreTone(score: number): string {
+  if (score >= 80) return 'var(--white)'
+  if (score >= 60) return 'var(--platinum)'
+  if (score >= 40) return 'var(--muted)'
+  if (score > 0) return 'var(--muted-2)'
+  return 'var(--faint)'
+}
+
+function outcomeTone(band: string): { color: string; border: string; bg: string } {
+  if (band === 'promoted' || band === 'passed_threshold') {
+    return { color: 'var(--white)', border: 'rgba(232,240,255,0.30)', bg: 'rgba(232,240,255,0.07)' }
+  }
+  if (band === 'small_gain') {
+    return { color: 'var(--platinum)', border: 'var(--line-2)', bg: 'transparent' }
+  }
+  if (band === 'no_gain' || band === 'failed') {
+    return { color: 'var(--muted-2)', border: 'var(--line)', bg: 'transparent' }
+  }
+  return { color: 'var(--muted)', border: 'var(--line)', bg: 'transparent' }
+}
+
+function severityTone(severity: BenchmarkIssue['severity']): { color: string; border: string } {
+  if (severity === 'high') return { color: 'var(--platinum)', border: 'var(--line-3)' }
+  if (severity === 'medium') return { color: 'var(--muted)', border: 'var(--line-2)' }
+  return { color: 'var(--muted-2)', border: 'var(--line)' }
+}
+
+/* ============================================================
+ * Formatters (unchanged from prior implementation)
+ * ============================================================ */
 function formatScore(value: number): string {
   if (!Number.isFinite(value)) return '0.0'
   return value.toFixed(1)
@@ -578,11 +773,6 @@ function formatRelative(value: string): string {
 
 function readableTag(value: string): string {
   return value.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
-}
-
-function shortHash(value: string): string {
-  if (!value) return ''
-  return value.length > 18 ? `${value.slice(0, 13)}...${value.slice(-4)}` : value
 }
 
 function textValue(value: unknown): string {

@@ -389,9 +389,9 @@ export function FulfillmentMobile({
                       <div
                         className="h-full rounded-full"
                         style={{
-                          // Dusty burgundy. Saturates at the top entries, fades for the tail.
+                          // Monochrome: brighter for the top entries, fades for the tail.
                           width: `${pct}%`,
-                          background: `linear-gradient(90deg, rgba(168, 116, 111, ${0.6 + severity * 0.3}) 0%, rgba(196, 142, 137, ${0.5 + severity * 0.3}) 100%)`,
+                          background: `linear-gradient(90deg, rgba(236, 234, 230, ${0.26 + severity * 0.2}) 0%, rgba(236, 234, 230, ${0.16 + severity * 0.16}) 100%)`,
                           transition: 'width 320ms cubic-bezier(0.16, 1, 0.3, 1)',
                         }}
                       />

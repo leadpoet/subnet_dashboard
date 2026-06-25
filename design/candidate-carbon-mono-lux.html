@@ -1,0 +1,649 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Leadpoet — Research Lab</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+  :root{
+    --bg:#0a0b0c;
+    --bg-2:#0e0f11;
+    --ink:#f2f3f4;
+    --ink-2:#9ea1a4;
+    --ink-3:#65686b;
+    --ink-4:#42454a;
+    --line:rgba(255,255,255,0.085);
+    --line-2:rgba(255,255,255,0.14);
+    --accent:#e8f0ff;
+    --accent-dim:rgba(232,240,255,0.5);
+    --mono:'IBM Plex Mono',ui-monospace,'JetBrains Mono',Menlo,monospace;
+    --display:'Space Grotesk',-apple-system,system-ui,sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+  body{
+    background:var(--bg);
+    color:var(--ink);
+    font-family:var(--mono);
+    font-size:13px;
+    line-height:1.5;
+    font-feature-settings:"tnum" 1,"ss01" 1;
+    letter-spacing:0.01em;
+    position:relative;
+    min-height:100vh;
+  }
+  body::before{
+    content:"";position:fixed;inset:0;pointer-events:none;z-index:0;
+    background:radial-gradient(120% 80% at 78% -8%,rgba(220,232,255,0.05),transparent 60%);
+  }
+  .wrap{max-width:1080px;margin:0 auto;padding:0 40px;position:relative;z-index:1}
+  .tnum{font-variant-numeric:tabular-nums}
+  .eyebrow{
+    font-size:10.5px;letter-spacing:0.22em;text-transform:uppercase;
+    color:var(--ink-3);font-weight:500;
+  }
+  .hr{height:1px;background:var(--line);border:0;width:100%}
+
+  /* ── masthead ───────────────────────────── */
+  .masthead{
+    display:flex;align-items:center;justify-content:space-between;
+    padding:26px 0 22px;border-bottom:1px solid var(--line);gap:24px;flex-wrap:wrap;
+  }
+  .brand{display:flex;align-items:baseline;gap:14px}
+  .wordmark{
+    font-family:var(--display);font-weight:600;font-size:19px;
+    letter-spacing:-0.02em;color:var(--ink);
+  }
+  .brand-sub{
+    font-size:10.5px;letter-spacing:0.2em;text-transform:uppercase;
+    color:var(--ink-3);font-weight:500;
+  }
+  .chip{
+    font-size:10.5px;letter-spacing:0.12em;text-transform:uppercase;
+    color:var(--ink-2);border:1px solid var(--line-2);
+    padding:5px 10px;border-radius:2px;white-space:nowrap;
+  }
+  .sync{display:flex;align-items:center;gap:9px;font-size:11px;color:var(--ink-2);letter-spacing:0.04em}
+  .dot{
+    width:6px;height:6px;border-radius:50%;background:var(--accent);
+    box-shadow:0 0 0 0 rgba(232,240,255,0.4);animation:pulse 2.6s infinite;
+  }
+  @keyframes pulse{
+    0%{box-shadow:0 0 0 0 rgba(232,240,255,0.34)}
+    70%{box-shadow:0 0 0 7px rgba(232,240,255,0)}
+    100%{box-shadow:0 0 0 0 rgba(232,240,255,0)}
+  }
+
+  /* ── nav ────────────────────────────────── */
+  .nav{display:flex;gap:0;padding:18px 0 0;border:0}
+  .nav a{
+    text-decoration:none;font-size:11px;letter-spacing:0.14em;text-transform:uppercase;
+    color:var(--ink-3);padding:9px 18px 13px;position:relative;transition:color .2s;font-weight:500;
+  }
+  .nav a:hover{color:var(--ink-2)}
+  .nav a.active{color:var(--ink)}
+  .nav a.active::after{
+    content:"";position:absolute;left:18px;right:18px;bottom:-1px;height:1px;background:var(--accent);
+  }
+  .nav-rule{height:1px;background:var(--line);margin-top:0}
+
+  section{padding:60px 0}
+  .seclabel{display:flex;align-items:center;gap:14px;margin-bottom:34px}
+  .seclabel .ix{font-size:10.5px;color:var(--ink-4);letter-spacing:0.18em}
+
+  /* ── hero ───────────────────────────────── */
+  .hero{padding:64px 0 56px}
+  .hero-eyebrow{margin-bottom:30px}
+  .hero h1{
+    font-family:var(--display);font-weight:500;font-size:31px;line-height:1.18;
+    letter-spacing:-0.025em;color:var(--ink);max-width:18ch;margin-bottom:48px;
+  }
+  .hero-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.05fr);gap:56px;align-items:end}
+  .score-row{display:flex;align-items:baseline;gap:14px;margin-bottom:18px}
+  .score{
+    font-family:var(--display);font-weight:500;font-size:118px;line-height:0.82;
+    letter-spacing:-0.045em;color:var(--accent);font-variant-numeric:tabular-nums;
+  }
+  .score-of{font-family:var(--mono);font-size:20px;color:var(--ink-4);letter-spacing:0.02em}
+  .score-meta{display:flex;align-items:center;gap:16px;margin-bottom:30px;flex-wrap:wrap}
+  .band{
+    font-size:10.5px;letter-spacing:0.2em;text-transform:uppercase;color:var(--ink);
+    border:1px solid var(--line-2);padding:5px 11px;border-radius:2px;
+  }
+  .delta{font-size:12px;color:var(--ink-2);letter-spacing:0.03em}
+  .delta b{color:var(--ink);font-weight:500}
+  .narrative{font-size:12px;line-height:1.85;color:var(--ink-2);max-width:46ch;letter-spacing:0.015em}
+  .narrative b{color:var(--ink);font-weight:500}
+
+  .spark-card{display:flex;flex-direction:column;gap:0}
+  .spark-head{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:18px}
+  .spark-wrap{position:relative;width:100%;height:120px}
+  .spark-foot{display:flex;justify-content:space-between;align-items:baseline;margin-top:14px;font-size:10.5px;color:var(--ink-3);letter-spacing:0.04em}
+  .spark-now{color:var(--ink);font-size:11px}
+
+  /* ── kpi ────────────────────────────────── */
+  .kpi-rail{display:grid;grid-template-columns:repeat(4,1fr);border-top:1px solid var(--line)}
+  .kpi{padding:30px 26px 30px 0;border-right:1px solid var(--line)}
+  .kpi:first-child{padding-left:0}
+  .kpi:last-child{border-right:0;padding-right:0}
+  .kpi-label{font-size:10.5px;letter-spacing:0.18em;text-transform:uppercase;color:var(--ink-3);margin-bottom:18px}
+  .kpi-val{font-family:var(--display);font-weight:500;font-size:40px;letter-spacing:-0.03em;color:var(--ink);line-height:1;font-variant-numeric:tabular-nums}
+  .kpi-sub{font-size:10.5px;color:var(--ink-3);margin-top:14px;letter-spacing:0.04em}
+
+  /* ── benchmark detail ───────────────────── */
+  .bm-head{display:flex;justify-content:space-between;align-items:flex-start;gap:30px;flex-wrap:wrap;margin-bottom:40px}
+  .bm-head .meta{font-size:11px;color:var(--ink-2);letter-spacing:0.05em}
+  .verif{display:flex;align-items:center;gap:18px;flex-wrap:wrap}
+  .verif-tag{display:flex;align-items:center;gap:7px;font-size:10.5px;letter-spacing:0.16em;text-transform:uppercase;color:var(--ink-2)}
+  .verif-tag .vd{width:5px;height:5px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 0 rgba(232,240,255,0.4);animation:pulse 2.6s infinite}
+  .hash{display:flex;align-items:center;gap:10px;font-size:11px;color:var(--ink-2)}
+  .hash code{color:var(--ink);letter-spacing:0.02em}
+  .icon-btn{
+    background:none;border:1px solid var(--line-2);color:var(--ink-3);cursor:pointer;
+    width:24px;height:24px;display:inline-flex;align-items:center;justify-content:center;
+    border-radius:2px;transition:all .18s;font-size:13px;
+  }
+  .icon-btn:hover{color:var(--ink);border-color:var(--line-2);background:rgba(255,255,255,0.04)}
+  .icon-btn.copied{color:var(--accent)}
+  .mlink{font-size:11px;color:var(--ink-2);text-decoration:none;letter-spacing:0.04em;border-bottom:1px solid var(--line-2);padding-bottom:2px;transition:color .2s}
+  .mlink:hover{color:var(--ink)}
+
+  /* distribution strip */
+  .dist{margin:0 0 52px}
+  .dist-label{font-size:10.5px;letter-spacing:0.18em;text-transform:uppercase;color:var(--ink-3);margin-bottom:18px}
+  .dist-bars{display:grid;grid-template-columns:repeat(5,1fr);gap:2px;height:54px;align-items:end}
+  .dist-col{display:flex;flex-direction:column;justify-content:flex-end;height:100%}
+  .dist-bar{width:100%;background:var(--ink-4);border-radius:1px;transition:background .2s;min-height:3px}
+  .dist-col.peak .dist-bar{background:var(--accent)}
+  .dist-foot{display:grid;grid-template-columns:repeat(5,1fr);gap:2px;margin-top:12px}
+  .dist-foot div{font-size:10px;letter-spacing:0.14em;text-transform:uppercase;color:var(--ink-3);text-align:left}
+  .dist-foot .cnt{color:var(--ink);font-size:12px;margin-top:5px;letter-spacing:0}
+  .dist-col.peak ~ .dist-foot{} /* noop */
+
+  /* leaderboard */
+  .lb-head{display:grid;grid-template-columns:34px minmax(0,1fr) 120px 92px;gap:18px;padding:0 0 14px;border-bottom:1px solid var(--line);font-size:10px;letter-spacing:0.16em;text-transform:uppercase;color:var(--ink-4)}
+  .lb-head .r-score{text-align:right}
+  .lb-head .r-co{text-align:right}
+  .row{
+    display:grid;grid-template-columns:34px minmax(0,1fr) 120px 92px;gap:18px;
+    padding:22px 0;border-bottom:1px solid var(--line);align-items:center;
+    transition:transform .18s ease,background .18s ease;position:relative;
+  }
+  .row:hover{transform:translateX(3px)}
+  .row .rank{font-size:12px;color:var(--ink-3);letter-spacing:0.05em;align-self:start;padding-top:2px}
+  .row.top .rank{color:var(--accent)}
+  .row.top::before{content:"";position:absolute;left:-16px;top:18px;bottom:18px;width:2px;background:var(--accent)}
+  .icp-title{font-size:12.5px;color:var(--ink);letter-spacing:0.01em;line-height:1.5;margin-bottom:8px}
+  .row.top .icp-title{color:var(--ink)}
+  .icp-tags{font-size:10.5px;color:var(--ink-3);letter-spacing:0.04em;margin-bottom:9px}
+  .icp-signal{font-size:10.5px;color:var(--ink-2);letter-spacing:0.03em;display:flex;align-items:center;gap:8px}
+  .icp-signal .sx{color:var(--ink-4);font-size:10px;letter-spacing:0.14em;text-transform:uppercase}
+  .sc-cell{text-align:right;align-self:start}
+  .sc-num{font-family:var(--display);font-weight:500;font-size:22px;letter-spacing:-0.02em;color:var(--ink);font-variant-numeric:tabular-nums;line-height:1}
+  .row.top .sc-num{color:var(--accent)}
+  .sc-bar{height:2px;background:var(--line);margin-top:11px;border-radius:1px;overflow:hidden}
+  .sc-bar i{display:block;height:100%;background:var(--ink-2);width:0;transition:width 1.1s cubic-bezier(.2,.7,.2,1)}
+  .row.top .sc-bar i{background:var(--accent)}
+  .co-cell{text-align:right;align-self:start;font-size:11px;color:var(--ink-2);letter-spacing:0.03em}
+  .co-cell b{color:var(--ink);font-weight:500;font-size:14px}
+  .co-cell span{display:block;font-size:9.5px;letter-spacing:0.14em;text-transform:uppercase;color:var(--ink-4);margin-top:5px}
+
+  /* ── live activity ──────────────────────── */
+  .live-label{display:flex;align-items:center;gap:9px;font-size:10.5px;letter-spacing:0.16em;text-transform:uppercase;color:var(--ink-2)}
+  .live-label .dot{width:5px;height:5px}
+  .act-row{
+    display:grid;grid-template-columns:160px minmax(0,1fr) 130px;gap:24px;align-items:center;
+    padding:20px 0;border-bottom:1px solid var(--line);transition:transform .18s,background .18s;
+  }
+  .act-row:hover{transform:translateX(3px)}
+  .act-key{font-size:12px;color:var(--ink);letter-spacing:0.04em}
+  .act-area{font-size:11px;color:var(--ink-2);letter-spacing:0.03em}
+  .act-meta{font-size:10.5px;color:var(--ink-3);letter-spacing:0.03em;text-align:left}
+  .badge{
+    justify-self:end;font-size:10px;letter-spacing:0.14em;text-transform:uppercase;
+    padding:5px 11px;border-radius:2px;border:1px solid var(--line-2);white-space:nowrap;
+  }
+  .badge.promoted{color:var(--accent);border-color:rgba(232,240,255,0.4)}
+  .badge.promising{color:var(--ink);border-color:var(--line-2)}
+  .badge.nogain{color:var(--ink-4);border-color:var(--line)}
+
+  /* ── research directions ────────────────── */
+  .dir{padding:24px 0;border-bottom:1px solid var(--line)}
+  .dir-top{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:16px;gap:20px;flex-wrap:wrap}
+  .dir-name{font-size:13px;color:var(--ink);letter-spacing:0.02em}
+  .dir-stats{font-size:10.5px;color:var(--ink-3);letter-spacing:0.05em}
+  .dir-stats b{color:var(--ink-2);font-weight:500}
+  .dir-bar{height:2px;background:var(--line);border-radius:1px;overflow:hidden;position:relative}
+  .dir-bar i{display:block;height:100%;background:var(--ink-2);width:0;transition:width 1.1s cubic-bezier(.2,.7,.2,1)}
+  .dir-pct{font-size:10.5px;color:var(--ink-3);min-width:38px;text-align:right;letter-spacing:0.03em}
+  .dir-bar-row{display:flex;align-items:center;gap:16px}
+
+  /* ── methodology ────────────────────────── */
+  .tiers{display:grid;grid-template-columns:repeat(4,1fr);gap:0;border-top:1px solid var(--line)}
+  .tier{padding:30px 24px 34px 0;border-right:1px solid var(--line)}
+  .tier:first-child{padding-left:0}
+  .tier:last-child{border-right:0;padding-right:0}
+  .tier-ix{font-size:10.5px;letter-spacing:0.18em;text-transform:uppercase;color:var(--ink-4);margin-bottom:16px}
+  .tier-name{font-size:12.5px;color:var(--ink);letter-spacing:0.02em;margin-bottom:12px}
+  .tier-desc{font-size:10.5px;color:var(--ink-3);line-height:1.75;letter-spacing:0.02em}
+  .prov{
+    margin-top:48px;padding-top:30px;border-top:1px solid var(--line);
+    font-size:10.5px;color:var(--ink-3);letter-spacing:0.06em;line-height:1.9;
+  }
+  .prov b{color:var(--ink-2);font-weight:500}
+  footer{padding:50px 0 70px;display:flex;justify-content:space-between;align-items:center;gap:20px;flex-wrap:wrap;border-top:1px solid var(--line)}
+  .foot-mark{font-family:var(--display);font-weight:600;font-size:14px;letter-spacing:-0.02em;color:var(--ink-2)}
+  .foot-meta{font-size:10px;letter-spacing:0.16em;text-transform:uppercase;color:var(--ink-4)}
+
+  .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);border:0}
+
+  @media(max-width:880px){
+    .wrap{padding:0 24px}
+    .hero-grid{grid-template-columns:1fr;gap:48px}
+    .kpi-rail,.tiers{grid-template-columns:1fr 1fr}
+    .kpi,.tier{border-right:0;padding-right:0}
+    .kpi:nth-child(odd),.tier:nth-child(odd){border-right:1px solid var(--line);padding-right:26px}
+    .score{font-size:92px}
+  }
+  @media(max-width:560px){
+    .lb-head{display:none}
+    .row{grid-template-columns:30px 1fr;gap:14px}
+    .row .sc-cell,.row .co-cell{grid-column:2;text-align:left}
+    .act-row{grid-template-columns:1fr;gap:8px}
+    .badge{justify-self:start}
+    .kpi-rail,.tiers{grid-template-columns:1fr}
+    .kpi,.tier{border-right:0!important;padding-right:0!important;border-bottom:1px solid var(--line)}
+  }
+</style>
+</head>
+<body>
+<h2 class="sr-only">Leadpoet Research Lab benchmark dashboard. Current model score 72.4 out of 100, band strong, up 3.1 since last cycle.</h2>
+<div class="wrap">
+
+  <header class="masthead">
+    <div class="brand">
+      <span class="wordmark">Leadpoet</span>
+      <span class="brand-sub">Research Lab</span>
+    </div>
+    <div style="display:flex;align-items:center;gap:18px;flex-wrap:wrap">
+      <span class="chip">Subnet 71 · Bittensor</span>
+      <span class="sync"><span class="dot"></span>Synced just now</span>
+    </div>
+  </header>
+
+  <nav class="nav">
+    <a href="#" class="active">Research Lab</a>
+    <a href="#">Fulfillment</a>
+    <a href="#">FAQ</a>
+  </nav>
+  <div class="nav-rule"></div>
+
+  <!-- HERO -->
+  <section class="hero">
+    <div class="hero-eyebrow eyebrow">Current model benchmark · v2026.06</div>
+    <h1>Autonomous lead research, scored in the open.</h1>
+
+    <div class="hero-grid">
+      <div>
+        <div class="score-row">
+          <span class="score" id="score" data-to="72.4">0.0</span>
+          <span class="score-of">/100</span>
+        </div>
+        <div class="score-meta">
+          <span class="band">Strong</span>
+          <span class="delta"><b>+3.1</b> since last cycle</span>
+        </div>
+        <p class="narrative">
+          Evaluated on a rolling <b>7-day window</b> of live client ICPs, produced by a
+          <b>four-tier validator pipeline</b>, and independently verifiable from the benchmark hash.
+        </p>
+      </div>
+
+      <div class="spark-card">
+        <div class="spark-head">
+          <span class="eyebrow">12-cycle trend</span>
+          <span class="spark-now tnum">61.2 → 72.4</span>
+        </div>
+        <div class="spark-wrap">
+          <svg viewBox="0 0 480 120" preserveAspectRatio="none" width="100%" height="120" aria-hidden="true">
+            <line x1="0" y1="119" x2="480" y2="119" stroke="rgba(255,255,255,0.08)" stroke-width="1"/>
+            <path id="sparkArea" fill="rgba(232,240,255,0.06)" stroke="none" d=""/>
+            <path id="sparkLine" fill="none" stroke="#e8f0ff" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round" d="" stroke-dasharray="1400" stroke-dashoffset="1400"/>
+            <circle id="sparkDot" r="3" fill="#e8f0ff" cx="0" cy="0" opacity="0"/>
+          </svg>
+        </div>
+        <div class="spark-foot">
+          <span>Low 61.2</span>
+          <span class="spark-now">Next benchmark in 2d 14h</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- KPI RAIL -->
+  <section style="padding-top:0">
+    <div class="kpi-rail">
+      <div class="kpi">
+        <div class="kpi-label">Active loops</div>
+        <div class="kpi-val tnum" data-to="18">0</div>
+        <div class="kpi-sub">Research runs in progress</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-label">Scored this cycle</div>
+        <div class="kpi-val tnum" data-to="142">0</div>
+        <div class="kpi-sub">+22% week over week</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-label">Companies researched</div>
+        <div class="kpi-val tnum" data-to="3847">0</div>
+        <div class="kpi-sub">All-time, verified</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-label">Active contributors</div>
+        <div class="kpi-val tnum" data-to="9">0</div>
+        <div class="kpi-sub">Running loops now</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- BENCHMARK DETAIL -->
+  <section>
+    <div class="seclabel">
+      <span class="ix">01</span><span class="eyebrow">Benchmark detail</span><span class="hr"></span>
+    </div>
+
+    <div class="bm-head">
+      <div class="meta">Jun 25, 2026 · rolling 7-day window</div>
+      <div class="verif">
+        <span class="verif-tag"><span class="vd"></span>Verifiable</span>
+        <span class="hash">sha256 <code id="hashText">5a9957…4e30</code>
+          <button class="icon-btn" id="copyBtn" aria-label="Copy benchmark hash"><i class="ti ti-copy" aria-hidden="true"></i></button>
+        </span>
+        <a href="#methodology" class="mlink">Methodology ↗</a>
+      </div>
+    </div>
+
+    <!-- distribution -->
+    <div class="dist">
+      <div class="dist-label">Score distribution · 50 ICPs</div>
+      <div class="dist-bars" id="distBars">
+        <div class="dist-col" data-h="3"><div class="dist-bar" style="height:0"></div></div>
+        <div class="dist-col" data-h="7"><div class="dist-bar" style="height:0"></div></div>
+        <div class="dist-col" data-h="15"><div class="dist-bar" style="height:0"></div></div>
+        <div class="dist-col peak" data-h="17"><div class="dist-bar" style="height:0"></div></div>
+        <div class="dist-col" data-h="8"><div class="dist-bar" style="height:0"></div></div>
+      </div>
+      <div class="dist-foot">
+        <div>Zero<div class="cnt tnum">3</div></div>
+        <div>Weak<div class="cnt tnum">7</div></div>
+        <div>Fair<div class="cnt tnum">15</div></div>
+        <div>Strong<div class="cnt tnum">17</div></div>
+        <div>Frontier<div class="cnt tnum">8</div></div>
+      </div>
+    </div>
+
+    <!-- leaderboard -->
+    <div class="lb-head">
+      <span>#</span><span>ICP definition</span><span class="r-score">Score</span><span class="r-co">Companies</span>
+    </div>
+
+    <div class="row top">
+      <span class="rank">01</span>
+      <div>
+        <div class="icp-title">Data &amp; Analytics / Cloud Data Platforms / BI &amp; analytics tooling</div>
+        <div class="icp-tags">United States · 200–500 · Data leaders</div>
+        <div class="icp-signal"><span class="sx">Signal</span>Launched or announced a new product</div>
+      </div>
+      <div class="sc-cell">
+        <div class="sc-num tnum">88.2</div>
+        <div class="sc-bar"><i data-w="88.2"></i></div>
+      </div>
+      <div class="co-cell"><b class="tnum">34</b><span>Companies</span></div>
+    </div>
+
+    <div class="row">
+      <span class="rank">02</span>
+      <div>
+        <div class="icp-title">Information Technology / Managed IT &amp; Cloud Infrastructure</div>
+        <div class="icp-tags">United States · 200–500 · IT directors</div>
+        <div class="icp-signal"><span class="sx">Signal</span>Expanded to new markets</div>
+      </div>
+      <div class="sc-cell">
+        <div class="sc-num tnum">81.5</div>
+        <div class="sc-bar"><i data-w="81.5"></i></div>
+      </div>
+      <div class="co-cell"><b class="tnum">28</b><span>Companies</span></div>
+    </div>
+
+    <div class="row">
+      <span class="rank">03</span>
+      <div>
+        <div class="icp-title">Professional Services / Management &amp; Technology Consulting</div>
+        <div class="icp-tags">United States · 500–1000 · Ops VPs</div>
+        <div class="icp-signal"><span class="sx">Signal</span>Acquired another company</div>
+      </div>
+      <div class="sc-cell">
+        <div class="sc-num tnum">76.0</div>
+        <div class="sc-bar"><i data-w="76.0"></i></div>
+      </div>
+      <div class="co-cell"><b class="tnum">21</b><span>Companies</span></div>
+    </div>
+
+    <div class="row">
+      <span class="rank">04</span>
+      <div>
+        <div class="icp-title">Transportation / Logistics &amp; Mobility Technology</div>
+        <div class="icp-tags">United States · 10–50 · Founders</div>
+        <div class="icp-signal"><span class="sx">Signal</span>Recent facility or store opening</div>
+      </div>
+      <div class="sc-cell">
+        <div class="sc-num tnum">69.3</div>
+        <div class="sc-bar"><i data-w="69.3"></i></div>
+      </div>
+      <div class="co-cell"><b class="tnum">12</b><span>Companies</span></div>
+    </div>
+
+    <div class="row">
+      <span class="rank">05</span>
+      <div>
+        <div class="icp-title">Information Technology / IT Services &amp; Consulting</div>
+        <div class="icp-tags">United States · 50–200 · CTOs</div>
+        <div class="icp-signal"><span class="sx">Signal</span>Just closed a funding round</div>
+      </div>
+      <div class="sc-cell">
+        <div class="sc-num tnum">64.8</div>
+        <div class="sc-bar"><i data-w="64.8"></i></div>
+      </div>
+      <div class="co-cell"><b class="tnum">9</b><span>Companies</span></div>
+    </div>
+  </section>
+
+  <!-- LIVE ACTIVITY -->
+  <section>
+    <div class="seclabel">
+      <span class="ix">02</span><span class="eyebrow">Live research activity</span><span class="hr"></span>
+      <span class="live-label"><span class="dot"></span>18 running</span>
+    </div>
+
+    <div class="act-row">
+      <span class="act-key">5F3a…9kQ2</span>
+      <div><div class="act-area">Cloud Data Platforms</div></div>
+      <span class="badge promoted">Promoted</span>
+      <div class="act-meta" style="grid-column:1/3;margin-top:-6px">240 candidates · 31 scored · 4m ago</div>
+    </div>
+
+    <div class="act-row">
+      <span class="act-key">5Gw7…pL4x</span>
+      <div><div class="act-area">Logistics Tech</div></div>
+      <span class="badge promising">Promising</span>
+      <div class="act-meta" style="grid-column:1/3;margin-top:-6px">180 candidates · 22 scored · 11m ago</div>
+    </div>
+
+    <div class="act-row">
+      <span class="act-key">5Dn2…rT8v</span>
+      <div><div class="act-area">IT Services</div></div>
+      <span class="badge nogain">No gain</span>
+      <div class="act-meta" style="grid-column:1/3;margin-top:-6px">95 candidates · 12 scored · 26m ago</div>
+    </div>
+  </section>
+
+  <!-- RESEARCH DIRECTIONS -->
+  <section>
+    <div class="seclabel">
+      <span class="ix">03</span><span class="eyebrow">Research directions</span><span class="hr"></span>
+    </div>
+
+    <div class="dir">
+      <div class="dir-top">
+        <span class="dir-name">Cloud Data Platforms</span>
+        <span class="dir-stats"><b>6</b> running · <b>18</b> scored · <b>4</b> promising</span>
+      </div>
+      <div class="dir-bar-row">
+        <div class="dir-bar" style="flex:1"><i data-w="72"></i></div>
+        <span class="dir-pct tnum">72%</span>
+      </div>
+    </div>
+
+    <div class="dir">
+      <div class="dir-top">
+        <span class="dir-name">Managed IT &amp; Cloud</span>
+        <span class="dir-stats"><b>4</b> running · <b>12</b> scored · <b>2</b> promising</span>
+      </div>
+      <div class="dir-bar-row">
+        <div class="dir-bar" style="flex:1"><i data-w="48"></i></div>
+        <span class="dir-pct tnum">48%</span>
+      </div>
+    </div>
+
+    <div class="dir">
+      <div class="dir-top">
+        <span class="dir-name">Logistics &amp; Mobility Tech</span>
+        <span class="dir-stats"><b>3</b> running · <b>9</b> scored · <b>1</b> promising</span>
+      </div>
+      <div class="dir-bar-row">
+        <div class="dir-bar" style="flex:1"><i data-w="34"></i></div>
+        <span class="dir-pct tnum">34%</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- METHODOLOGY -->
+  <section id="methodology">
+    <div class="seclabel">
+      <span class="ix">04</span><span class="eyebrow">How every score is produced</span><span class="hr"></span>
+    </div>
+
+    <div class="tiers">
+      <div class="tier">
+        <div class="tier-ix">Tier 1</div>
+        <div class="tier-name">ICP fit</div>
+        <div class="tier-desc">Industry, role, seniority, geography and company size aligned to the target definition.</div>
+      </div>
+      <div class="tier">
+        <div class="tier-ix">Tier 2</div>
+        <div class="tier-name">Data accuracy</div>
+        <div class="tier-desc">Email and company data verified against live third-party APIs at scoring time.</div>
+      </div>
+      <div class="tier">
+        <div class="tier-ix">Tier 3</div>
+        <div class="tier-name">Attribute proof</div>
+        <div class="tier-desc">Required attributes confirmed through independent web evidence, not self-report.</div>
+      </div>
+      <div class="tier">
+        <div class="tier-ix">Tier 4</div>
+        <div class="tier-name">Intent signal</div>
+        <div class="tier-desc">Buying-intent evidence weighted and time-decayed toward the present cycle.</div>
+      </div>
+    </div>
+
+    <div class="prov">
+      <b>Subnet 71</b> · epoch <b>1428</b> · commit-reveal scored on-chain · benchmark
+      <b>5a9957…4e30</b> verifiable by any validator.
+    </div>
+  </section>
+
+  <footer>
+    <span class="foot-mark">Leadpoet Research Lab</span>
+    <span class="foot-meta">v2026.06 · Bittensor Subnet 71</span>
+  </footer>
+
+</div>
+
+<script>
+  const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  function animateCount(el, to, dur, decimals){
+    if(reduce){ el.textContent = decimals ? to.toFixed(decimals) : Math.round(to).toLocaleString(); return; }
+    const start = performance.now();
+    function frame(now){
+      const t = Math.min(1,(now-start)/dur);
+      const e = 1-Math.pow(1-t,3);
+      const v = to*e;
+      el.textContent = decimals ? v.toFixed(decimals) : Math.round(v).toLocaleString();
+      if(t<1) requestAnimationFrame(frame);
+      else el.textContent = decimals ? to.toFixed(decimals) : Math.round(to).toLocaleString();
+    }
+    requestAnimationFrame(frame);
+  }
+
+  // hero score
+  const score = document.getElementById('score');
+  animateCount(score, parseFloat(score.dataset.to), 1500, 1);
+
+  // kpis
+  document.querySelectorAll('.kpi-val').forEach((el,i)=>{
+    setTimeout(()=>animateCount(el, parseFloat(el.dataset.to), 1300, 0), 180 + i*110);
+  });
+
+  // sparkline
+  (function(){
+    const data = [61.2,62.0,63.5,64.1,66.3,65.8,67.9,69.0,68.4,70.5,71.2,72.4];
+    const W=480,H=120,pad=6,min=60,max=74;
+    const x = i => pad + (i/(data.length-1))*(W-pad*2);
+    const y = v => H-4 - ((v-min)/(max-min))*(H-22);
+    let d='';
+    data.forEach((v,i)=>{ d += (i?'L':'M')+x(i).toFixed(1)+' '+y(v).toFixed(1)+' '; });
+    const line = document.getElementById('sparkLine');
+    line.setAttribute('d', d.trim());
+    const area = 'M'+x(0).toFixed(1)+' '+(H-1)+' '+ d.replace(/^M/,'L').trim()+' L'+x(data.length-1).toFixed(1)+' '+(H-1)+' Z';
+    document.getElementById('sparkArea').setAttribute('d', area);
+    const dot = document.getElementById('sparkDot');
+    dot.setAttribute('cx', x(data.length-1)); dot.setAttribute('cy', y(data[data.length-1]));
+    if(reduce){ line.style.strokeDashoffset='0'; dot.style.opacity='1'; }
+    else{
+      const len = line.getTotalLength();
+      line.style.strokeDasharray = len; line.style.strokeDashoffset = len;
+      line.style.transition='stroke-dashoffset 1.6s cubic-bezier(.3,.7,.2,1)';
+      requestAnimationFrame(()=>{ line.style.strokeDashoffset='0'; });
+      setTimeout(()=>{ dot.style.transition='opacity .5s'; dot.style.opacity='1'; }, 1500);
+    }
+  })();
+
+  // bars + distribution via intersection
+  function fill(){
+    document.querySelectorAll('.sc-bar i, .dir-bar i').forEach(el=>{
+      el.style.width = Math.min(100,parseFloat(el.dataset.w))+'%';
+    });
+    const maxC = 17;
+    document.querySelectorAll('.dist-col').forEach(col=>{
+      const h = (parseFloat(col.dataset.h)/maxC)*100;
+      col.querySelector('.dist-bar').style.height = h+'%';
+    });
+  }
+  setTimeout(fill, 350);
+
+  // copy hash
+  const copyBtn = document.getElementById('copyBtn');
+  copyBtn.addEventListener('click', ()=>{
+    const full = '5a9957d2c41b8e0f7a3692c8be15d740a1f2c93e6b8047d5e29f1ac3b6e74e30';
+    navigator.clipboard && navigator.clipboard.writeText(full);
+    copyBtn.classList.add('copied');
+    copyBtn.innerHTML = '<i class="ti ti-check" aria-hidden="true"></i>';
+    setTimeout(()=>{ copyBtn.classList.remove('copied'); copyBtn.innerHTML='<i class="ti ti-copy" aria-hidden="true"></i>'; }, 1600);
+  });
+</script>
+</body>
+</html>

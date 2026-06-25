@@ -101,27 +101,42 @@ export function DashboardClient({ initialData, metagraph: initialMetagraph }: Da
   }, [activateTab])
 
   // -------------------------------------------------------------------
-  // Single, page-level "Synced X ago" indicator. Each tab calls
-  // `handleSync()` after a successful fetch so the masthead reflects
-  // the freshest data across whichever tab last polled. The brief pulse
-  // animation gives a subtle live-data confirmation on every refresh.
+  // Sliding tab underline. A single white indicator measures the active
+  // trigger and animates its left/width between tabs, instead of a static
+  // per-tab rule. Re-measures on tab change, container resize, and once
+  // web fonts settle (label widths shift after Space Grotesk loads).
   // -------------------------------------------------------------------
-  const [lastSync, setLastSync] = useState<number | null>(null)
-  const [syncPulse, setSyncPulse] = useState(false)
-  const syncPulseTimerRef = useRef<number | null>(null)
-  const handleSync = useCallback(() => {
-    setLastSync(Date.now())
-    setSyncPulse(true)
-    if (syncPulseTimerRef.current) {
-      window.clearTimeout(syncPulseTimerRef.current)
-    }
-    syncPulseTimerRef.current = window.setTimeout(() => setSyncPulse(false), 900)
-  }, [])
+  const navWrapRef = useRef<HTMLDivElement>(null)
+  const tabIndicatorRef = useRef<HTMLSpanElement>(null)
   useEffect(() => {
-    return () => {
-      if (syncPulseTimerRef.current) window.clearTimeout(syncPulseTimerRef.current)
+    const wrap = navWrapRef.current
+    const indicator = tabIndicatorRef.current
+    if (!wrap || !indicator) return
+    const position = () => {
+      const active = wrap.querySelector('[data-state="active"]') as HTMLElement | null
+      if (!active) {
+        indicator.style.opacity = '0'
+        return
+      }
+      indicator.style.opacity = '1'
+      indicator.style.left = `${active.offsetLeft}px`
+      indicator.style.width = `${active.offsetWidth}px`
     }
-  }, [])
+    // rAF so the measure runs after Radix has applied data-state and the
+    // browser has laid out the triggers (a synchronous call can race those).
+    const raf = requestAnimationFrame(position)
+    const ro = new ResizeObserver(position)
+    ro.observe(wrap)
+    window.addEventListener('resize', position)
+    if (typeof document !== 'undefined' && document.fonts?.ready) {
+      document.fonts.ready.then(position).catch(() => {})
+    }
+    return () => {
+      cancelAnimationFrame(raf)
+      ro.disconnect()
+      window.removeEventListener('resize', position)
+    }
+  }, [activeTab])
 
   // -------------------------------------------------------------------
   // Polling: every 60s, paused when the tab isn't visible so we
@@ -313,24 +328,26 @@ export function DashboardClient({ initialData, metagraph: initialMetagraph }: Da
   }
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="relative min-h-screen">
       {/* Main Content */}
-      <div className="max-w-[1500px] mx-auto px-5 py-4 md:py-6 overflow-auto">
-        <header className="relative mb-6 md:mb-8 pb-4 md:pb-5 border-b border-[var(--surface-border)]">
+      <div className="relative z-10 max-w-[1500px] mx-auto px-5 py-4 md:py-6 overflow-auto">
+        <header className="relative mb-7 md:mb-9 pt-6 md:pt-10 pb-6 md:pb-8 border-b border-[var(--line)]">
           <div className="flex items-center justify-between gap-4">
-            <h1 className="text-xl sm:text-2xl md:text-[26px] leading-none tracking-[-0.018em] text-[color:var(--text-primary)]">
-              <span className="font-semibold">Leadpoet</span>
-              <span className="ml-2 font-light text-[color:var(--text-secondary)]">Subnet Dashboard</span>
-            </h1>
-            <SyncedIndicator lastSync={lastSync} pulse={syncPulse} />
+            <span className="font-display text-[20px] md:text-[22px] font-semibold tracking-[-0.02em] text-[var(--white)]">
+              Leadpoet Subnet Dashboard
+            </span>
+            <span className="font-mono text-[10px] md:text-[10.5px] uppercase tracking-[0.18em] text-[var(--muted-2)] whitespace-nowrap">
+              SN&nbsp;71 · Bittensor
+            </span>
           </div>
         </header>
 
         {/* Tabs: gated by the public tab registry above. */}
         <Tabs value={activeTab} onValueChange={handleTabChange} className="space-y-4 md:space-y-6">
+          <div ref={navWrapRef} className="relative">
           <TabsList
             className={cn(
-              'flex w-full overflow-x-auto bg-slate-900/40 border border-slate-800/70 backdrop-blur-sm h-auto p-1 gap-1'
+              'flex w-full justify-start gap-8 sm:gap-10 overflow-x-auto no-scrollbar rounded-none border-0 border-b border-[var(--line)] bg-transparent h-auto p-0'
             )}
           >
             {VISIBLE_TABS.includes('research-lab') && (
@@ -388,6 +405,12 @@ export function DashboardClient({ initialData, metagraph: initialMetagraph }: Da
               />
             )}
           </TabsList>
+          <span
+            ref={tabIndicatorRef}
+            aria-hidden
+            className="pointer-events-none absolute bottom-[-0.5px] left-0 h-[1.5px] w-0 bg-[var(--white)] opacity-0 transition-[left,width,opacity] duration-300 ease-[cubic-bezier(0.16,1,0.3,1)]"
+          />
+          </div>
 
           {/* Launch tabs stay mounted so switching tabs does not flash loading states. */}
           {VISIBLE_TABS.includes('research-lab') && mountedTabs.has('research-lab') && (
@@ -397,7 +420,7 @@ export function DashboardClient({ initialData, metagraph: initialMetagraph }: Da
               className="data-[state=active]:animate-in data-[state=active]:fade-in-0 data-[state=active]:duration-300"
             >
               <ErrorBoundary label="ResearchLab">
-                <ResearchLab onSync={handleSync} />
+                <ResearchLab />
               </ErrorBoundary>
             </TabsContent>
           )}
@@ -409,7 +432,7 @@ export function DashboardClient({ initialData, metagraph: initialMetagraph }: Da
               className="data-[state=active]:animate-in data-[state=active]:fade-in-0 data-[state=active]:duration-300"
             >
               <ErrorBoundary label="Fulfillment">
-                <Fulfillment onSync={handleSync} />
+                <Fulfillment />
               </ErrorBoundary>
             </TabsContent>
           )}
@@ -421,7 +444,7 @@ export function DashboardClient({ initialData, metagraph: initialMetagraph }: Da
               className="data-[state=active]:animate-in data-[state=active]:fade-in-0 data-[state=active]:duration-300"
             >
               <ErrorBoundary label="ModelCompetition">
-                <ModelCompetition onSync={handleSync} />
+                <ModelCompetition />
               </ErrorBoundary>
             </TabsContent>
           )}
@@ -518,74 +541,24 @@ function DashboardTabTrigger({
     <TabsTrigger
       value={value}
       className={cn(
-        'flex-1 inline-flex items-center justify-center gap-1.5 rounded-md border border-transparent',
-        'h-10 px-2.5 text-xs font-medium whitespace-nowrap transition-all',
-        // Resting state
-        'text-slate-400 hover:text-slate-100 hover:bg-slate-800/40',
-        // Focus: subtle neutral ring so it doesn't clash with the gold
-        // active state (shift/tab focus used to render a gold-on-gold halo).
-        'focus:outline-none focus-visible:ring-1 focus-visible:ring-slate-500/50',
-        // Active state: gold accent
-        'data-[state=active]:bg-slate-900/70 data-[state=active]:text-gold',
-        'data-[state=active]:border-[rgba(201,169,110,0.30)]',
-        'data-[state=active]:shadow-[0_0_0_1px_rgba(201,169,110,0.10)]'
+        'relative flex-none inline-flex items-center justify-center rounded-none border-0 bg-transparent',
+        'h-10 px-1 font-mono text-[11px] uppercase tracking-[0.14em] whitespace-nowrap transition-colors duration-200',
+        // Resting state. The dark: variants are required so they win over the
+        // base trigger's own dark:text-muted-foreground — tailwind-merge keeps
+        // both variant groups, and the .dark-scoped one has higher specificity.
+        'text-[var(--muted-2)] dark:text-[var(--muted-2)] hover:bg-transparent',
+        'hover:text-[var(--platinum)] dark:hover:text-[var(--platinum)]',
+        'focus:outline-none focus-visible:text-[var(--platinum)]',
+        // Active: brightest white text only. The sliding indicator in the nav
+        // wrapper draws the underline. Kill the base trigger's active box,
+        // shadow, border and text override in BOTH light and dark.
+        'data-[state=active]:bg-transparent dark:data-[state=active]:bg-transparent',
+        'data-[state=active]:text-[var(--white)] dark:data-[state=active]:text-[var(--white)]',
+        'data-[state=active]:shadow-none data-[state=active]:border-transparent dark:data-[state=active]:border-transparent'
       )}
     >
       <span className="inline md:hidden">{shortLabel ?? label}</span>
       <span className="hidden md:inline">{label}</span>
     </TabsTrigger>
   )
-}
-
-/* ============================================================
- * SyncedIndicator. Page-level "Synced X ago" pill, anchored to
- * the masthead top-right. Each tab calls the parent's onSync
- * after a successful fetch so this stays accurate across tabs.
- * ============================================================ */
-function SyncedIndicator({
-  lastSync,
-  pulse,
-}: {
-  lastSync: number | null
-  pulse: boolean
-}) {
-  // Re-render once a minute so the relative time stays accurate
-  // without each tab having to push updates.
-  const [, setTick] = useState(0)
-  useEffect(() => {
-    const id = window.setInterval(() => setTick((n) => n + 1), 60_000)
-    return () => window.clearInterval(id)
-  }, [])
-
-  const label = formatRelativeShort(lastSync)
-  return (
-    <div
-      className="flex items-center gap-1.5 sm:gap-2 text-[10px] font-mono text-slate-500 shrink-0"
-      title="Auto-syncs every 60s"
-    >
-      <span
-        className={cn(
-          'inline-block w-1.5 h-1.5 rounded-full dot-gold',
-          pulse ? 'live-pulse' : 'opacity-70'
-        )}
-        aria-hidden
-      />
-      <span>
-        <span className="hidden sm:inline">Synced </span>
-        <span className="text-slate-300">{label}</span>
-      </span>
-    </div>
-  )
-}
-
-function formatRelativeShort(ts: number | null): string {
-  if (ts === null) return '—'
-  const diff = Math.max(0, Math.floor((Date.now() - ts) / 1000))
-  if (diff < 30) return 'just now'
-  if (diff < 60) return `${diff}s ago`
-  const m = Math.floor(diff / 60)
-  if (m < 60) return `${m}m ago`
-  const h = Math.floor(m / 60)
-  if (h < 24) return `${h}h ago`
-  return `${Math.floor(h / 24)}d ago`
 }

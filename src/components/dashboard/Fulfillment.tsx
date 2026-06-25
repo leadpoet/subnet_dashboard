@@ -312,7 +312,8 @@ function hotkeySwatch(hotkey: string): { hue: number; hex: string; initials: str
   }
   const hue = Math.abs(h) % 360
   const initials = hotkey.slice(2, 4).toUpperCase()
-  return { hue, hex: `hsl(${hue}, 22%, 58%)`, initials }
+  // Monochrome avatar: a single warm-neutral grey, no per-hotkey hue.
+  return { hue, hex: `hsl(40, 5%, 54%)`, initials }
 }
 
 // Smooth count-up animation for premium feel on stat displays
@@ -960,7 +961,7 @@ function RejectionReasonsContent({
                   className="h-full rounded-full"
                   style={{
                     width: `${pct}%`,
-                    background: `linear-gradient(90deg, rgba(168, 116, 111, ${0.6 + severity * 0.3}) 0%, rgba(196, 142, 137, ${0.5 + severity * 0.3}) 100%)`,
+                    background: `linear-gradient(90deg, rgba(236, 234, 230, ${0.26 + severity * 0.2}) 0%, rgba(236, 234, 230, ${0.16 + severity * 0.16}) 100%)`,
                     transition: 'width 320ms cubic-bezier(0.16, 1, 0.3, 1)',
                   }}
                 />
@@ -1703,7 +1704,7 @@ function PendingRequestBody({
             className="h-full"
             style={{
               width: `${fillPct}%`,
-              background: 'linear-gradient(90deg, #b89456 0%, #c9a96e 100%)',
+              background: 'linear-gradient(90deg, #4c4a45 0%, #ededec 100%)',
               transition: 'width 480ms cubic-bezier(0.16, 1, 0.3, 1)',
             }}
           />
@@ -1948,11 +1949,9 @@ function MinerDetailDialog({
               <div
                 className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold text-slate-950 shadow-lg"
                 style={{
-                  // Muted dual-stop gradient derived from the hotkey hue but kept at
-                  // 22% saturation so each avatar reads as a chromatic neutral rather
-                  // than a vivid swatch.
-                  background: `linear-gradient(135deg, hsl(${swatch.hue}, 22%, 66%), hsl(${swatch.hue}, 22%, 46%))`,
-                  boxShadow: `0 0 0 1px hsl(${swatch.hue}, 22%, 58%, 0.35), 0 8px 24px -8px hsl(${swatch.hue}, 22%, 38%, 0.45)`,
+                  // Monochrome avatar: warm-neutral grey, no per-hotkey hue.
+                  background: `linear-gradient(135deg, hsl(40, 5%, 60%), hsl(40, 5%, 42%))`,
+                  boxShadow: `0 0 0 1px hsl(40, 5%, 54%, 0.35), 0 8px 24px -8px hsl(40, 5%, 34%, 0.45)`,
                 }}
                 aria-hidden
               >

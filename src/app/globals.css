@@ -46,6 +46,25 @@
   --radius-4xl: calc(var(--radius) + 16px);
 }
 
+@theme {
+  /* Remap the slate palette to a warm platinum-neutral ramp so every
+     existing `slate-*` utility across the app reads warm and on-system,
+     coherent with the near-black canvas — without editing each file.
+     Combined with the gold→monochrome repoint at the bottom of this file,
+     this carries the whole dashboard onto the platinum system. */
+  --color-slate-50:  #f6f4ef;
+  --color-slate-100: #ededec;
+  --color-slate-200: #d6d4cd;
+  --color-slate-300: #b8b6b0;
+  --color-slate-400: #8a8a86;
+  --color-slate-500: #6c6b66;
+  --color-slate-600: #4c4a45;
+  --color-slate-700: #34322e;
+  --color-slate-800: #232120;
+  --color-slate-900: #131210;
+  --color-slate-950: #0c0b0a;
+}
+
 :root {
   --radius: 0.625rem;
   --background: oklch(1 0 0);
@@ -403,4 +422,122 @@ button:focus-visible,
   *::-webkit-scrollbar {
     display: none;
   }
+}
+
+/* =================================================================
+ * PLATINUM MONOCHROME — the dashboard design system.
+ *
+ * Hierarchy is carried by a warm brightness ladder, never by hue.
+ * A single near-white accent (#e8f0ff) is rationed to the few
+ * elements that matter (the live dot, the active nav, the one number
+ * that counts, the top row); everything else is warm-neutral grey.
+ * No gold, amber, or any saturated chroma.
+ *
+ * This block is intentionally LAST so it supersedes the legacy warm
+ * tokens and gold utility classes above while components are migrated
+ * onto the new variables — nothing renders gold even before its
+ * component is rewritten.
+ * ================================================================= */
+:root {
+  --canvas: #0a0908;
+  --canvas-2: #0d0c0a;
+  --line: rgba(236, 234, 230, 0.07);
+  --line-2: rgba(236, 234, 230, 0.12);
+  --line-3: rgba(236, 234, 230, 0.18);
+  --white: #e8f0ff;
+  --platinum: #ededec;
+  --muted: #8a8a86;
+  --muted-2: #6c6b66;
+  --faint: #525049;
+
+  /* Repoint legacy accent tokens to the monochrome ladder. */
+  --brand: #e8f0ff;
+  --brand-soft: rgba(232, 240, 255, 0.10);
+  --brand-strong: #ededec;
+  --accent-pending: #8a8a86;
+  --accent-completed: #ededec;
+  --accent-positive: #e8f0ff;
+  --accent-negative: #8a8a86;
+  --accent-top: #ffffff;
+  --surface-base: #0a0908;
+  --surface: #0d0c0a;
+  --surface-elevated: #141318;
+  --surface-border: var(--line);
+  --surface-border-strong: var(--line-2);
+  --text-primary: #ededec;
+  --text-secondary: #8a8a86;
+  --text-tertiary: #6c6b66;
+}
+
+.dark {
+  --background: #0a0908;
+  --foreground: #ededec;
+}
+
+body {
+  background: var(--canvas);
+}
+
+/* Subtle single-hue depth wash behind the app, barely perceptible.
+   The page shell is transparent so this shows through. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background: radial-gradient(115% 75% at 50% -12%, rgba(232, 240, 255, 0.030), transparent 58%);
+}
+
+/* Display face (Space Grotesk) for headings and large numerals. */
+.font-display { font-family: var(--font-display), 'Space Grotesk', sans-serif; }
+
+/* Monochrome repoint of the legacy semantic utilities, so any
+   not-yet-migrated component renders on-system instead of gold. */
+.text-gold        { color: var(--white); }
+.text-gold-bright { color: #ffffff; }
+.text-cream       { color: var(--platinum); }
+.text-amber-warm  { color: var(--muted); }
+.text-burgundy    { color: var(--muted); }
+
+.bg-gold-soft       { background-color: rgba(232, 240, 255, 0.08); }
+.bg-gold-tint       { background-color: rgba(232, 240, 255, 0.14); }
+.bg-amber-warm-soft { background-color: rgba(236, 234, 230, 0.06); }
+.bg-cream-soft      { background-color: rgba(236, 234, 230, 0.06); }
+.bg-cream-tint      { background-color: rgba(236, 234, 230, 0.12); }
+.bg-burgundy-soft   { background-color: rgba(236, 234, 230, 0.05); }
+
+.border-gold-soft       { border-color: var(--line-2); }
+.border-amber-warm-soft { border-color: var(--line-2); }
+.border-cream-soft      { border-color: var(--line-2); }
+.border-burgundy-soft   { border-color: var(--line-2); }
+.border-gold-strong     { border-color: var(--line-3); }
+
+.ring-gold-soft   { box-shadow: 0 0 0 1px rgba(232, 240, 255, 0.20); }
+.dot-gold  { background-color: var(--white); }
+.dot-amber { background-color: var(--muted); }
+.hover-bg-warm:hover { background-color: rgba(236, 234, 230, 0.04); }
+
+/* Tracked numbered section eyebrow (engineering-spec label). */
+.seclabel { display: flex; align-items: baseline; gap: 16px; }
+.seclabel .ix { font-family: var(--font-geist-mono), monospace; font-size: 10.5px; letter-spacing: 0.18em; color: var(--muted-2); flex: none; }
+.seclabel .stitle { font-family: var(--font-display), sans-serif; font-weight: 500; font-size: 16px; letter-spacing: -0.02em; color: var(--platinum); flex: none; }
+.seclabel .sline { flex: 1; height: 1px; background: var(--line); align-self: center; }
+.seclabel .ssub { font-family: var(--font-geist-mono), monospace; font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted-2); flex: none; }
+
+/* Soft draw-in for the live pulse ring used on activity dots. */
+@keyframes ring-pulse {
+  0% { transform: scale(1); opacity: 0.6; }
+  70% { transform: scale(2.6); opacity: 0; }
+  100% { opacity: 0; }
+}
+.live-ring { position: relative; }
+.live-ring::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 1px solid var(--white);
+  opacity: 0.6;
+  animation: ring-pulse 2.6s cubic-bezier(0.4, 0, 0.2, 1) infinite;
 }

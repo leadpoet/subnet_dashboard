@@ -37,19 +37,19 @@ const FAQ_DATA: FAQItem[] = [
     id: 'problem',
     question: 'What problem does Leadpoet solve?',
     answer:
-      "Cold outbound is in a rough place. The lead lists sales teams buy from incumbents are static, sold simultaneously to thousands of competitors, scored by a single proprietary algorithm nobody can audit, and stale by the time anyone reaches out. Conversion rates have collapsed accordingly.\n\nLeadpoet rebuilds the layer underneath. Lead generation is, at its core, a continuously evolving matching problem with measurable outcomes, and the protocol is built around exactly that fact. Instead of one vendor selling the same list to everyone, sales teams get leads from a live, open market that produces fresh results tailored to each request and verifies quality before delivery. The output gets better whether or not you're paying attention.",
+      "Sales runs on fragmented tools and stale, generic data. The lead lists teams buy are sold to thousands of competitors at once, scored by proprietary algorithms nobody can audit, and out of date before anyone reaches out. Worse, none of it compounds: every vendor is a static point solution that never really gets smarter.\n\nLeadpoet rebuilds the layer underneath. We're training a specialized sales intelligence, a sales brain, and the best autonomous sales agent built on top of it. Sales is, at its core, a continuously evolving matching problem with measurable outcomes, which makes it ideal to train against. An open market of contributors competes to produce better results, every output is verified before it ships, and each one makes the model sharper. Lead generation is where we start. The goal is the entire sales motion.",
   },
   {
     id: 'why-bittensor',
     question: 'Why Bittensor?',
     answer:
-      "Bittensor turns useful work into an open incentive market. Anyone can participate, and emissions can flow to the miners producing the best verified output. Lead quality is unusually measurable: did the contact exist, did the email send, did the prospect respond, did the deal close.\n\nThat makes sales intelligence a good fit for a subnet. Instead of trusting a single private vendor, buyers get a system where many independent miners are pushed toward fresher data, better fit, and stronger verification every cycle.",
+      "Bittensor turns useful work into an open incentive market: anyone can contribute, and emissions flow to whoever produces the best verified output. Sales is unusually measurable. Did the contact exist, did the email land, did the prospect reply, did the deal close. Because the work can be scored honestly, the incentive can't be gamed.\n\nThat makes it the right substrate for building a sales brain. Instead of one company training a model behind closed doors, an open network of contributors competes every cycle to push the agent's data, fit, and verification forward, and the same work generates the labeled data that trains the model. No single lab could assemble that breadth of real-world sales signal alone.",
   },
   {
     id: 'how-it-works',
     question: 'How does the subnet actually work?',
     answer:
-      "Fulfillment is where the subnet produces economic outputs. When a sales team submits a request, miners compete in real time to source leads that match the request's criteria: industry, role, geography, company size, intent signals, and any other filters that matter.\n\nValidators score and verify every submission, and only the leads that pass quality checks and show the strongest fit reach the sales team. That creates a live market around each request instead of a static list sold over and over again.",
+      "The subnet runs on two tracks. Fulfillment is where it produces economic output. When a sales team submits a request, miners compete in real time to source leads that match the request's criteria, including industry, role, geography, company size, and intent signals. Validators score and verify every submission, so only the leads that pass quality checks and fit best reach the sales team. That creates a live market around each request instead of a static list sold over and over again.\n\nThe Research Lab is the second track. Miners direct and fund automated research loops that work to improve Leadpoet's sales agent, with every improvement scored against a shared benchmark. The engine behind every request keeps getting better over time, and the same work generates data to train a state-of-the-art sales LLM.",
   },
   {
     id: 'fulfillment',
@@ -58,10 +58,16 @@ const FAQ_DATA: FAQItem[] = [
       "A sales team submits a request with the criteria they care about: industry, role, geography, headcount, and intent signals to prioritize. Miners source matching leads in real time, then validators score every submission on ICP fit, decision-maker accuracy, intent signal strength, and integrity.\n\nValidators also verify the underlying facts: company identity, contact existence, email deliverability, employment status, and intent scoring. Only leads that survive those checks reach the sales team, and the miners whose leads were chosen are compensated for them. Incumbents work the opposite way: they give you stale data from months ago and leave filtering and qualifying to you.",
   },
   {
+    id: 'research-lab',
+    question: 'How does the Research Lab work?',
+    answer:
+      "The Research Lab is where Leadpoet pushes the frontier of sales intelligence. Miners direct and fund automated research loops: they provide compute, choose a research direction, and run experiments that make Leadpoet's sales agent smarter. Every improvement is scored against a shared benchmark, so progress stays open, measurable, and relentless.\n\nThis is how the best sales agent in the world gets built, in the open. The agent sharpens with every loop, miners are rewarded for the gains they unlock, and each experiment leaves behind a growing, labeled corpus of real sales research. That corpus is the foundation for training state-of-the-art sales models. We improve what ships today and compound the data advantage behind everything we build next.",
+  },
+  {
     id: 'incentives',
     question: 'How does the incentive mechanism work?',
     answer:
-      "Miners earn when their leads meet every data quality and intent scoring check, then rank highest for a live request. Validators handle scoring and verification; the miners whose leads win are the ones who get compensated.\n\nThat keeps the incentive tied to real buyer value. Better fit, fresher contacts, stronger intent signals, and cleaner verification are what move the market.",
+      "Rewards follow verified value, on both tracks. In Fulfillment, miners earn when their leads pass every data-quality and intent check and rank highest for a live request. Validators handle scoring, and the leads that win are the ones that get paid. In the Research Lab, contributors are rewarded when their experiments measurably improve the sales agent against a shared benchmark.\n\nThat keeps every incentive pointed at the same goal: a sharper sales brain and a better agent. Fresher data, tighter fit, stronger signal, and real model gains are what move the market. And because outcomes are measured, the network can't reward anything that doesn't actually work.",
   },
   {
     id: 'alpha',
@@ -71,9 +77,9 @@ const FAQ_DATA: FAQItem[] = [
   },
   {
     id: 'beyond-sales',
-    question: "What's beyond sales lead generation?",
+    question: "What's beyond sales?",
     answer:
-      "Sales lead generation is the first deployment of the framework, not the ceiling. The same architecture of live request fulfillment and verifiable quality applies to any matching problem where the outcome can be measured.\n\nTalent acquisition. M&A sourcing. Customer-expansion intelligence, deciding which accounts to upsell and when. Procurement, matching suppliers to specifications. Investment research, real estate, partnership development. Each is a market with the same shape and the same brittle incumbents lead generation has.\n\nEach subsequent market plugs into the same trust infrastructure, the same validator network, and the same Alpha economy, deepening the flywheel for everything already on the subnet. Over time, other Bittensor subnets and applications will build directly on Leadpoet outputs, which puts Leadpoet in the position of being infrastructure for an entire class of intent-driven products, not just one of them.",
+      "First, the whole of sales. Lead generation is the entry point, but the same engine extends across the entire sales motion: sourcing, qualification, account expansion, timing, and outreach, all powered by the sales brain we're training and the agent built on it.\n\nBeyond sales, the architecture isn't sales-specific. Live request fulfillment, verifiable quality, and a model that learns from measured outcomes apply to any matching problem: talent acquisition, M&A sourcing, procurement, investment research, partnership development. Each is the same shape with the same brittle incumbents.\n\nEvery new domain plugs into the same trust infrastructure, validator network, and Alpha economy, deepening the flywheel for everything already on the subnet. Over time, other Bittensor subnets and applications build directly on Leadpoet's outputs, making Leadpoet infrastructure for an entire class of intent-driven products, not just one of them.",
   },
 ]
 
@@ -218,17 +224,17 @@ function FAQAccordionItem({
         onClick={onToggle}
         className={cn(
           'w-full flex items-center gap-3 px-4 py-3.5 text-left transition-colors duration-200',
-          'focus:outline-none focus-visible:bg-slate-800/50',
+          'focus:outline-none focus-visible:bg-[rgba(236,234,230,0.04)]',
           'motion-reduce:transition-none',
-          isOpen ? 'bg-slate-800/40' : 'hover-bg-warm'
+          isOpen ? 'bg-[rgba(232,240,255,0.03)]' : 'hover-bg-warm'
         )}
       >
         <span
           className={cn(
             'flex items-center justify-center w-6 h-6 rounded-md flex-shrink-0 transition-colors duration-200 motion-reduce:transition-none',
             isOpen
-              ? 'bg-gold-soft text-gold'
-              : 'bg-slate-900/60 text-slate-500 group-hover:text-slate-300'
+              ? 'bg-[rgba(232,240,255,0.1)] text-[var(--white)]'
+              : 'bg-[rgba(236,234,230,0.04)] text-[var(--muted-2)] group-hover:text-[var(--muted)]'
           )}
           aria-hidden
         >
@@ -243,7 +249,7 @@ function FAQAccordionItem({
         <span
           className={cn(
             'flex-1 text-[14px] leading-snug transition-colors duration-200 min-w-0',
-            isOpen ? 'text-slate-100 font-medium' : 'text-slate-200 group-hover:text-slate-100'
+            isOpen ? 'text-[var(--white)] font-medium' : 'text-[var(--platinum)] group-hover:text-[var(--white)]'
           )}
         >
           {item.question}
@@ -298,7 +304,7 @@ function Sidebar() {
           </span>
         </header>
         <div className="divide-y divide-slate-800/60">
-          <SidebarLink href="https://github.com/leadpoet">
+          <SidebarLink href="https://github.com/leadpoet/leadpoet">
             GitHub
           </SidebarLink>
           <SidebarLink href="https://leadpoet.com">

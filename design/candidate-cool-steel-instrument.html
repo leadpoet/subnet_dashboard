@@ -1,0 +1,598 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Leadpoet — Research Lab</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+  :root{
+    --canvas:#08090b;
+    --surface:#0d0f12;
+    --surface-2:#101317;
+    --line:rgba(168,199,214,.085);
+    --line-strong:rgba(168,199,214,.16);
+    --ink:#e8ecef;
+    --ink-2:#aab3bb;
+    --ink-3:#6f7780;
+    --ink-4:#4b5258;
+    --ice:#a8c7d6;
+    --ice-dim:#7e98a6;
+    --ice-soft:rgba(168,199,214,.12);
+    --ice-line:rgba(168,199,214,.34);
+    --good:#9db4c0;
+    --warn:#8d949a;
+    --null:#5b6168;
+    --mono:'IBM Plex Mono',ui-monospace,monospace;
+    --disp:'Space Grotesk','Inter',system-ui,sans-serif;
+    --maxw:1180px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+  body{
+    background:var(--canvas);
+    color:var(--ink);
+    font-family:var(--disp);
+    font-feature-settings:"tnum" 1,"cv01" 1;
+    line-height:1.5;
+    overflow-x:hidden;
+    position:relative;
+  }
+  body::before{
+    content:"";position:fixed;inset:0;pointer-events:none;z-index:0;
+    background:radial-gradient(120% 80% at 26% -8%,rgba(168,199,214,.05),transparent 60%);
+  }
+  .wrap{position:relative;z-index:1;max-width:var(--maxw);margin:0 auto;padding:0 40px}
+  .mono{font-family:var(--mono)}
+  .eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:.22em;text-transform:uppercase;color:var(--ink-3);font-weight:500}
+  .tnum{font-variant-numeric:tabular-nums}
+  .hr{height:1px;background:var(--line);width:100%}
+  a{color:inherit;text-decoration:none}
+
+  /* ---------- masthead ---------- */
+  .mast{display:flex;align-items:center;justify-content:space-between;padding:26px 0 22px;border-bottom:1px solid var(--line)}
+  .brand{display:flex;align-items:baseline;gap:14px}
+  .wordmark{font-family:var(--disp);font-weight:600;font-size:18px;letter-spacing:-.01em;color:var(--ink)}
+  .brand-sub{font-family:var(--mono);font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-3)}
+  .mast-right{display:flex;align-items:center;gap:18px}
+  .chip{font-family:var(--mono);font-size:11px;letter-spacing:.1em;color:var(--ink-2);border:1px solid var(--line-strong);border-radius:5px;padding:6px 11px;display:flex;align-items:center;gap:8px}
+  .chip .slash{color:var(--ink-4)}
+  .sync{display:flex;align-items:center;gap:9px;font-family:var(--mono);font-size:11px;letter-spacing:.08em;color:var(--ink-2)}
+  .dot{width:7px;height:7px;border-radius:50%;background:var(--ice);position:relative;flex:none}
+  .dot::after{content:"";position:absolute;inset:-4px;border-radius:50%;border:1px solid var(--ice);opacity:0;animation:pulse 2.6s ease-out infinite}
+  @keyframes pulse{0%{transform:scale(.6);opacity:.7}80%,100%{transform:scale(2.1);opacity:0}}
+
+  /* ---------- nav ---------- */
+  nav{display:flex;gap:2px;padding:18px 0 0}
+  .tab{font-family:var(--mono);font-size:12px;letter-spacing:.04em;color:var(--ink-3);padding:9px 16px;border-radius:6px;position:relative;transition:color .18s}
+  .tab:hover{color:var(--ink-2)}
+  .tab.on{color:var(--ink);background:var(--surface);border:1px solid var(--line-strong)}
+  .tab.on::after{content:"";position:absolute;left:16px;right:16px;bottom:-1px;height:1px;background:var(--ice);opacity:.55}
+
+  /* ---------- hero ---------- */
+  .hero{padding:64px 0 56px;border-bottom:1px solid var(--line)}
+  .hero-grid{display:grid;grid-template-columns:1.05fr .95fr;gap:60px;align-items:end}
+  .hero h1{font-family:var(--disp);font-weight:500;font-size:38px;line-height:1.08;letter-spacing:-.025em;color:var(--ink);max-width:14ch;margin:20px 0 24px}
+  .narrative{font-size:14.5px;line-height:1.62;color:var(--ink-2);max-width:52ch;font-family:var(--disp);font-weight:400}
+  .narrative b{color:var(--ink);font-weight:500}
+  .score-block{display:flex;flex-direction:column;align-items:flex-end;text-align:right}
+  .score-row{display:flex;align-items:baseline;gap:8px}
+  .score{font-family:var(--disp);font-weight:600;font-size:120px;line-height:.84;letter-spacing:-.045em;color:var(--ice);font-variant-numeric:tabular-nums}
+  .score-max{font-family:var(--mono);font-size:22px;color:var(--ink-4);font-weight:400}
+  .score-meta{display:flex;align-items:center;gap:14px;margin-top:22px}
+  .band{font-family:var(--mono);font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink);border:1px solid var(--ice-line);border-radius:5px;padding:5px 11px;background:var(--ice-soft)}
+  .delta{font-family:var(--mono);font-size:13px;letter-spacing:.02em;color:var(--good);font-variant-numeric:tabular-nums}
+  .delta span{color:var(--ink-3)}
+
+  .spark-wrap{margin-top:30px;width:100%}
+  .spark-head{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px}
+  .spark-cap{font-family:var(--mono);font-size:11px;letter-spacing:.08em;color:var(--ink-3);font-variant-numeric:tabular-nums}
+  svg.spark{width:100%;height:64px;display:block;overflow:visible}
+  .spark path.line{fill:none;stroke:var(--ice);stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:1;stroke-dashoffset:1}
+  .spark .area{fill:url(#sparkfill);opacity:0}
+
+  /* ---------- kpi rail ---------- */
+  .kpis{display:grid;grid-template-columns:repeat(4,1fr);border-bottom:1px solid var(--line)}
+  .kpi{padding:34px 28px 32px;border-right:1px solid var(--line);position:relative}
+  .kpi:first-child{padding-left:0}
+  .kpi:last-child{border-right:0;padding-right:0}
+  .kpi .lab{font-family:var(--mono);font-size:11px;letter-spacing:.13em;text-transform:uppercase;color:var(--ink-3);margin-bottom:16px}
+  .kpi .val{font-family:var(--disp);font-weight:500;font-size:42px;letter-spacing:-.03em;color:var(--ink);line-height:1;font-variant-numeric:tabular-nums}
+  .kpi .sub{font-family:var(--mono);font-size:11.5px;letter-spacing:.02em;color:var(--ink-3);margin-top:13px}
+
+  /* ---------- section scaffold ---------- */
+  section{padding:60px 0}
+  .sec-head{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:34px;gap:24px;flex-wrap:wrap}
+  .sec-title{font-family:var(--disp);font-weight:500;font-size:19px;letter-spacing:-.01em;color:var(--ink)}
+  .sec-meta{font-family:var(--mono);font-size:11.5px;letter-spacing:.06em;color:var(--ink-3)}
+
+  /* verifiable / hash bar */
+  .verify-bar{display:flex;align-items:center;gap:20px;flex-wrap:wrap;padding:16px 20px;border:1px solid var(--line-strong);border-radius:8px;background:var(--surface);margin-bottom:40px}
+  .verify-tag{display:flex;align-items:center;gap:8px;font-family:var(--mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-2)}
+  .verify-tag .tick{width:15px;height:15px;border:1px solid var(--ice-line);border-radius:4px;display:flex;align-items:center;justify-content:center;color:var(--ice);font-size:10px;line-height:1}
+  .hashpill{display:flex;align-items:center;gap:10px;font-family:var(--mono);font-size:12px;color:var(--ink-2);letter-spacing:.02em;margin-left:auto}
+  .hashpill .k{color:var(--ink-4)}
+  .copybtn{font-family:var(--mono);font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3);border:1px solid var(--line-strong);background:transparent;border-radius:5px;padding:5px 9px;cursor:pointer;transition:.16s}
+  .copybtn:hover{color:var(--ink);border-color:var(--ice-line)}
+  .copybtn.done{color:var(--ice);border-color:var(--ice-line)}
+  .methlink{font-family:var(--mono);font-size:11.5px;letter-spacing:.04em;color:var(--ink-2);border-bottom:1px solid var(--line-strong);padding-bottom:2px;transition:.16s}
+  .methlink:hover{color:var(--ice);border-color:var(--ice-line)}
+
+  /* distribution strip */
+  .dist{margin-bottom:48px}
+  .dist-cap{font-family:var(--mono);font-size:11px;letter-spacing:.13em;text-transform:uppercase;color:var(--ink-3);margin-bottom:16px}
+  .dist-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:3px;align-items:end;height:96px}
+  .dist-col{display:flex;flex-direction:column;justify-content:flex-end;height:100%;gap:0}
+  .dist-bar{width:100%;border-radius:3px 3px 0 0;background:var(--surface-2);border:1px solid var(--line-strong);border-bottom:0;transform-origin:bottom;transform:scaleY(0);transition:transform .9s cubic-bezier(.16,1,.3,1)}
+  .dist-bar.acc{background:var(--ice-soft);border-color:var(--ice-line)}
+  .dist-labels{display:grid;grid-template-columns:repeat(5,1fr);gap:3px;margin-top:12px}
+  .dist-l{display:flex;flex-direction:column;gap:5px}
+  .dist-l .n{font-family:var(--disp);font-weight:500;font-size:18px;color:var(--ink);font-variant-numeric:tabular-nums}
+  .dist-l.acc .n{color:var(--ice)}
+  .dist-l .b{font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3)}
+
+  /* leaderboard */
+  .lb{border-top:1px solid var(--line)}
+  .row{display:grid;grid-template-columns:46px 1fr 132px 150px;gap:24px;align-items:center;padding:22px 14px;border-bottom:1px solid var(--line);transition:transform .2s ease,background .2s ease;position:relative}
+  .row:hover{transform:translateY(-1px);background:linear-gradient(90deg,rgba(168,199,214,.04),transparent 70%)}
+  .row.top::before{content:"";position:absolute;left:0;top:0;bottom:0;width:2px;background:var(--ice);opacity:.7}
+  .rank{font-family:var(--mono);font-size:13px;color:var(--ink-4);font-variant-numeric:tabular-nums;letter-spacing:.04em}
+  .row.top .rank{color:var(--ice)}
+  .lb-title{font-family:var(--disp);font-weight:500;font-size:15px;color:var(--ink);letter-spacing:-.005em;line-height:1.3}
+  .row.top .lb-title{font-size:16px}
+  .lb-tags{font-family:var(--mono);font-size:11px;letter-spacing:.03em;color:var(--ink-3);margin-top:7px}
+  .lb-tags .sep{color:var(--ink-4);margin:0 7px}
+  .lb-signal{font-family:var(--mono);font-size:11px;letter-spacing:.02em;color:var(--ink-2);margin-top:9px;display:flex;align-items:center;gap:7px}
+  .lb-signal .ic{color:var(--ice-dim);font-size:10px}
+  .lb-score-wrap{display:flex;flex-direction:column;gap:9px}
+  .lb-score{font-family:var(--disp);font-weight:600;font-size:24px;letter-spacing:-.02em;color:var(--ink);font-variant-numeric:tabular-nums;line-height:1}
+  .row.top .lb-score{color:var(--ice);font-size:27px}
+  .bar{height:3px;background:var(--surface-2);border-radius:2px;overflow:hidden}
+  .bar i{display:block;height:100%;background:var(--ink-3);border-radius:2px;width:0;transition:width 1s cubic-bezier(.16,1,.3,1)}
+  .row.top .bar i{background:var(--ice)}
+  .lb-co{font-family:var(--mono);font-size:11px;letter-spacing:.04em;color:var(--ink-3);text-align:right;font-variant-numeric:tabular-nums}
+  .lb-co b{color:var(--ink-2);font-weight:500}
+
+  /* live activity */
+  .live-label{display:inline-flex;align-items:center;gap:9px;font-family:var(--mono);font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--ice);border:1px solid var(--ice-line);background:var(--ice-soft);border-radius:5px;padding:6px 11px}
+  .act{display:grid;grid-template-columns:170px 1fr auto auto;gap:24px;align-items:center;padding:20px 14px;border-bottom:1px solid var(--line);transition:background .2s,transform .2s}
+  .act:first-of-type{border-top:1px solid var(--line)}
+  .act:hover{transform:translateY(-1px);background:linear-gradient(90deg,rgba(168,199,214,.035),transparent 70%)}
+  .act .hot{font-family:var(--mono);font-size:13px;letter-spacing:.04em;color:var(--ink-2)}
+  .act .area{font-family:var(--disp);font-weight:500;font-size:14px;color:var(--ink)}
+  .act .meta{font-family:var(--mono);font-size:11px;letter-spacing:.03em;color:var(--ink-3);text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+  .act .meta b{color:var(--ink-2);font-weight:500}
+  .obadge{font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;padding:5px 10px;border-radius:5px;border:1px solid var(--line-strong);white-space:nowrap}
+  .obadge.promoted{color:var(--ice);border-color:var(--ice-line);background:var(--ice-soft)}
+  .obadge.promising{color:var(--ink-2);border-color:var(--line-strong)}
+  .obadge.nogain{color:var(--ink-4);border-color:var(--line)}
+
+  /* research directions */
+  .dirs{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--line);border:1px solid var(--line)}
+  .dir{background:var(--canvas);padding:30px 26px}
+  .dir h3{font-family:var(--disp);font-weight:500;font-size:15px;color:var(--ink);letter-spacing:-.005em;margin-bottom:22px;line-height:1.3}
+  .dir-stats{display:flex;gap:26px;margin-bottom:24px}
+  .ds{display:flex;flex-direction:column;gap:6px}
+  .ds .n{font-family:var(--disp);font-weight:500;font-size:24px;color:var(--ink);font-variant-numeric:tabular-nums;line-height:1}
+  .ds .l{font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3)}
+  .ds.acc .n{color:var(--ice)}
+  .prog{height:3px;background:var(--surface-2);border-radius:2px;overflow:hidden;margin-bottom:10px}
+  .prog i{display:block;height:100%;background:var(--ice-dim);border-radius:2px;width:0;transition:width 1.1s cubic-bezier(.16,1,.3,1)}
+  .prog-cap{font-family:var(--mono);font-size:10.5px;letter-spacing:.08em;color:var(--ink-3);font-variant-numeric:tabular-nums}
+
+  /* methodology footer */
+  .meth{padding:64px 0 80px;border-top:1px solid var(--line)}
+  .tiers{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--line);border:1px solid var(--line);margin:36px 0 40px}
+  .tier{background:var(--canvas);padding:28px 24px;position:relative}
+  .tier .tn{font-family:var(--mono);font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--ice-dim);margin-bottom:16px}
+  .tier h4{font-family:var(--disp);font-weight:500;font-size:15px;color:var(--ink);margin-bottom:11px;letter-spacing:-.005em}
+  .tier p{font-family:var(--mono);font-size:11.5px;line-height:1.65;letter-spacing:.01em;color:var(--ink-3)}
+  .prov{font-family:var(--mono);font-size:11.5px;line-height:1.7;letter-spacing:.04em;color:var(--ink-3);display:flex;flex-wrap:wrap;gap:0 9px;align-items:center}
+  .prov .sep{color:var(--ink-4)}
+  .prov b{color:var(--ink-2);font-weight:500}
+  .prov .h{color:var(--ice-dim)}
+
+  /* count-up fade */
+  .cu{opacity:0;transform:translateY(8px);transition:opacity .7s ease,transform .7s ease}
+  .cu.in{opacity:1;transform:none}
+
+  @media(max-width:920px){
+    .wrap{padding:0 22px}
+    .hero-grid{grid-template-columns:1fr;gap:40px}
+    .score-block{align-items:flex-start;text-align:left}
+    .score{font-size:88px}
+    .kpis,.dirs,.tiers{grid-template-columns:repeat(2,1fr)}
+    .kpi{border-right:1px solid var(--line);padding:26px 20px}
+    .kpi:nth-child(2){border-right:0}
+    .row{grid-template-columns:34px 1fr;gap:14px}
+    .lb-score-wrap,.lb-co{grid-column:2}
+    .act{grid-template-columns:1fr;gap:10px}
+    .act .meta{text-align:left}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="mast">
+    <div class="brand">
+      <span class="wordmark">Leadpoet</span>
+      <span class="brand-sub">Research Lab</span>
+    </div>
+    <div class="mast-right">
+      <span class="chip mono">Subnet 71 <span class="slash">/</span> Bittensor</span>
+      <span class="sync"><span class="dot"></span>Synced just now</span>
+    </div>
+  </header>
+
+  <nav>
+    <a class="tab on" href="#">Research Lab</a>
+    <a class="tab" href="#">Fulfillment</a>
+    <a class="tab" href="#">FAQ</a>
+  </nav>
+
+  <!-- HERO -->
+  <div class="hero">
+    <div class="hero-grid">
+      <div>
+        <div class="eyebrow">Current model benchmark <span style="color:var(--ink-4)">/</span> v2026.06</div>
+        <h1>Autonomous lead research, scored in the open.</h1>
+        <p class="narrative">Evaluated on a rolling <b>7-day window</b> of live client ICPs, produced by a <b>four-tier validator pipeline</b>, and independently verifiable from the benchmark hash.</p>
+        <div class="spark-wrap">
+          <div class="spark-head">
+            <span class="spark-cap">12-cycle trend</span>
+            <span class="spark-cap">61.2 → 72.4 · next benchmark in 2d 14h</span>
+          </div>
+          <svg class="spark" viewBox="0 0 560 64" preserveAspectRatio="none" aria-label="Twelve-cycle benchmark trend, rising from 61.2 to 72.4">
+            <defs>
+              <linearGradient id="sparkfill" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0" stop-color="#a8c7d6" stop-opacity=".16"/>
+                <stop offset="1" stop-color="#a8c7d6" stop-opacity="0"/>
+              </linearGradient>
+            </defs>
+            <path class="area" id="sparkArea"/>
+            <path class="line" id="sparkLine"/>
+          </svg>
+        </div>
+      </div>
+
+      <div class="score-block">
+        <div class="score-row">
+          <span class="score tnum" id="hero" data-target="72.4" data-dec="1">0.0</span>
+          <span class="score-max">/100</span>
+        </div>
+        <div class="score-meta">
+          <span class="band">Strong</span>
+          <span class="delta tnum">+3.1 <span>since last cycle</span></span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- KPI RAIL -->
+  <div class="kpis">
+    <div class="kpi">
+      <div class="lab">Active loops</div>
+      <div class="val tnum cu" data-target="18">0</div>
+      <div class="sub">research runs in progress</div>
+    </div>
+    <div class="kpi">
+      <div class="lab">Scored this cycle</div>
+      <div class="val tnum cu" data-target="142">0</div>
+      <div class="sub">+22% week over week</div>
+    </div>
+    <div class="kpi">
+      <div class="lab">Companies researched</div>
+      <div class="val tnum cu" data-target="3847" data-comma="1">0</div>
+      <div class="sub">all-time, verified</div>
+    </div>
+    <div class="kpi">
+      <div class="lab">Active contributors</div>
+      <div class="val tnum cu" data-target="9">0</div>
+      <div class="sub">running loops now</div>
+    </div>
+  </div>
+
+  <!-- BENCHMARK DETAIL -->
+  <section>
+    <div class="sec-head">
+      <div class="sec-title">Benchmark detail</div>
+      <div class="sec-meta">Jun 25, 2026 &nbsp;/&nbsp; rolling 7-day window</div>
+    </div>
+
+    <div class="verify-bar">
+      <span class="verify-tag"><span class="tick">✓</span>Verifiable</span>
+      <span class="hashpill"><span class="k">sha256</span><span id="hashval">5a9957…4e30</span>
+        <button class="copybtn" id="copy">Copy</button>
+      </span>
+      <a class="methlink" href="#methodology">Methodology ↗</a>
+    </div>
+
+    <div class="dist">
+      <div class="dist-cap">Score distribution · 50 ICPs</div>
+      <div class="dist-grid" id="distGrid">
+        <div class="dist-col"><div class="dist-bar" data-h="20"></div></div>
+        <div class="dist-col"><div class="dist-bar" data-h="42"></div></div>
+        <div class="dist-col"><div class="dist-bar" data-h="78"></div></div>
+        <div class="dist-col"><div class="dist-bar acc" data-h="88"></div></div>
+        <div class="dist-col"><div class="dist-bar" data-h="48"></div></div>
+      </div>
+      <div class="dist-labels">
+        <div class="dist-l"><span class="n tnum">3</span><span class="b">Zero</span></div>
+        <div class="dist-l"><span class="n tnum">7</span><span class="b">Weak</span></div>
+        <div class="dist-l"><span class="n tnum">15</span><span class="b">Fair</span></div>
+        <div class="dist-l acc"><span class="n tnum">17</span><span class="b">Strong</span></div>
+        <div class="dist-l"><span class="n tnum">8</span><span class="b">Frontier</span></div>
+      </div>
+    </div>
+
+    <div class="lb">
+      <div class="row top">
+        <div class="rank">01</div>
+        <div>
+          <div class="lb-title">Data &amp; Analytics — Cloud Data Platforms</div>
+          <div class="lb-tags">BI &amp; analytics tooling<span class="sep">·</span>United States<span class="sep">·</span>200–500<span class="sep">·</span>Data leaders</div>
+          <div class="lb-signal"><span class="ic">◆</span>Launched or announced a new product</div>
+        </div>
+        <div class="lb-score-wrap">
+          <span class="lb-score tnum">88.2</span>
+          <span class="bar"><i data-w="88"></i></span>
+        </div>
+        <div class="lb-co"><b>34</b> companies</div>
+      </div>
+
+      <div class="row">
+        <div class="rank">02</div>
+        <div>
+          <div class="lb-title">Information Technology — Managed IT &amp; Cloud Infrastructure</div>
+          <div class="lb-tags">United States<span class="sep">·</span>200–500<span class="sep">·</span>IT directors</div>
+          <div class="lb-signal"><span class="ic">◆</span>Expanded to new markets</div>
+        </div>
+        <div class="lb-score-wrap">
+          <span class="lb-score tnum">81.5</span>
+          <span class="bar"><i data-w="81"></i></span>
+        </div>
+        <div class="lb-co"><b>28</b> companies</div>
+      </div>
+
+      <div class="row">
+        <div class="rank">03</div>
+        <div>
+          <div class="lb-title">Professional Services — Management &amp; Technology Consulting</div>
+          <div class="lb-tags">United States<span class="sep">·</span>500–1000<span class="sep">·</span>Ops VPs</div>
+          <div class="lb-signal"><span class="ic">◆</span>Acquired another company</div>
+        </div>
+        <div class="lb-score-wrap">
+          <span class="lb-score tnum">76.0</span>
+          <span class="bar"><i data-w="76"></i></span>
+        </div>
+        <div class="lb-co"><b>21</b> companies</div>
+      </div>
+
+      <div class="row">
+        <div class="rank">04</div>
+        <div>
+          <div class="lb-title">Transportation — Logistics &amp; Mobility Technology</div>
+          <div class="lb-tags">United States<span class="sep">·</span>10–50<span class="sep">·</span>Founders</div>
+          <div class="lb-signal"><span class="ic">◆</span>Recent facility or store opening</div>
+        </div>
+        <div class="lb-score-wrap">
+          <span class="lb-score tnum">69.3</span>
+          <span class="bar"><i data-w="69"></i></span>
+        </div>
+        <div class="lb-co"><b>12</b> companies</div>
+      </div>
+
+      <div class="row">
+        <div class="rank">05</div>
+        <div>
+          <div class="lb-title">Information Technology — IT Services &amp; Consulting</div>
+          <div class="lb-tags">United States<span class="sep">·</span>50–200<span class="sep">·</span>CTOs</div>
+          <div class="lb-signal"><span class="ic">◆</span>Just closed a funding round</div>
+        </div>
+        <div class="lb-score-wrap">
+          <span class="lb-score tnum">64.8</span>
+          <span class="bar"><i data-w="64"></i></span>
+        </div>
+        <div class="lb-co"><b>9</b> companies</div>
+      </div>
+    </div>
+  </section>
+
+  <div class="hr"></div>
+
+  <!-- LIVE ACTIVITY -->
+  <section>
+    <div class="sec-head">
+      <div class="sec-title">Live research activity</div>
+      <span class="live-label"><span class="dot"></span>18 running</span>
+    </div>
+
+    <div class="act">
+      <div class="hot mono">5F3a…9kQ2</div>
+      <div class="area">Cloud Data Platforms</div>
+      <div><span class="obadge promoted">Promoted</span></div>
+      <div class="meta"><b>240</b> candidates&nbsp;·&nbsp;<b>31</b> scored&nbsp;·&nbsp;4m ago</div>
+    </div>
+    <div class="act">
+      <div class="hot mono">5Gw7…pL4x</div>
+      <div class="area">Logistics Tech</div>
+      <div><span class="obadge promising">Promising</span></div>
+      <div class="meta"><b>180</b> candidates&nbsp;·&nbsp;<b>22</b> scored&nbsp;·&nbsp;11m ago</div>
+    </div>
+    <div class="act">
+      <div class="hot mono">5Dn2…rT8v</div>
+      <div class="area">IT Services</div>
+      <div><span class="obadge nogain">No gain</span></div>
+      <div class="meta"><b>95</b> candidates&nbsp;·&nbsp;<b>12</b> scored&nbsp;·&nbsp;26m ago</div>
+    </div>
+  </section>
+
+  <div class="hr"></div>
+
+  <!-- RESEARCH DIRECTIONS -->
+  <section>
+    <div class="sec-head">
+      <div class="sec-title">Research directions</div>
+      <div class="sec-meta">3 active lines</div>
+    </div>
+    <div class="dirs">
+      <div class="dir">
+        <h3>Cloud Data Platforms</h3>
+        <div class="dir-stats">
+          <div class="ds"><span class="n tnum">6</span><span class="l">Running</span></div>
+          <div class="ds"><span class="n tnum">18</span><span class="l">Scored</span></div>
+          <div class="ds acc"><span class="n tnum">4</span><span class="l">Promising</span></div>
+        </div>
+        <div class="prog"><i data-w="72"></i></div>
+        <div class="prog-cap">72% of window evaluated</div>
+      </div>
+      <div class="dir">
+        <h3>Managed IT &amp; Cloud</h3>
+        <div class="dir-stats">
+          <div class="ds"><span class="n tnum">4</span><span class="l">Running</span></div>
+          <div class="ds"><span class="n tnum">12</span><span class="l">Scored</span></div>
+          <div class="ds acc"><span class="n tnum">2</span><span class="l">Promising</span></div>
+        </div>
+        <div class="prog"><i data-w="48"></i></div>
+        <div class="prog-cap">48% of window evaluated</div>
+      </div>
+      <div class="dir">
+        <h3>Logistics &amp; Mobility Tech</h3>
+        <div class="dir-stats">
+          <div class="ds"><span class="n tnum">3</span><span class="l">Running</span></div>
+          <div class="ds"><span class="n tnum">9</span><span class="l">Scored</span></div>
+          <div class="ds acc"><span class="n tnum">1</span><span class="l">Promising</span></div>
+        </div>
+        <div class="prog"><i data-w="34"></i></div>
+        <div class="prog-cap">34% of window evaluated</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- METHODOLOGY -->
+  <div class="meth" id="methodology">
+    <div class="sec-head">
+      <div class="sec-title">How every score is produced</div>
+      <div class="sec-meta">Four-tier validator pipeline</div>
+    </div>
+    <div class="tiers">
+      <div class="tier">
+        <div class="tn">Tier 1</div>
+        <h4>ICP fit</h4>
+        <p>Industry, role, seniority, geography and company size matched against the client specification.</p>
+      </div>
+      <div class="tier">
+        <div class="tn">Tier 2</div>
+        <h4>Data accuracy</h4>
+        <p>Email and company data verified against live APIs at evaluation time.</p>
+      </div>
+      <div class="tier">
+        <div class="tn">Tier 3</div>
+        <h4>Attribute proof</h4>
+        <p>Required attributes confirmed via independent web evidence, not self-report.</p>
+      </div>
+      <div class="tier">
+        <div class="tn">Tier 4</div>
+        <h4>Intent signal</h4>
+        <p>Buying-intent evidence scored and time-decayed toward the present cycle.</p>
+      </div>
+    </div>
+    <div class="prov">
+      <b>Subnet 71</b><span class="sep">/</span>epoch <b>1428</b><span class="sep">/</span>commit-reveal scored on-chain<span class="sep">/</span>benchmark <span class="h">5a9957…4e30</span><span class="sep">/</span>verifiable by any validator
+    </div>
+  </div>
+
+</div>
+
+<script>
+  // ---- count-up (hero + KPIs) ----
+  function easeOut(t){return 1-Math.pow(1-t,3)}
+  function countUp(el,target,dur,dec,comma){
+    var start=performance.now();
+    function frame(now){
+      var p=Math.min((now-start)/dur,1),v=easeOut(p)*target;
+      if(dec){el.textContent=v.toFixed(dec)}
+      else if(comma){el.textContent=Math.round(v).toLocaleString('en-US')}
+      else{el.textContent=Math.round(v)}
+      if(p<1)requestAnimationFrame(frame);
+    }
+    requestAnimationFrame(frame);
+  }
+
+  // ---- sparkline geometry (12 cycles, 61.2 -> 72.4) ----
+  (function(){
+    var data=[61.2,62.8,62.1,64.5,66.0,65.3,67.8,69.1,68.4,70.6,71.2,72.4];
+    var W=560,H=64,pad=4,min=60,max=74;
+    var pts=data.map(function(d,i){
+      var x=pad+(W-pad*2)*(i/(data.length-1));
+      var y=H-pad-((d-min)/(max-min))*(H-pad*2);
+      return [x,y];
+    });
+    var line='M'+pts.map(function(p){return p[0].toFixed(1)+' '+p[1].toFixed(1)}).join(' L');
+    var area=line+' L'+pts[pts.length-1][0].toFixed(1)+' '+H+' L'+pts[0][0].toFixed(1)+' '+H+' Z';
+    var lp=document.getElementById('sparkLine');
+    document.getElementById('sparkArea').setAttribute('d',area);
+    lp.setAttribute('d',line);
+    var len=lp.getTotalLength();
+    lp.style.strokeDasharray=len;lp.style.strokeDashoffset=len;
+    requestAnimationFrame(function(){
+      lp.style.transition='stroke-dashoffset 1.6s cubic-bezier(.16,1,.3,1)';
+      lp.style.strokeDashoffset=0;
+      setTimeout(function(){document.getElementById('sparkArea').style.transition='opacity 1s ease';document.getElementById('sparkArea').style.opacity=1},500);
+    });
+  })();
+
+  // ---- on-load orchestration ----
+  window.addEventListener('load',function(){
+    var hero=document.getElementById('hero');
+    countUp(hero,parseFloat(hero.dataset.target),1500,1,false);
+
+    // KPIs
+    var io=new IntersectionObserver(function(es){
+      es.forEach(function(e){
+        if(!e.isIntersecting)return;
+        var el=e.target;el.classList.add('in');
+        countUp(el,parseInt(el.dataset.target,10),1300,0,el.dataset.comma==='1');
+        io.unobserve(el);
+      });
+    },{threshold:.4});
+    document.querySelectorAll('.kpi .val').forEach(function(el){io.observe(el)});
+
+    // distribution bars
+    var dio=new IntersectionObserver(function(es){
+      es.forEach(function(e){
+        if(!e.isIntersecting)return;
+        document.querySelectorAll('.dist-bar').forEach(function(b,i){
+          setTimeout(function(){b.style.transform='scaleY('+(b.dataset.h/100)+')'},i*70);
+        });
+        dio.disconnect();
+      });
+    },{threshold:.3});
+    var dg=document.getElementById('distGrid');if(dg)dio.observe(dg);
+
+    // bars (leaderboard + progress)
+    var bio=new IntersectionObserver(function(es){
+      es.forEach(function(e){
+        if(!e.isIntersecting)return;
+        e.target.querySelectorAll('[data-w]').forEach(function(el,i){
+          setTimeout(function(){el.style.width=el.dataset.w+'%'},i*80);
+        });
+        bio.unobserve(e.target);
+      });
+    },{threshold:.25});
+    document.querySelectorAll('.lb,.dirs').forEach(function(el){bio.observe(el)});
+  });
+
+  // ---- copy hash ----
+  document.getElementById('copy').addEventListener('click',function(){
+    var btn=this;
+    var full='5a9957c1e0b48f2a7d3c9e61b2f04a8e5d7c33619a02fe48b1c6d90a4e30';
+    function done(){btn.textContent='Copied';btn.classList.add('done');setTimeout(function(){btn.textContent='Copy';btn.classList.remove('done')},1600);}
+    if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(full).then(done).catch(done);}else{done();}
+  });
+</script>
+</body>
+</html>
