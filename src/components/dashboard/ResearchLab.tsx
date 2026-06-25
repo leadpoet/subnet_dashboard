@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import {
   Activity,
   AlertCircle,
@@ -21,7 +21,6 @@ type ResearchLabData = {
     activeLoopCount: number
     scoredLoopCount: number
     promisingLoopCount: number
-    publicIcpCount: number
     totalBenchmarkIcpCount: number
   }
   fetchedAt: string
@@ -34,14 +33,8 @@ type BenchmarkReport = {
   aggregateScore: number
   aggregateScoreBand: string
   itemCount: number
-  publicIcpCount: number
-  privateHoldoutIcpCount: number
   scoreBandCounts: Record<string, number>
   failureCategoryCounts: Record<string, number>
-  visibilitySplit: {
-    public_count?: number
-    private_count?: number
-  }
   publicIcps: PublicIcp[]
   currentStatusAt: string | null
 }
@@ -122,11 +115,6 @@ export function ResearchLab({ onSync }: { onSync?: () => void } = {}) {
   }, [fetchData])
 
   const benchmark = data?.benchmark ?? null
-  const publicIcpAverage = useMemo(() => {
-    const icps = benchmark?.publicIcps ?? []
-    if (!icps.length) return 0
-    return icps.reduce((sum, row) => sum + numberOr(row.score, 0), 0) / icps.length
-  }, [benchmark])
 
   if (loading) return <ResearchLabLoading />
 
@@ -151,7 +139,7 @@ export function ResearchLab({ onSync }: { onSync?: () => void } = {}) {
             Research Lab
           </div>
           <h2 className="mt-2 text-2xl md:text-3xl font-semibold tracking-tight text-slate-100">
-            Private model benchmark and live research activity
+            Current model benchmark and live research activity
           </h2>
         </div>
         <div className="text-xs font-mono text-slate-500">
@@ -167,19 +155,19 @@ export function ResearchLab({ onSync }: { onSync?: () => void } = {}) {
           tone="gold"
         />
         <MetricPanel
-          label="Public ICP average"
-          value={benchmark ? formatScore(publicIcpAverage) : 'Pending'}
-          detail={`${benchmark?.publicIcpCount ?? 0} public ICPs shown`}
-        />
-        <MetricPanel
-          label="Private holdout"
-          value={`${benchmark?.privateHoldoutIcpCount ?? 0}`}
-          detail="ICPs kept hidden"
+          label="Benchmark ICPs"
+          value={`${benchmark?.itemCount ?? 0}`}
+          detail={benchmark ? 'Latest benchmark window' : 'No published benchmark'}
         />
         <MetricPanel
           label="Active loops"
           value={`${data?.stats.activeLoopCount ?? 0}`}
-          detail={`${data?.stats.scoredLoopCount ?? 0} scored recently`}
+          detail="Research runs in progress"
+        />
+        <MetricPanel
+          label="Scored loops"
+          value={`${data?.stats.scoredLoopCount ?? 0}`}
+          detail="Recently evaluated"
         />
       </section>
 
@@ -224,6 +212,7 @@ function MetricPanel({
 
 function BenchmarkPanel({ benchmark }: { benchmark: BenchmarkReport | null }) {
   const publicIcps = benchmark?.publicIcps ?? []
+  const hiddenIcpCount = Math.max(0, (benchmark?.itemCount ?? 0) - publicIcps.length)
 
   return (
     <div className="rounded-xl border border-slate-800/70 bg-slate-950/40 overflow-hidden">
@@ -245,22 +234,22 @@ function BenchmarkPanel({ benchmark }: { benchmark: BenchmarkReport | null }) {
       </div>
 
       {!benchmark ? (
-        <div className="p-6 text-sm text-slate-400">The first public Research Lab benchmark has not been published yet.</div>
+        <div className="p-6 text-sm text-slate-400">The first Research Lab benchmark has not been published yet.</div>
       ) : (
         <>
-          <div className="grid gap-3 border-b border-slate-800/70 p-4 md:grid-cols-3">
-            <CountBlock
-              label="Public ICPs"
-              value={benchmark.publicIcpCount}
-              detail="Exact ICP criteria and scores shown below"
-            />
-            <CountBlock
-              label="Private holdout"
-              value={benchmark.privateHoldoutIcpCount}
-              detail="Used in the total score, not displayed"
-            />
+          <div className="border-b border-slate-800/70 p-4">
             <div className="rounded-lg border border-slate-800/60 bg-slate-900/35 p-3">
-              <div className="text-[10px] uppercase tracking-[0.14em] text-slate-500">Failures</div>
+              <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+                <div>
+                  <div className="text-[10px] uppercase tracking-[0.14em] text-slate-500">Benchmark details</div>
+                  <div className="mt-2 text-sm text-slate-400">
+                    Visible rows include exact ICP criteria and model scores. Blurred rows are withheld.
+                  </div>
+                </div>
+                <div className="text-right text-xs text-slate-500">
+                  {benchmark.itemCount} total rows
+                </div>
+              </div>
               <div className="mt-2 flex flex-wrap gap-1.5">
                 {Object.entries(benchmark.failureCategoryCounts).slice(0, 4).map(([key, count]) => (
                   <Badge key={key} className="border-slate-700/70 bg-slate-900/60 text-slate-300">
@@ -277,28 +266,18 @@ function BenchmarkPanel({ benchmark }: { benchmark: BenchmarkReport | null }) {
           <div className="max-h-[720px] overflow-auto">
             <div className="grid grid-cols-[88px_minmax(0,1fr)_96px] gap-3 border-b border-slate-800/60 px-4 py-2 text-[10px] uppercase tracking-[0.14em] text-slate-500">
               <span>Score</span>
-              <span>Public ICP</span>
+              <span>ICP</span>
               <span className="text-right">Leads</span>
             </div>
             {publicIcps.map((icp) => (
               <PublicIcpRow key={icp.icp_ref || icp.icp_hash || icp.item_rank} icp={icp} />
             ))}
+            {Array.from({ length: hiddenIcpCount }, (_, index) => (
+              <HiddenIcpRow key={`hidden-icp-${index}`} />
+            ))}
           </div>
         </>
       )}
-    </div>
-  )
-}
-
-function CountBlock({ label, value, detail }: { label: string; value: number; detail: string }) {
-  return (
-    <div className="rounded-lg border border-slate-800/60 bg-slate-900/35 p-3">
-      <div className="text-[10px] uppercase tracking-[0.14em] text-slate-500">{label}</div>
-      <div className="mt-2 flex items-baseline gap-3">
-        <span className="text-xl font-semibold text-slate-100 tabular-nums">{value}</span>
-        <span className="text-xs text-slate-500">ICPs</span>
-      </div>
-      <div className="mt-2 text-xs text-slate-500">{detail}</div>
     </div>
   )
 }
@@ -310,7 +289,7 @@ function PublicIcpRow({ icp }: { icp: PublicIcp }) {
     textValue(doc.industry),
     textValue(doc.sub_industry),
     textValue(doc.product_service),
-  ]) || 'Public ICP'
+  ]) || 'Benchmark ICP'
   const geography = compactParts([
     textValue(doc.company_region),
     textValue(doc.company_country ?? doc.country ?? doc.target_geography),
@@ -362,6 +341,30 @@ function PublicIcpRow({ icp }: { icp: PublicIcp }) {
   )
 }
 
+function HiddenIcpRow() {
+  return (
+    <div className="grid grid-cols-[88px_minmax(0,1fr)_96px] gap-3 border-b border-slate-800/45 px-4 py-3 last:border-b-0">
+      <div className="select-none blur-sm">
+        <div className="h-6 w-12 rounded bg-slate-700/50" />
+        <div className="mt-2 h-3 w-9 rounded bg-slate-800/80" />
+      </div>
+      <div className="min-w-0 select-none blur-sm">
+        <div className="h-4 w-2/3 rounded bg-slate-700/50" />
+        <div className="mt-2 flex gap-1.5">
+          <div className="h-5 w-24 rounded border border-slate-800/80 bg-slate-900/70" />
+          <div className="h-5 w-20 rounded border border-slate-800/80 bg-slate-900/70" />
+        </div>
+        <div className="mt-3 h-3 w-4/5 rounded bg-slate-800/80" />
+        <div className="mt-2 h-3 w-3/5 rounded bg-slate-800/80" />
+      </div>
+      <div className="select-none text-right blur-sm">
+        <div className="ml-auto h-5 w-8 rounded bg-slate-700/50" />
+        <div className="mt-2 ml-auto h-3 w-16 rounded bg-slate-800/80" />
+      </div>
+    </div>
+  )
+}
+
 function ActivityPanel({ loops, topicGroups }: { loops: ResearchLoop[]; topicGroups: TopicGroup[] }) {
   return (
     <div className="space-y-5">
@@ -375,7 +378,7 @@ function ActivityPanel({ loops, topicGroups }: { loops: ResearchLoop[]; topicGro
         </div>
         <div className="max-h-[440px] overflow-auto">
           {loops.length === 0 ? (
-            <div className="p-5 text-sm text-slate-400">No public Research Lab loop activity yet.</div>
+            <div className="p-5 text-sm text-slate-400">No Research Lab loop activity yet.</div>
           ) : (
             loops.map((loop) => <LoopRow key={loop.cardId} loop={loop} />)
           )}

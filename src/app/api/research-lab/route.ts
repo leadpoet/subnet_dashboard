@@ -91,7 +91,6 @@ type ResearchLabPayload = {
     activeLoopCount: number
     scoredLoopCount: number
     promisingLoopCount: number
-    publicIcpCount: number
     totalBenchmarkIcpCount: number
   }
   fetchedAt: string
@@ -104,11 +103,8 @@ type NormalizedBenchmark = {
   aggregateScore: number
   aggregateScoreBand: string
   itemCount: number
-  publicIcpCount: number
-  privateHoldoutIcpCount: number
   scoreBandCounts: Record<string, number>
   failureCategoryCounts: Record<string, number>
-  visibilitySplit: NonNullable<PublicBenchmarkReportDoc['visibility_split']>
   publicIcps: PublicIcpEntry[]
   currentStatusAt: string | null
 }
@@ -177,7 +173,6 @@ export async function GET() {
         promisingLoopCount: loops.filter((loop) =>
           ['small_gain', 'passed_threshold', 'promoted'].includes(loop.outcomeBand)
         ).length,
-        publicIcpCount: benchmark?.publicIcpCount ?? 0,
         totalBenchmarkIcpCount: benchmark?.itemCount ?? 0,
       },
       fetchedAt: new Date().toISOString(),
@@ -220,14 +215,8 @@ async function fetchLatestBenchmark(supabase: ReturnType<typeof getSupabase>): P
     aggregateScore: numberOr(doc.aggregate_score, row.aggregate_score),
     aggregateScoreBand: String(doc.aggregate_score_band || scoreBand(numberOr(doc.aggregate_score, row.aggregate_score))),
     itemCount,
-    publicIcpCount: numberOr(doc.public_icp_count, publicIcps.length),
-    privateHoldoutIcpCount: numberOr(doc.private_holdout_icp_count, Math.max(0, itemCount - publicIcps.length)),
     scoreBandCounts: doc.score_band_counts ?? {},
     failureCategoryCounts: doc.failure_category_counts ?? {},
-    visibilitySplit: {
-      public_count: numberOr(doc.visibility_split?.public_count, publicIcps.length),
-      private_count: numberOr(doc.visibility_split?.private_count, Math.max(0, itemCount - publicIcps.length)),
-    },
     publicIcps,
     currentStatusAt: row.current_status_at || row.created_at,
   }
