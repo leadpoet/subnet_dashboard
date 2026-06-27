@@ -38,6 +38,19 @@ type BenchmarkIssue = {
   count: number
   severity: 'high' | 'medium' | 'low'
   description: string
+  icps?: ModelIssueIcpEntry[]
+}
+
+type ModelIssueIcpEntry = {
+  item_rank?: number
+  icp_ref?: string
+  icp_hash?: string
+  set_id?: number
+  day_index?: number
+  day_rank?: number
+  industry_bucket?: string
+  score?: number
+  company_count?: number
 }
 
 type PublicIcp = {
@@ -486,11 +499,17 @@ function ModelIssuesSection({ issues }: { issues: BenchmarkIssue[] }) {
 
 function IssueRow({ issue }: { issue: BenchmarkIssue }) {
   const tone = severityTone(issue.severity)
+  const icpRefs = formatIssueIcpRefs(issue.icps ?? [])
   return (
     <div className="flex items-start justify-between gap-5 border-b border-[var(--line)] py-4 last:border-b-0">
       <div className="min-w-0">
         <div className="text-[13.5px] font-medium text-[var(--platinum)]">{issue.label}</div>
         <p className="mt-1.5 text-[12px] leading-relaxed text-[var(--muted-2)]">{issue.description}</p>
+        {icpRefs ? (
+          <div className="mt-2 font-mono text-[10px] uppercase tracking-[0.1em] text-[var(--muted)]">
+            {icpRefs}
+          </div>
+        ) : null}
       </div>
       <div className="flex shrink-0 items-center gap-3">
         <span className="font-display text-[15px] font-medium tabular-nums text-[var(--platinum)]">
@@ -793,6 +812,18 @@ function formatRelative(value: string): string {
 
 function readableTag(value: string): string {
   return value.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+}
+
+function formatIssueIcpRefs(icps: ModelIssueIcpEntry[]): string {
+  const labels = icps
+    .map((icp) => numberOr(icp.item_rank, 0))
+    .filter((rank) => rank > 0)
+    .sort((a, b) => a - b)
+    .map((rank) => `ICP ${String(rank).padStart(2, '0')}`)
+  if (labels.length === 0) return ''
+  const visible = labels.slice(0, 8)
+  const suffix = labels.length > visible.length ? ` +${labels.length - visible.length}` : ''
+  return `${visible.join(', ')}${suffix}`
 }
 
 function textValue(value: unknown): string {

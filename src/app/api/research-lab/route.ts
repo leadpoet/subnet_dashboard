@@ -36,6 +36,8 @@ type PublicBenchmarkReportDoc = {
   low_icp_fit_count?: number
   score_band_counts?: Record<string, number>
   failure_category_counts?: Record<string, number>
+  model_issue_counts?: Record<string, number>
+  model_issue_public_icps?: Record<string, ModelIssueIcpEntry[]>
   visibility_split?: {
     public_count?: number
     private_count?: number
@@ -60,6 +62,18 @@ type PublicIcpEntry = {
     avg_icp_fit?: number
     avg_intent_signal_final?: number
   }
+}
+
+type ModelIssueIcpEntry = {
+  item_rank?: number
+  icp_ref?: string
+  icp_hash?: string
+  set_id?: number
+  day_index?: number
+  day_rank?: number
+  industry_bucket?: string
+  score?: number
+  company_count?: number
 }
 
 type PublicLoopRow = {
@@ -118,6 +132,7 @@ type BenchmarkIssue = {
   count: number
   severity: 'high' | 'medium' | 'low'
   description: string
+  icps: ModelIssueIcpEntry[]
 }
 
 type NormalizedLoop = {
@@ -246,26 +261,30 @@ async function fetchLatestBenchmark(supabase: ReturnType<typeof getSupabase>): P
 
 function buildBenchmarkIssues(doc: PublicBenchmarkReportDoc, publicIcps: PublicIcpEntry[]): BenchmarkIssue[] {
   const counts = new Map<string, number>()
+  const icpsByIssue = new Map<string, ModelIssueIcpEntry[]>()
 
-  const aggregateFailureCounts = doc.failure_category_counts ?? {}
-  for (const [key, count] of Object.entries(aggregateFailureCounts)) {
-    addIssueCount(counts, key, count)
-  }
-
-  if (Object.keys(aggregateFailureCounts).length === 0) {
+  const explicitIssueCounts = doc.model_issue_counts
+  if (explicitIssueCounts && Object.keys(explicitIssueCounts).length > 0) {
+    for (const [key, count] of Object.entries(explicitIssueCounts)) {
+      addIssueCount(counts, key, count)
+      const rows = Array.isArray(doc.model_issue_public_icps?.[key])
+        ? doc.model_issue_public_icps[key]
+        : []
+      for (const row of rows) {
+        appendIssueIcp(icpsByIssue, key, issueIcpEntry(row))
+      }
+    }
+  } else {
     for (const icp of publicIcps) {
-      for (const key of icp.diagnostics?.failure_categories ?? []) {
+      for (const key of issueKeysForPublicIcp(icp)) {
         addIssueCount(counts, key, 1)
+        appendIssueIcp(icpsByIssue, key, issueIcpEntry(icp))
       }
     }
   }
 
-  addIssueCount(counts, 'zero_company_results', doc.zero_lead_icp_count ?? 0)
-  addIssueCount(counts, 'low_intent_fit', doc.low_intent_fit_icp_count ?? 0)
-  addIssueCount(counts, 'low_icp_fit', doc.low_icp_fit_count ?? 0)
-
   return Array.from(counts.entries())
-    .map(([key, count]) => issueForKey(key, count))
+    .map(([key, count]) => issueForKey(key, count, icpsByIssue.get(key) ?? []))
     .filter((issue) => issue.count > 0)
     .sort((a, b) => b.count - a.count || severityRank(a.severity) - severityRank(b.severity) || a.label.localeCompare(b.label))
     .slice(0, 8)
@@ -277,7 +296,64 @@ function addIssueCount(counts: Map<string, number>, key: string, value: unknown)
   counts.set(key, (counts.get(key) ?? 0) + count)
 }
 
-function issueForKey(key: string, count: number): BenchmarkIssue {
+function issueKeysForPublicIcp(icp: PublicIcpEntry): string[] {
+  const keys = new Set(normalizedFailureCategories(icp.diagnostics?.failure_categories ?? []))
+  const companyCount = numberOr(icp.company_count, 0)
+  if (companyCount <= 0) {
+    keys.add('zero_company_results')
+  } else if (keys.size === 0 && numberOr(icp.diagnostics?.avg_intent_signal_final, 0) < 15) {
+    keys.add('low_intent_fit')
+  }
+  return Array.from(keys).sort()
+}
+
+function normalizedFailureCategories(value: unknown): string[] {
+  const raw = typeof value === 'string'
+    ? [value]
+    : Array.isArray(value)
+      ? value.map((item) => String(item))
+      : []
+  const categories = new Set(raw.map((item) => item.trim()).filter(Boolean))
+  if (categories.has('provider_http_4xx') || categories.has('provider_http_5xx')) {
+    categories.delete('runtime_provider_error')
+  }
+  return Array.from(categories).sort()
+}
+
+function appendIssueIcp(
+  icpsByIssue: Map<string, ModelIssueIcpEntry[]>,
+  key: string,
+  row: ModelIssueIcpEntry
+) {
+  const rows = icpsByIssue.get(key) ?? []
+  const rowKey = row.icp_ref || row.icp_hash || String(row.item_rank ?? '')
+  if (
+    !rowKey ||
+    rows.some((existing) => (existing.icp_ref || existing.icp_hash || String(existing.item_rank ?? '')) === rowKey)
+  ) {
+    icpsByIssue.set(key, rows)
+    return
+  }
+  rows.push(row)
+  rows.sort((a, b) => numberOr(a.item_rank, 0) - numberOr(b.item_rank, 0))
+  icpsByIssue.set(key, rows)
+}
+
+function issueIcpEntry(value: ModelIssueIcpEntry): ModelIssueIcpEntry {
+  return {
+    item_rank: numberOr(value.item_rank, 0),
+    icp_ref: value.icp_ref ? String(value.icp_ref) : '',
+    icp_hash: value.icp_hash ? String(value.icp_hash) : '',
+    set_id: value.set_id === undefined ? undefined : numberOr(value.set_id, 0),
+    day_index: value.day_index === undefined ? undefined : numberOr(value.day_index, 0),
+    day_rank: value.day_rank === undefined ? undefined : numberOr(value.day_rank, 0),
+    industry_bucket: value.industry_bucket ? String(value.industry_bucket) : undefined,
+    score: value.score === undefined ? undefined : numberOr(value.score, 0),
+    company_count: value.company_count === undefined ? undefined : numberOr(value.company_count, 0),
+  }
+}
+
+function issueForKey(key: string, count: number, icps: ModelIssueIcpEntry[]): BenchmarkIssue {
   const normalized = key.toLowerCase()
   if (normalized.includes('hallucinated') || normalized.includes('generic_intent')) {
     return {
@@ -286,6 +362,7 @@ function issueForKey(key: string, count: number): BenchmarkIssue {
       label: 'Generic or hallucinated intent',
       severity: 'high',
       description: 'Intent evidence looked fabricated, generic, hardcoded, or not tied closely enough to the ICP.',
+      icps,
     }
   }
   if (normalized.includes('stale') || normalized.includes('date') || normalized.includes('freshness')) {
@@ -295,6 +372,7 @@ function issueForKey(key: string, count: number): BenchmarkIssue {
       label: 'Stale or invalid timing',
       severity: 'high',
       description: 'Intent evidence did not appear recent enough or had invalid/future-dated timing.',
+      icps,
     }
   }
   if (normalized.includes('low_intent')) {
@@ -304,6 +382,7 @@ function issueForKey(key: string, count: number): BenchmarkIssue {
       label: 'Weak intent match',
       severity: 'medium',
       description: 'The model found companies, but the buying-intent signal was too weak or indirect.',
+      icps,
     }
   }
   if (normalized.includes('low_icp') || normalized.includes('icp_or_geo')) {
@@ -313,6 +392,7 @@ function issueForKey(key: string, count: number): BenchmarkIssue {
       label: 'ICP mismatch',
       severity: 'medium',
       description: 'The returned company did not match the target industry, geography, company size, or role profile closely enough.',
+      icps,
     }
   }
   if (normalized.includes('zero')) {
@@ -322,6 +402,7 @@ function issueForKey(key: string, count: number): BenchmarkIssue {
       label: 'No companies returned',
       severity: 'medium',
       description: 'The model returned no usable companies for that ICP.',
+      icps,
     }
   }
   if (normalized.includes('company_verification')) {
@@ -331,6 +412,7 @@ function issueForKey(key: string, count: number): BenchmarkIssue {
       label: 'Company verification failed',
       severity: 'medium',
       description: 'The company identity or website could not be verified reliably.',
+      icps,
     }
   }
   if (normalized.includes('source') || normalized.includes('url') || normalized.includes('fetch')) {
@@ -340,6 +422,7 @@ function issueForKey(key: string, count: number): BenchmarkIssue {
       label: 'Source fetch failed',
       severity: 'low',
       description: 'The model relied on a source that could not be fetched or verified cleanly.',
+      icps,
     }
   }
   if (normalized.includes('parser') || normalized.includes('json') || normalized.includes('llm')) {
@@ -349,6 +432,7 @@ function issueForKey(key: string, count: number): BenchmarkIssue {
       label: 'Scoring format issue',
       severity: 'low',
       description: 'The response could not be parsed or scored cleanly.',
+      icps,
     }
   }
   return {
@@ -357,6 +441,7 @@ function issueForKey(key: string, count: number): BenchmarkIssue {
     label: readableIssueLabel(key),
     severity: 'low',
     description: 'A sanitized benchmark issue was recorded for this model run.',
+    icps,
   }
 }
 
