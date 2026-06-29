@@ -5,6 +5,7 @@ export const dynamic = 'force-dynamic'
 
 const CACHE_TTL = 60_000
 const LOOP_LIMIT = 50
+const START_DELAY_MS = 30 * 60 * 1000
 
 type CachedResponse = {
   data: ResearchLabPayload
@@ -251,6 +252,13 @@ type NormalizedLoop = {
   bestCandidatePublicSummary: string
   lastActivityAt: string
   submittedAt: string
+  statusNote?: LoopStatusNote
+}
+
+type LoopStatusNote = {
+  tone: 'info' | 'warning' | 'error'
+  label: string
+  detail: string
 }
 
 type TopicGroup = {
@@ -782,24 +790,61 @@ async function fetchPublicLoops(supabase: ReturnType<typeof getSupabase>): Promi
     return []
   }
 
-  return ((data ?? []) as PublicLoopRow[]).map((row) => ({
-    cardId: row.card_id,
-    ticketId: row.ticket_id,
-    runId: row.current_run_id,
-    receiptId: row.current_receipt_id,
-    minerHotkey: row.miner_hotkey,
-    researchArea: row.research_area || 'generalist',
-    researchFocusSummary: row.research_focus_summary || '',
-    topicTags: arrayOfStrings(row.current_topic_tags ?? row.topic_tags),
-    topicSignatureHash: row.current_topic_signature_hash || row.topic_signature_hash,
-    outcomeLabel: row.current_outcome_label || 'submitted',
-    outcomeBand: row.current_outcome_band || 'pending',
-    candidateCount: numberOr(row.current_candidate_count, 0),
-    scoredCandidateCount: numberOr(row.current_scored_candidate_count, 0),
-    bestCandidatePublicSummary: row.current_best_candidate_public_summary || '',
-    lastActivityAt: row.current_last_activity_at || row.created_at,
-    submittedAt: row.created_at,
-  }))
+  return ((data ?? []) as PublicLoopRow[]).map((row) => {
+    const outcomeLabel = row.current_outcome_label || 'submitted'
+    const outcomeBand = row.current_outcome_band || 'pending'
+    const lastActivityAt = row.current_last_activity_at || row.created_at
+    return {
+      cardId: row.card_id,
+      ticketId: row.ticket_id,
+      runId: row.current_run_id,
+      receiptId: row.current_receipt_id,
+      minerHotkey: row.miner_hotkey,
+      researchArea: row.research_area || 'generalist',
+      researchFocusSummary: row.research_focus_summary || '',
+      topicTags: arrayOfStrings(row.current_topic_tags ?? row.topic_tags),
+      topicSignatureHash: row.current_topic_signature_hash || row.topic_signature_hash,
+      outcomeLabel,
+      outcomeBand,
+      candidateCount: numberOr(row.current_candidate_count, 0),
+      scoredCandidateCount: numberOr(row.current_scored_candidate_count, 0),
+      bestCandidatePublicSummary: row.current_best_candidate_public_summary || '',
+      lastActivityAt,
+      submittedAt: row.created_at,
+      statusNote: loopStatusNote(row, outcomeLabel, outcomeBand, lastActivityAt),
+    }
+  })
+}
+
+function loopStatusNote(
+  row: PublicLoopRow,
+  outcomeLabel: string,
+  outcomeBand: string,
+  lastActivityAt: string
+): LoopStatusNote | undefined {
+  if (outcomeBand === 'failed' || outcomeLabel === 'failed') {
+    return {
+      tone: 'error',
+      label: 'Run failed',
+      detail: 'The public log marked this loop as failed before a scored candidate was produced.',
+    }
+  }
+
+  if (
+    outcomeLabel === 'submitted' &&
+    !row.current_run_id &&
+    !row.current_receipt_id
+  ) {
+    const lastActivityMs = new Date(lastActivityAt).getTime()
+    const delayed = Number.isFinite(lastActivityMs) && Date.now() - lastActivityMs >= START_DELAY_MS
+    return {
+      tone: delayed ? 'warning' : 'info',
+      label: delayed ? 'Start delayed' : 'Waiting to start',
+      detail: 'The ticket is recorded, but no run or receipt has been published yet.',
+    }
+  }
+
+  return undefined
 }
 
 function groupLoopsByTopic(loops: NormalizedLoop[]): TopicGroup[] {

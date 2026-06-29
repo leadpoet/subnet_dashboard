@@ -134,6 +134,13 @@ type ResearchLoop = {
   bestCandidatePublicSummary: string
   lastActivityAt: string
   submittedAt: string
+  statusNote?: LoopStatusNote
+}
+
+type LoopStatusNote = {
+  tone: 'info' | 'warning' | 'error'
+  label: string
+  detail: string
 }
 
 type TopicGroup = {
@@ -879,6 +886,7 @@ function ActivitySection({ loops, activeCount }: { loops: ResearchLoop[]; active
 }
 
 function LoopRow({ loop }: { loop: ResearchLoop }) {
+  const statusTone = loop.statusNote ? statusNoteTone(loop.statusNote.tone) : null
   return (
     <div className="border-b border-[var(--line)] py-4 transition-colors last:border-b-0 hover-bg-warm">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -902,6 +910,21 @@ function LoopRow({ loop }: { loop: ResearchLoop }) {
           {loop.bestCandidatePublicSummary}
         </p>
       )}
+      {loop.statusNote && statusTone ? (
+        <div
+          className="mt-3 border-l-2 py-2 pl-3"
+          style={{ borderColor: statusTone.border, background: statusTone.bg }}
+        >
+          <div className="font-mono text-[10px] uppercase tracking-[0.12em]" style={{ color: statusTone.color }}>
+            {loop.statusNote.label}
+          </div>
+          <p className="mt-1 text-[11.5px] leading-relaxed text-[var(--muted-2)]">
+            <span className="font-mono text-[var(--muted)]">Ticket {shortId(loop.ticketId)}</span>
+            <span className="text-[var(--faint)]"> · </span>
+            {loop.statusNote.detail}
+          </p>
+        </div>
+      ) : null}
       <div className="mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-1 font-mono text-[10.5px] text-[var(--muted-2)]">
         <span>
           <span className="text-[var(--muted)]">{loop.candidateCount}</span> candidates
@@ -1106,6 +1129,16 @@ function severityTone(severity: BenchmarkIssue['severity']): { color: string; bo
   return { color: 'var(--muted-2)', border: 'var(--line)' }
 }
 
+function statusNoteTone(tone: LoopStatusNote['tone']): { color: string; border: string; bg: string } {
+  if (tone === 'error') {
+    return { color: 'var(--platinum)', border: 'var(--line-3)', bg: 'rgba(236,234,230,0.035)' }
+  }
+  if (tone === 'warning') {
+    return { color: 'var(--muted)', border: 'var(--line-2)', bg: 'rgba(236,234,230,0.025)' }
+  }
+  return { color: 'var(--muted-2)', border: 'var(--line)', bg: 'transparent' }
+}
+
 /* ============================================================
  * Formatters (unchanged from prior implementation)
  * ============================================================ */
@@ -1166,6 +1199,10 @@ function arrayText(value: unknown): string {
 
 function compactParts(parts: string[]): string {
   return parts.filter(Boolean).join(' · ')
+}
+
+function shortId(value: string): string {
+  return value ? value.slice(0, 8) : 'unknown'
 }
 
 function intentSignals(value: unknown): string[] {
