@@ -5,7 +5,9 @@ export const dynamic = 'force-dynamic'
 
 const CACHE_TTL = 60_000
 const LOOP_LIMIT = 50
+const LOOP_FETCH_LIMIT = LOOP_LIMIT + 100
 const START_DELAY_MS = 30 * 60 * 1000
+const HIDDEN_LOOP_MINER_PREFIXES = ['5FEtvB']
 
 type CachedResponse = {
   data: ResearchLabPayload
@@ -783,37 +785,44 @@ async function fetchPublicLoops(supabase: ReturnType<typeof getSupabase>): Promi
     .select('card_id, ticket_id, miner_hotkey, research_area, research_focus_summary, topic_tags, topic_signature_hash, current_topic_tags, current_topic_signature_hash, current_outcome_label, current_outcome_band, current_candidate_count, current_scored_candidate_count, current_best_candidate_public_summary, current_last_activity_at, current_run_id, current_receipt_id, created_at')
     .order('current_last_activity_at', { ascending: false, nullsFirst: false })
     .order('created_at', { ascending: false })
-    .limit(LOOP_LIMIT)
+    .limit(LOOP_FETCH_LIMIT)
 
   if (error) {
     console.error('[Research Lab API] public loop query failed:', error)
     return []
   }
 
-  return ((data ?? []) as PublicLoopRow[]).map((row) => {
-    const outcomeLabel = row.current_outcome_label || 'submitted'
-    const outcomeBand = row.current_outcome_band || 'pending'
-    const lastActivityAt = row.current_last_activity_at || row.created_at
-    return {
-      cardId: row.card_id,
-      ticketId: row.ticket_id,
-      runId: row.current_run_id,
-      receiptId: row.current_receipt_id,
-      minerHotkey: row.miner_hotkey,
-      researchArea: row.research_area || 'generalist',
-      researchFocusSummary: row.research_focus_summary || '',
-      topicTags: arrayOfStrings(row.current_topic_tags ?? row.topic_tags),
-      topicSignatureHash: row.current_topic_signature_hash || row.topic_signature_hash,
-      outcomeLabel,
-      outcomeBand,
-      candidateCount: numberOr(row.current_candidate_count, 0),
-      scoredCandidateCount: numberOr(row.current_scored_candidate_count, 0),
-      bestCandidatePublicSummary: row.current_best_candidate_public_summary || '',
-      lastActivityAt,
-      submittedAt: row.created_at,
-      statusNote: loopStatusNote(row, outcomeLabel, outcomeBand, lastActivityAt),
-    }
-  })
+  return ((data ?? []) as PublicLoopRow[])
+    .filter(isVisiblePublicLoop)
+    .slice(0, LOOP_LIMIT)
+    .map((row) => {
+      const outcomeLabel = row.current_outcome_label || 'submitted'
+      const outcomeBand = row.current_outcome_band || 'pending'
+      const lastActivityAt = row.current_last_activity_at || row.created_at
+      return {
+        cardId: row.card_id,
+        ticketId: row.ticket_id,
+        runId: row.current_run_id,
+        receiptId: row.current_receipt_id,
+        minerHotkey: row.miner_hotkey,
+        researchArea: row.research_area || 'generalist',
+        researchFocusSummary: row.research_focus_summary || '',
+        topicTags: arrayOfStrings(row.current_topic_tags ?? row.topic_tags),
+        topicSignatureHash: row.current_topic_signature_hash || row.topic_signature_hash,
+        outcomeLabel,
+        outcomeBand,
+        candidateCount: numberOr(row.current_candidate_count, 0),
+        scoredCandidateCount: numberOr(row.current_scored_candidate_count, 0),
+        bestCandidatePublicSummary: row.current_best_candidate_public_summary || '',
+        lastActivityAt,
+        submittedAt: row.created_at,
+        statusNote: loopStatusNote(row, outcomeLabel, outcomeBand, lastActivityAt),
+      }
+    })
+}
+
+function isVisiblePublicLoop(row: PublicLoopRow): boolean {
+  return !HIDDEN_LOOP_MINER_PREFIXES.some((prefix) => row.miner_hotkey.startsWith(prefix))
 }
 
 function loopStatusNote(
