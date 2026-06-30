@@ -142,6 +142,7 @@ type ResearchLoop = {
   topicTags: string[]
   topicSignatureHash: string
   outcomeLabel: string
+  statusLabel: string
   outcomeBand: string
   candidateCount: number
   scoredCandidateCount: number
@@ -1209,7 +1210,7 @@ function ActivityPanelRow({ loop }: { loop: ResearchLoop }) {
       </div>
 
       <div className="flex min-w-0 md:justify-center">
-        <OutcomeBadge label={loop.outcomeLabel} band={loop.outcomeBand} />
+        <OutcomeBadge label={loop.statusLabel || readableTag(loop.outcomeLabel)} band={loop.outcomeBand} />
       </div>
 
       <div className="font-mono text-[10.5px] text-[var(--muted-2)]">
@@ -1320,7 +1321,7 @@ function OutcomeBadge({ label, band }: { label: string; band: string }) {
       className="max-w-full whitespace-normal break-words text-center leading-[1.3] rounded-[3px] border px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.06em]"
       style={{ color: tone.color, borderColor: tone.border, background: tone.bg }}
     >
-      {readableTag(label)}
+      {label}
     </span>
   )
 }
@@ -1369,7 +1370,7 @@ function DirectionRow({ group }: { group: TopicGroup }) {
         <span>{group.running} running</span>
         <span>{group.scored} scored</span>
         <span className="text-[var(--platinum)]">{group.promisingOrPromoted} promising</span>
-        <span>{group.noGainOrFailed} no gain</span>
+        <span>{group.noGainOrFailed} no gain / failed</span>
       </div>
     </div>
   )
@@ -1489,8 +1490,17 @@ function outcomeTone(band: string): { color: string; border: string; bg: string 
   if (band === 'promoted' || band === 'passed_threshold') {
     return { color: 'var(--white)', border: 'rgba(232,240,255,0.30)', bg: 'rgba(232,240,255,0.07)' }
   }
+  if (band === 'high_gain') {
+    return { color: 'var(--white)', border: 'rgba(232,240,255,0.30)', bg: 'rgba(232,240,255,0.07)' }
+  }
   if (band === 'small_gain') {
     return { color: 'var(--platinum)', border: 'var(--line-2)', bg: 'transparent' }
+  }
+  if (band === 'stale' || band === 'warning') {
+    return { color: 'var(--muted)', border: 'var(--line-2)', bg: 'rgba(236,234,230,0.025)' }
+  }
+  if (band === 'pending' || band === 'completed') {
+    return { color: 'var(--muted)', border: 'var(--line)', bg: 'transparent' }
   }
   if (band === 'no_gain' || band === 'failed') {
     return { color: 'var(--muted-2)', border: 'var(--line)', bg: 'transparent' }
