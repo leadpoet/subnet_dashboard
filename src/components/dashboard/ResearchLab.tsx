@@ -415,7 +415,7 @@ function BenchmarkSection({ benchmark }: { benchmark: BenchmarkReport | null }) 
             </span>
           </div>
           {benchmark.scoreBandCounts && <DistributionStrip counts={benchmark.scoreBandCounts} />}
-          <div className="grid grid-cols-[28px_minmax(0,1fr)_132px_64px] gap-4 border-b border-[var(--line)] pb-3 pl-3 font-mono text-[10px] uppercase tracking-[0.12em] text-[var(--muted-2)]">
+          <div className="hidden sm:grid sm:grid-cols-[28px_minmax(0,1fr)_132px_64px] gap-4 border-b border-[var(--line)] pb-3 pl-3 font-mono text-[10px] uppercase tracking-[0.12em] text-[var(--muted-2)]">
             <span>#</span>
             <span>Ideal customer profile</span>
             <span>Score</span>
@@ -783,7 +783,7 @@ function LeaderboardRow({ icp, rank }: { icp: PublicIcp; rank: number }) {
   return (
     <div
       className={cn(
-        'grid grid-cols-[28px_minmax(0,1fr)_132px_64px] items-start gap-4 border-b border-l-2 py-5 pl-3 transition-colors last:border-b-0',
+        'grid grid-cols-[24px_minmax(0,1fr)] items-start gap-x-3 gap-y-3 border-b border-l-2 py-5 pl-3 transition-colors last:border-b-0 sm:grid-cols-[28px_minmax(0,1fr)_132px_64px] sm:gap-4',
         top
           ? 'border-l-[var(--white)] border-b-[var(--line)] bg-[rgba(232,240,255,0.025)]'
           : 'border-l-transparent border-[var(--line)] hover-bg-warm'
@@ -796,7 +796,7 @@ function LeaderboardRow({ icp, rank }: { icp: PublicIcp; rank: number }) {
         {String(rank).padStart(2, '0')}
       </span>
       <div className="min-w-0">
-        <div className="text-[13.5px] font-medium leading-snug text-[var(--platinum)]">{title}</div>
+        <div className="break-words text-[13.5px] font-medium leading-snug text-[var(--platinum)]">{title}</div>
         <div className="mt-2 flex flex-wrap gap-1.5">
           {geography && <Tag>{geography}</Tag>}
           {companySize && <Tag>{companySize}</Tag>}
@@ -821,29 +821,31 @@ function LeaderboardRow({ icp, rank }: { icp: PublicIcp; rank: number }) {
           sourcingFailed={icp.diagnostics?.sourcing_failed}
         />
       </div>
-      <div className="flex flex-col gap-1.5 pt-0.5">
-        <span
-          className="font-display text-[15px] font-medium tabular-nums"
-          style={{ color: top ? 'var(--white)' : 'var(--platinum)' }}
-        >
-          {formatScore(score)}
-        </span>
-        <span className="h-[3px] overflow-hidden rounded-full bg-[rgba(236,234,230,0.06)]">
+      <div className="col-start-2 flex items-center justify-between gap-4 sm:contents">
+        <div className="flex w-full min-w-[88px] max-w-[160px] flex-col gap-1.5 pt-0.5 sm:max-w-none">
           <span
-            className="block h-full rounded-full"
-            style={{
-              width: `${Math.max(0, Math.min(100, score))}%`,
-              background: top ? 'var(--white)' : 'var(--muted)',
-            }}
-          />
-        </span>
-      </div>
-      <div className="text-right">
-        <div className="font-display text-[15px] font-medium tabular-nums text-[var(--platinum)]">
-          {numberOr(icp.company_count, 0)}
+            className="font-display text-[15px] font-medium tabular-nums"
+            style={{ color: top ? 'var(--white)' : 'var(--platinum)' }}
+          >
+            {formatScore(score)}
+          </span>
+          <span className="h-[3px] overflow-hidden rounded-full bg-[rgba(236,234,230,0.06)]">
+            <span
+              className="block h-full rounded-full"
+              style={{
+                width: `${Math.max(0, Math.min(100, score))}%`,
+                background: top ? 'var(--white)' : 'var(--muted)',
+              }}
+            />
+          </span>
         </div>
-        <div className="mt-1 font-mono text-[9px] uppercase tracking-[0.1em] text-[var(--muted-2)]">
-          companies
+        <div className="shrink-0 text-right">
+          <div className="font-display text-[15px] font-medium tabular-nums text-[var(--platinum)]">
+            {numberOr(icp.company_count, 0)}
+          </div>
+          <div className="mt-1 font-mono text-[9px] uppercase tracking-[0.1em] text-[var(--muted-2)]">
+            companies
+          </div>
         </div>
       </div>
     </div>
@@ -1206,7 +1208,7 @@ function ActivityPanelRow({ loop }: { loop: ResearchLoop }) {
         </span>
       </div>
 
-      <div className="flex md:justify-center">
+      <div className="flex min-w-0 md:justify-center">
         <OutcomeBadge label={loop.outcomeLabel} band={loop.outcomeBand} />
       </div>
 
@@ -1315,7 +1317,7 @@ function OutcomeBadge({ label, band }: { label: string; band: string }) {
   const tone = outcomeTone(band)
   return (
     <span
-      className="shrink-0 rounded-[3px] border px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.06em]"
+      className="max-w-full whitespace-normal break-words text-center leading-[1.3] rounded-[3px] border px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.06em]"
       style={{ color: tone.color, borderColor: tone.border, background: tone.bg }}
     >
       {readableTag(label)}
