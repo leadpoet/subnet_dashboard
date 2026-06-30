@@ -1,9 +1,10 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Activity, Check, ChevronLeft, ChevronRight, Copy, Search, X } from 'lucide-react'
+import { Check, ChevronLeft, ChevronRight, Copy, Search, X } from 'lucide-react'
 import {
   Dialog,
+  DialogClose,
   DialogContent,
   DialogHeader,
   DialogTitle,
@@ -239,8 +240,7 @@ export function ResearchLab({ onSync }: { onSync?: () => void } = {}) {
             title="Open research activity panel"
             aria-label="Open research activity panel"
           >
-            <Activity className="h-3.5 w-3.5" />
-            <span>Activity</span>
+            <span>Activity panel</span>
           </button>
         </div>
         <h2 className="mt-3 max-w-[600px] font-display text-[26px] font-medium leading-[1.12] tracking-[-0.025em] text-[var(--platinum)] md:text-[30px]">
@@ -984,15 +984,16 @@ function ResearchActivityDialog({
                   {activeCount} running
                 </span>
               ) : null}
-              <button
-                type="button"
-                onClick={() => onOpenChange(false)}
-                className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-[var(--line-2)] bg-[rgba(236,234,230,0.025)] text-[var(--muted)] transition-colors hover:border-[var(--line-3)] hover:bg-[rgba(236,234,230,0.045)] hover:text-[var(--platinum)] premium-focus"
-                aria-label="Close activity panel"
-                title="Close activity panel"
-              >
-                <X className="h-3.5 w-3.5" />
-              </button>
+              <DialogClose asChild>
+                <button
+                  type="button"
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-[var(--line-2)] bg-[rgba(236,234,230,0.025)] text-[var(--muted)] transition-colors hover:border-[var(--line-3)] hover:bg-[rgba(236,234,230,0.045)] hover:text-[var(--platinum)] premium-focus"
+                  aria-label="Close activity panel"
+                  title="Close activity panel"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </DialogClose>
             </div>
           </div>
 
@@ -1091,6 +1092,16 @@ function ResearchActivityDialog({
             onPageChange={setCurrentPage}
           />
         ) : null}
+        <div className="shrink-0 border-t border-[var(--line)] px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:hidden">
+          <DialogClose asChild>
+            <button
+              type="button"
+              className="flex h-10 w-full items-center justify-center rounded-md border border-[var(--line-2)] bg-[rgba(236,234,230,0.045)] font-mono text-[11px] uppercase tracking-[0.12em] text-[var(--platinum)] transition-colors hover:border-[var(--line-3)] hover:bg-[rgba(236,234,230,0.07)] premium-focus"
+            >
+              Close activity panel
+            </button>
+          </DialogClose>
+        </div>
       </DialogContent>
     </Dialog>
   )
