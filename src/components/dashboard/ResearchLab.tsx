@@ -971,18 +971,20 @@ function ResearchActivityDialog({
         showCloseButton={false}
         className="sm:w-[calc(100vw-3rem)] sm:max-w-[1180px] sm:max-h-[90vh] overflow-hidden flex flex-col gap-0 bg-[var(--canvas)] border-[var(--line-2)] p-0 sm:p-0 text-[var(--platinum)]"
       >
-        <DialogClose asChild>
-          <button
-            type="button"
-            className="absolute right-3 top-3 z-20 inline-flex h-7 w-7 items-center justify-center rounded-md text-[var(--muted)] transition-colors hover:bg-[rgba(236,234,230,0.045)] hover:text-[var(--platinum)] premium-focus"
-            aria-label="Close activity panel"
-            title="Close activity panel"
-          >
-            <X className="h-3.5 w-3.5" />
-          </button>
-        </DialogClose>
-        <DialogHeader className="shrink-0 border-b border-[var(--line)] px-4 pb-4 pt-8 text-left sm:px-5 sm:py-4">
-          <DialogTitle className="sr-only">Live research activity</DialogTitle>
+        <DialogHeader className="shrink-0 border-b border-[var(--line)] px-4 py-3 text-left sm:px-5 sm:py-4">
+          <div className="mb-3 flex items-center justify-end">
+            <DialogTitle className="sr-only">Live research activity</DialogTitle>
+            <DialogClose asChild>
+              <button
+                type="button"
+                className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-[var(--line-2)] bg-[rgba(236,234,230,0.045)] text-[var(--platinum)] transition-colors hover:border-[var(--line-3)] hover:bg-[rgba(236,234,230,0.07)] premium-focus"
+                aria-label="Close activity panel"
+                title="Close activity panel"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </DialogClose>
+          </div>
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
             <ActivityPanelStat label="Visible" value={filteredLoops.length} />
             <ActivityPanelStat label="Runs" value={loops.length} />
