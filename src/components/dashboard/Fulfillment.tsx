@@ -25,6 +25,7 @@ import {
   type CosmosRequest,
 } from './FulfillmentCosmos'
 import { FulfillmentMobile } from './FulfillmentMobile'
+import { EmissionAllocationVial } from './EmissionAllocationVial'
 
 interface IcpDetails {
   prompt?: string
@@ -472,6 +473,11 @@ export function Fulfillment({ onSync }: { onSync?: () => void } = {}) {
       }))
   }, [graphableActiveRequests, filter])
 
+  const filteredRequestIds = useMemo(
+    () => filteredRequests.map((r) => r.request_id),
+    [filteredRequests],
+  )
+
   const filteredLeads = useMemo<CosmosConsensusLead[]>(() => {
     if (!data) return []
     const ids = new Set(filteredRequests.map((r) => r.request_id))
@@ -729,6 +735,7 @@ export function Fulfillment({ onSync }: { onSync?: () => void } = {}) {
         <FulfillmentMobile
           activeRequests={data.activeRequests}
           allConsensus={data.allConsensus}
+          requestMap={data.requestMap}
           leaderboard={data.leaderboard}
           leaderboardWindowDays={data.stats.leaderboardWindowDays ?? 30}
           totalSubmittedLeads={data.stats.totalSubmittedLeads ?? data.allConsensus.length}
@@ -828,17 +835,25 @@ export function Fulfillment({ onSync }: { onSync?: () => void } = {}) {
         </div>
       </div>
 
-      <div className="relative h-[72vh] min-h-[600px]">
-        <FulfillmentCosmos
-          requests={filteredRequests}
-          leads={filteredLeads}
-          visibleNodeIds={visibleNodeIds}
-          forceLabelIds={matchedNodeIds}
-          emphasizedNodeIds={emphasizedNodeIds}
-          onRequestActivate={handleRequestActivate}
-          onMinerActivate={handleMinerActivate}
+      <div className="grid h-[72vh] min-h-[600px] grid-cols-[minmax(0,1fr)_300px] gap-4 xl:grid-cols-[minmax(0,1fr)_330px]">
+        <div className="relative min-h-0">
+          <FulfillmentCosmos
+            requests={filteredRequests}
+            leads={filteredLeads}
+            visibleNodeIds={visibleNodeIds}
+            forceLabelIds={matchedNodeIds}
+            emphasizedNodeIds={emphasizedNodeIds}
+            onRequestActivate={handleRequestActivate}
+            onMinerActivate={handleMinerActivate}
+          />
+        </div>
+        <EmissionAllocationVial
+          consensus={data.allConsensus}
+          requestMap={data.requestMap}
+          requestIds={filteredRequestIds}
+          onMinerSelect={handleMinerActivate}
+          className="h-full"
         />
-
       </div>
       </div>
       {/* End md:block desktop layout */}
