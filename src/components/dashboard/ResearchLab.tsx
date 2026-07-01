@@ -824,10 +824,10 @@ function LabEmissionSplit({
         <div className="hidden grid-cols-[minmax(0,1fr)_118px_132px_112px_58px_58px_96px_80px] gap-3 border-b border-[var(--line)] bg-[rgba(236,234,230,0.018)] px-3 py-2 font-mono text-[9.5px] uppercase tracking-[0.1em] text-[var(--muted-2)] md:grid">
           <span>Hotkey</span>
           <span className="text-right">{primaryColumnLabel}</span>
-          <span className="text-right" title="Current metagraph incentive share for this Lab-active miner">
-            <span className="block">Total Emissions</span>
+          <span className="text-right" title="Current metagraph incentive for this Lab-active miner">
+            <span className="block">Metagraph Incentive</span>
             <span className="mt-0.5 block text-[8.5px] normal-case leading-tight tracking-normal">
-              Current metagraph incentive share for this Lab-active miner
+              Current substrate incentive; raw emission shown below
             </span>
           </span>
           <span className="text-right">Compute spent</span>
@@ -863,7 +863,7 @@ function LabEmissionSplit({
                 <span className="min-w-0">
                   <HotkeyCopyButton hotkey={row.hotkey} />
                   <span className="mt-1 block font-mono text-[10px] text-[var(--muted-2)] md:hidden">
-                    {row.count} loops · {row.active} active · {row.promising} improvements · {isAllTime ? `${formatAlpha(row.alphaEarned)} ㄴ earned` : `${formatLabAllocationPercent(row.labAllocationPaidAlphaPercent)} lab allocation`} · {formatPercent(row.metagraphIncentivePct)} total emissions · {formatUsd(row.computeSpendUsd)} compute
+                    {row.count} loops · {row.active} active · {row.promising} improvements · {isAllTime ? `${formatAlpha(row.alphaEarned)} ㄴ earned` : `${formatLabAllocationPercent(row.labAllocationPaidAlphaPercent)} lab allocation`} · {formatPercent(row.metagraphIncentivePct)} incentive · {formatUsd(row.computeSpendUsd)} compute
                   </span>
                 </span>
               </span>

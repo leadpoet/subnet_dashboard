@@ -93,8 +93,8 @@ try {
 
   const componentSource = await readFile(resolve('src/components/dashboard/ResearchLab.tsx'), 'utf8')
   assert.match(componentSource, /Lab Allocation/)
-  assert.match(componentSource, /Total Emissions/)
-  assert.match(componentSource, /Current metagraph incentive share for this Lab-active miner/)
+  assert.match(componentSource, /Metagraph Incentive/)
+  assert.match(componentSource, /Current substrate incentive; raw emission shown below/)
   assert.match(componentSource, /labAllocationPaidAlphaPercent/)
   assert.match(componentSource, /metagraphIncentivePct/)
   assert.match(componentSource, /metagraph\?\.incentives/)
