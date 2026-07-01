@@ -481,7 +481,7 @@ function KpiRail({ stats }: { stats: ResearchLabData['stats'] }) {
   const items = [
     { label: 'Live experiments', value: stats.activeLoopCount, sub: 'research running now' },
     { label: 'Completed tests', value: stats.scoredLoopCount, sub: 'evaluated against current model' },
-    { label: 'Model gains', value: stats.promisingLoopCount, sub: 'changes that beat baseline' },
+    { label: 'Model improvements', value: stats.promisingLoopCount, sub: 'validated lifts over baseline' },
   ]
   return (
     <section className="grid grid-cols-3 border-y border-[var(--line)]">
