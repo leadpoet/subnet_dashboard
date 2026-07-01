@@ -28,9 +28,31 @@ try {
   const require = createRequire(import.meta.url)
   const {
     deriveResearchLabLoopStatus,
+    filterResearchLabActivityLoops,
+    RESEARCH_LAB_OUTCOME_FILTER_OPTIONS,
   } = require(join(outDir, 'research-lab-status.js'))
 
   const cases = [
+    {
+      name: 'active scoring candidate renders Scoring, not Waiting for baseline',
+      input: {
+        outcomeLabel: 'scoring',
+        outcomeBand: 'running',
+        currentCandidateStatus: 'evaluating',
+        currentReason: 'gateway_qualification_worker_heartbeat',
+        candidateCount: 1,
+        scoredCandidateCount: 0,
+        runId: 'run-0',
+        receiptId: 'receipt-0',
+      },
+      expected: {
+        key: 'scoring',
+        label: 'Scoring',
+        band: 'running',
+        active: true,
+        scoring: true,
+      },
+    },
     {
       name: 'baseline_not_ready candidate renders Waiting for baseline',
       input: {
@@ -48,7 +70,28 @@ try {
         band: 'pending',
         active: false,
         scoring: false,
-        detail: 'Candidate is queued, but scoring is waiting for the benchmark baseline to become ready.',
+        detail: 'Scoring is waiting for the benchmark baseline to become ready.',
+      },
+    },
+    {
+      name: 'explicit waiting_for_baseline outcome renders Waiting for baseline',
+      input: {
+        outcomeLabel: 'waiting_for_baseline',
+        outcomeBand: 'pending',
+        currentCandidateStatus: 'evaluating',
+        currentReason: 'gateway_qualification_worker_heartbeat',
+        candidateCount: 1,
+        scoredCandidateCount: 0,
+        runId: 'run-1a',
+        receiptId: 'receipt-1a',
+      },
+      expected: {
+        key: 'waiting_for_baseline',
+        label: 'Waiting for baseline',
+        band: 'pending',
+        active: false,
+        scoring: false,
+        detail: 'Scoring is waiting for the benchmark baseline to become ready.',
       },
     },
     {
@@ -131,7 +174,7 @@ try {
       },
     },
     {
-      name: 'unscored candidate does not render Scored, no gain',
+      name: 'raw scored_no_gain renders Scored, no gain even with unscored candidate counts',
       input: {
         outcomeLabel: 'scored_no_gain',
         outcomeBand: 'no_gain',
@@ -142,16 +185,15 @@ try {
         receiptId: 'receipt-4b',
       },
       expected: {
-        key: 'waiting_for_baseline',
-        label: 'Waiting for baseline',
-        band: 'pending',
+        key: 'scored_no_gain',
+        label: 'Scored, no gain',
+        band: 'no_gain',
         active: false,
         scoring: false,
-        detail: 'Candidate generation completed, but scoring is waiting for the benchmark baseline.',
       },
     },
     {
-      name: 'no run id renders Not started',
+      name: 'raw submitted without run stays a neutral Submitted fallback',
       input: {
         outcomeLabel: 'submitted',
         outcomeBand: 'pending',
@@ -159,8 +201,8 @@ try {
         receiptId: null,
       },
       expected: {
-        key: 'not_started',
-        label: 'Not started',
+        key: 'submitted',
+        label: 'Submitted',
         band: 'pending',
         active: false,
         scoring: false,
@@ -180,7 +222,100 @@ try {
     }
   }
 
-  console.log(`research-lab-status: ${cases.length} fixtures passed`)
+  const optionValues = RESEARCH_LAB_OUTCOME_FILTER_OPTIONS.map((option) => option.value)
+  assert.deepEqual(optionValues, [
+    'all',
+    'scoring',
+    'waiting_for_baseline',
+    'not_started',
+    'completed_no_candidate',
+    'failed',
+    'scored',
+    'scored_no_gain',
+    'blocked_for_credit',
+    'needs_rescore',
+  ], 'outcome filter options should include required statuses')
+
+  const activityLoops = [
+    {
+      id: 'scoring-alpha-a',
+      minerHotkey: 'alpha-hotkey',
+      topicSignatureHash: 'direction-a',
+      topicTags: ['sales_ops'],
+      researchArea: 'ops',
+      outcomeLabel: 'scoring',
+      statusKey: 'scoring',
+      lastActivityAt: '2026-01-04T00:00:00Z',
+    },
+    {
+      id: 'waiting-alpha-a',
+      minerHotkey: 'alpha-hotkey',
+      topicSignatureHash: 'direction-a',
+      topicTags: ['sales_ops'],
+      researchArea: 'ops',
+      outcomeLabel: 'scoring',
+      statusKey: 'waiting_for_baseline',
+      lastActivityAt: '2026-01-03T00:00:00Z',
+    },
+    {
+      id: 'scored-beta-a',
+      minerHotkey: 'beta-hotkey',
+      topicSignatureHash: 'direction-a',
+      topicTags: ['sales_ops'],
+      researchArea: 'ops',
+      outcomeLabel: 'scored_promising',
+      statusKey: 'scored_promising',
+      lastActivityAt: '2026-01-02T00:00:00Z',
+    },
+    {
+      id: 'scoring-alpha-b',
+      minerHotkey: 'alpha-hotkey',
+      topicSignatureHash: 'direction-b',
+      topicTags: ['revops'],
+      researchArea: 'ops',
+      outcomeLabel: 'scoring',
+      statusKey: 'scoring',
+      lastActivityAt: '2026-01-01T00:00:00Z',
+    },
+    {
+      id: 'failed-gamma-b',
+      minerHotkey: 'gamma-hotkey',
+      topicSignatureHash: 'direction-b',
+      topicTags: ['revops'],
+      researchArea: 'ops',
+      outcomeLabel: 'failed',
+      statusKey: 'failed',
+      lastActivityAt: '2025-12-31T00:00:00Z',
+    },
+  ]
+
+  const byId = (loops) => loops.map((loop) => loop.id)
+  assert.deepEqual(
+    byId(filterResearchLabActivityLoops(activityLoops, { outcome: 'waiting_for_baseline' })),
+    ['waiting-alpha-a'],
+    'outcome filter should find explicit waiting_for_baseline status'
+  )
+  assert.deepEqual(
+    byId(filterResearchLabActivityLoops(activityLoops, { outcome: 'scoring' })),
+    ['scoring-alpha-a', 'scoring-alpha-b'],
+    'outcome filter should find only scoring statuses'
+  )
+  assert.deepEqual(
+    byId(filterResearchLabActivityLoops(activityLoops, { outcome: 'scored' })),
+    ['scored-beta-a'],
+    'Scored outcome filter should include scored_promising records'
+  )
+  assert.deepEqual(
+    byId(filterResearchLabActivityLoops(activityLoops, {
+      minerQuery: 'alpha',
+      direction: 'direction-a',
+      outcome: 'scoring',
+    })),
+    ['scoring-alpha-a'],
+    'miner, direction, and outcome filters should combine'
+  )
+
+  console.log(`research-lab-status: ${cases.length} status fixtures and filter fixtures passed`)
 } finally {
   await rm(outDir, { recursive: true, force: true })
 }

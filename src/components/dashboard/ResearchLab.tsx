@@ -18,9 +18,12 @@ import {
 } from '@/components/ui/select'
 import { cn } from '@/lib/utils'
 import {
+  filterResearchLabActivityLoops,
   isActiveResearchLabLoopStatus,
   isPromisingResearchLabLoopStatus,
   isScoredResearchLabLoopStatus,
+  RESEARCH_LAB_OUTCOME_FILTER_OPTIONS,
+  researchLabLoopDirectionKey as getResearchLabLoopDirectionKey,
 } from '@/lib/research-lab-status'
 
 type ResearchLabData = {
@@ -149,6 +152,7 @@ type ResearchLoop = {
   topicTags: string[]
   topicSignatureHash: string
   outcomeLabel: string
+  statusKey?: string
   statusLabel: string
   outcomeBand: string
   candidateCount: number
@@ -410,9 +414,10 @@ function LabEmissionSplit({ loops }: { loops: ResearchLoop[] }) {
         lastActivityAt: loop.lastActivityAt,
       }
       current.count += 1
-      if (isActiveResearchLabLoopStatus(loop.outcomeLabel)) current.active += 1
-      if (loop.scoredCandidateCount > 0 || isScoredResearchLabLoopStatus(loop.outcomeLabel)) current.scored += 1
-      if (isPromisingResearchLabLoopStatus(loop.outcomeLabel, loop.outcomeBand)) current.promising += 1
+      const statusKey = loopStatusKey(loop)
+      if (isActiveResearchLabLoopStatus(statusKey)) current.active += 1
+      if (isScoredResearchLabLoopStatus(statusKey)) current.scored += 1
+      if (isPromisingResearchLabLoopStatus(statusKey, loop.outcomeBand)) current.promising += 1
       if (new Date(loop.lastActivityAt).getTime() > new Date(current.lastActivityAt).getTime()) {
         current.lastActivityAt = loop.lastActivityAt
       }
@@ -1034,19 +1039,21 @@ function ResearchActivityDialog({
 }) {
   const [minerQuery, setMinerQuery] = useState('')
   const [direction, setDirection] = useState('all')
+  const [outcome, setOutcome] = useState('all')
   const [currentPage, setCurrentPage] = useState(1)
 
   useEffect(() => {
     if (!open) {
       setMinerQuery('')
       setDirection('all')
+      setOutcome('all')
       setCurrentPage(1)
     }
   }, [open])
 
   useEffect(() => {
     if (open) setCurrentPage(1)
-  }, [open, minerQuery, direction])
+  }, [open, minerQuery, direction, outcome])
 
   const directionOptions = useMemo(
     () => buildDirectionOptions(topicGroups, loops),
@@ -1062,16 +1069,8 @@ function ResearchActivityDialog({
   }, [loops])
 
   const filteredLoops = useMemo(() => {
-    const q = minerQuery.trim().toLowerCase()
-    return loops
-      .filter((loop) => {
-        if (direction !== 'all' && loopDirectionKey(loop) !== direction) return false
-        if (!q) return true
-        return loop.minerHotkey.toLowerCase().includes(q)
-      })
-      .slice()
-      .sort((a, b) => new Date(b.lastActivityAt).getTime() - new Date(a.lastActivityAt).getTime())
-  }, [loops, minerQuery, direction])
+    return filterResearchLabActivityLoops(loops, { minerQuery, direction, outcome })
+  }, [loops, minerQuery, direction, outcome])
 
   const totalPages = Math.max(1, Math.ceil(filteredLoops.length / ACTIVITY_PAGE_SIZE))
   const safePage = Math.min(currentPage, totalPages)
@@ -1162,6 +1161,27 @@ function ResearchActivityDialog({
                     className="font-mono text-[11px] text-[var(--muted)] focus:bg-[rgba(236,234,230,0.06)] focus:text-[var(--platinum)]"
                   >
                     {option.label} ({option.count})
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            <Select value={outcome} onValueChange={setOutcome}>
+              <SelectTrigger
+                size="sm"
+                className="h-8 w-full border-[var(--line-2)] bg-[rgba(236,234,230,0.025)] font-mono text-[11px] text-[var(--muted)] shadow-none hover:border-[var(--line-3)] hover:text-[var(--platinum)] sm:w-[210px]"
+                aria-label="Filter by outcome"
+              >
+                <SelectValue placeholder="All outcomes" />
+              </SelectTrigger>
+              <SelectContent className="z-[70] border-[var(--line-2)] bg-[var(--canvas-2)] text-[var(--platinum)]">
+                {RESEARCH_LAB_OUTCOME_FILTER_OPTIONS.map((option) => (
+                  <SelectItem
+                    key={option.value}
+                    value={option.value}
+                    className="font-mono text-[11px] text-[var(--muted)] focus:bg-[rgba(236,234,230,0.06)] focus:text-[var(--platinum)]"
+                  >
+                    {option.label}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -1415,12 +1435,19 @@ function buildDirectionOptions(groups: TopicGroup[], loops: ResearchLoop[]): Dir
   })
 }
 
+function loopStatusKey(loop: ResearchLoop): string {
+  return loop.statusKey || loop.outcomeLabel
+}
+
 function loopDirectionKey(loop: ResearchLoop): string {
-  return loop.topicSignatureHash || loop.topicTags.join('|') || loop.researchArea || 'generalist'
+  return getResearchLabLoopDirectionKey(loop)
 }
 
 function groupDirectionKey(group: TopicGroup): string {
-  return group.topicSignatureHash || group.topicTags.join('|') || 'generalist'
+  return getResearchLabLoopDirectionKey({
+    topicSignatureHash: group.topicSignatureHash,
+    topicTags: group.topicTags,
+  })
 }
 
 function directionLabel(tags: string[], fallback = 'generalist'): string {

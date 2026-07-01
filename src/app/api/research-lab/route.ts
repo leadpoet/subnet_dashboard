@@ -286,6 +286,7 @@ type NormalizedLoop = {
   topicTags: string[]
   topicSignatureHash: string
   outcomeLabel: string
+  statusKey: string
   statusLabel: string
   outcomeBand: string
   candidateCount: number
@@ -342,15 +343,15 @@ export async function GET() {
       loops,
       topicGroups,
       stats: {
-        activeLoopCount: loops.filter((loop) => isActiveResearchLabLoopStatus(loop.outcomeLabel)).length,
+        activeLoopCount: loops.filter((loop) => isActiveResearchLabLoopStatus(loop.statusKey)).length,
         opsPendingLoopCount: loops.filter((loop) =>
-          isPendingOrBlockingResearchLabLoopStatus(loop.outcomeLabel)
+          isPendingOrBlockingResearchLabLoopStatus(loop.statusKey)
         ).length,
         scoredLoopCount: loops.filter((loop) =>
-          loop.scoredCandidateCount > 0 || isScoredResearchLabLoopStatus(loop.outcomeLabel)
+          isScoredResearchLabLoopStatus(loop.statusKey)
         ).length,
         promisingLoopCount: loops.filter((loop) =>
-          isPromisingResearchLabLoopStatus(loop.outcomeLabel, loop.outcomeBand)
+          isPromisingResearchLabLoopStatus(loop.statusKey, loop.outcomeBand)
         ).length,
         totalBenchmarkIcpCount: benchmark?.itemCount ?? 0,
       },
@@ -878,7 +879,8 @@ async function fetchPublicLoops(supabase: ReturnType<typeof getSupabase>): Promi
         researchFocusSummary: row.research_focus_summary || '',
         topicTags: arrayOfStrings(row.current_topic_tags ?? row.topic_tags),
         topicSignatureHash: row.current_topic_signature_hash || row.topic_signature_hash,
-        outcomeLabel: displayStatus.key,
+        outcomeLabel: projectedOutcomeLabel,
+        statusKey: displayStatus.key,
         statusLabel: displayStatus.label,
         outcomeBand: displayStatus.band,
         candidateCount,
@@ -911,13 +913,13 @@ function groupLoopsByTopic(loops: NormalizedLoop[]): TopicGroup[] {
       latestActivityAt: loop.lastActivityAt,
     }
     group.total += 1
-    if (isActiveResearchLabLoopStatus(loop.outcomeLabel)) group.running += 1
-    if (isCompletedResearchLabLoopStatus(loop.outcomeLabel)) {
+    if (isActiveResearchLabLoopStatus(loop.statusKey)) group.running += 1
+    if (isCompletedResearchLabLoopStatus(loop.statusKey)) {
       group.completed += 1
     }
-    if (isScoredResearchLabLoopStatus(loop.outcomeLabel)) group.scored += 1
-    if (isPromisingResearchLabLoopStatus(loop.outcomeLabel, loop.outcomeBand)) group.promisingOrPromoted += 1
-    if (isNoGainOrFailedResearchLabLoopStatus(loop.outcomeLabel, loop.outcomeBand)) group.noGainOrFailed += 1
+    if (isScoredResearchLabLoopStatus(loop.statusKey)) group.scored += 1
+    if (isPromisingResearchLabLoopStatus(loop.statusKey, loop.outcomeBand)) group.promisingOrPromoted += 1
+    if (isNoGainOrFailedResearchLabLoopStatus(loop.statusKey, loop.outcomeBand)) group.noGainOrFailed += 1
     if (new Date(loop.lastActivityAt).getTime() > new Date(group.latestActivityAt).getTime()) {
       group.latestActivityAt = loop.lastActivityAt
     }
