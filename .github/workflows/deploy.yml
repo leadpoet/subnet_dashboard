@@ -22,7 +22,7 @@ jobs:
             cd subnet_dashboard
             git pull origin main
             export BUILD_TIME="$(date -u +%Y%m%d%H%M%S)"
-            NODE_OPTIONS='--max-old-space-size=512' npm run build
+            NODE_OPTIONS='--max-old-space-size=768' npm run build
             NODE_OPTIONS='--max-old-space-size=512' pm2 restart subnet-dashboard --update-env || NODE_OPTIONS='--max-old-space-size=512' pm2 start npm --name subnet-dashboard --max-memory-restart 700M -- start
             pm2 save
             echo "Deploy complete: $(date)"
