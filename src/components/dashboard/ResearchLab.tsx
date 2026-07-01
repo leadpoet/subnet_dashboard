@@ -287,7 +287,7 @@ export function ResearchLab({
           </button>
         </div>
         <h2 className="mt-3 max-w-[600px] font-display text-[26px] font-medium leading-[1.12] tracking-[-0.025em] text-[var(--platinum)] md:text-[30px]">
-          Current model benchmark and research directions
+          Model benchmark and improvement pipeline
         </h2>
       </header>
 
@@ -386,7 +386,7 @@ function Hero({ benchmark }: { benchmark: BenchmarkReport | null }) {
             <b className="font-medium text-[var(--platinum)]">{splitSummary}</b>
           </>
         ) : null}
-        . Research loops are scored against paired current-model runs.
+        . Each loop tests whether a miner&apos;s change improves the current model.
       </p>
 
       <div className="mt-6 font-mono text-[11px] text-[var(--muted-2)]">
@@ -401,9 +401,9 @@ function Hero({ benchmark }: { benchmark: BenchmarkReport | null }) {
  * ============================================================ */
 function KpiRail({ stats }: { stats: ResearchLabData['stats'] }) {
   const items = [
-    { label: 'Active loops', value: stats.activeLoopCount, sub: 'research runs in progress' },
-    { label: 'Scored loops', value: stats.scoredLoopCount, sub: 'evaluated against benchmark' },
-    { label: 'Promising loops', value: stats.promisingLoopCount, sub: 'matched or beat baseline' },
+    { label: 'Live experiments', value: stats.activeLoopCount, sub: 'research running now' },
+    { label: 'Completed tests', value: stats.scoredLoopCount, sub: 'evaluated against current model' },
+    { label: 'Model gains', value: stats.promisingLoopCount, sub: 'changes that beat baseline' },
   ]
   return (
     <section className="grid grid-cols-3 border-y border-[var(--line)]">
