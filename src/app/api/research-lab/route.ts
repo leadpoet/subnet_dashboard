@@ -241,6 +241,16 @@ type PublicLoopRow = {
   current_ops_reason?: string | null
   current_status_detail?: string | null
   current_ops_warnings?: unknown
+  improvement_gate_decision?: string | null
+  current_improvement_gate_decision?: string | null
+  promotion_status?: string | null
+  current_promotion_status?: string | null
+  promotion_event_type?: string | null
+  current_promotion_event_type?: string | null
+  promotion_event?: string | null
+  current_promotion_event?: string | null
+  event_type?: string | null
+  current_event_type?: string | null
   created_at: string
 }
 
@@ -274,6 +284,19 @@ type PublicLoopEventDoc = {
   current_ops_reason?: string
   current_status_detail?: string
   current_ops_warnings?: unknown
+  improvement_gate_decision?: string
+  current_improvement_gate_decision?: string
+  improvement_gate?: Record<string, unknown> | null
+  improvementGate?: Record<string, unknown> | null
+  promotion_status?: string
+  current_promotion_status?: string
+  promotion_event_type?: string
+  current_promotion_event_type?: string
+  promotion_event?: string
+  current_promotion_event?: string
+  promotion?: Record<string, unknown> | null
+  event_type?: string
+  current_event_type?: string
   score_bundle_count?: number
   candidate_status_counts?: Record<string, number>
   candidate_reason_counts?: Record<string, number>
@@ -1581,6 +1604,8 @@ async function fetchPublicLoops(
       const projectedOutcomeLabel = row.current_outcome_label || 'submitted'
       const projectedOutcomeBand = row.current_outcome_band || 'pending'
       const doc = row.current_event_doc ?? {}
+      const improvementGate = objectRecord(doc.improvement_gate) ?? objectRecord(doc.improvementGate)
+      const promotionDoc = objectRecord(doc.promotion)
       const lastActivityAt = row.current_last_activity_at || row.created_at
       const candidateCount = numberOr(row.current_candidate_count, 0)
       const scoredCandidateCount = numberOr(row.current_scored_candidate_count, 0)
@@ -1625,6 +1650,35 @@ async function fetchPublicLoops(
         doc.ops_warnings ??
         doc.current_ops_warnings
       const opsWarnings = warningStrings(opsWarningsSource)
+      const improvementGateDecision =
+        stringOr(row.improvement_gate_decision) ??
+        stringOr(row.current_improvement_gate_decision) ??
+        stringOr(doc.improvement_gate_decision) ??
+        stringOr(doc.current_improvement_gate_decision) ??
+        stringOr(improvementGate?.decision)
+      const promotionStatus =
+        stringOr(row.promotion_status) ??
+        stringOr(row.current_promotion_status) ??
+        stringOr(doc.promotion_status) ??
+        stringOr(doc.current_promotion_status) ??
+        stringOr(promotionDoc?.status)
+      const promotionEventType =
+        stringOr(row.promotion_event_type) ??
+        stringOr(row.current_promotion_event_type) ??
+        stringOr(doc.promotion_event_type) ??
+        stringOr(doc.current_promotion_event_type) ??
+        stringOr(promotionDoc?.event_type)
+      const promotionEvent =
+        stringOr(row.promotion_event) ??
+        stringOr(row.current_promotion_event) ??
+        stringOr(doc.promotion_event) ??
+        stringOr(doc.current_promotion_event) ??
+        stringOr(promotionDoc?.event)
+      const eventType =
+        stringOr(row.event_type) ??
+        stringOr(row.current_event_type) ??
+        stringOr(doc.event_type) ??
+        stringOr(doc.current_event_type)
       const displayStatus = deriveResearchLabLoopStatus({
         publicStatus,
         paymentState,
@@ -1654,6 +1708,11 @@ async function fetchPublicLoops(
         currentQueueStatus: row.current_queue_status ?? doc.queue_status,
         currentReceiptStatus: row.current_receipt_status ?? doc.receipt_status,
         currentStatus: row.current_status,
+        improvementGateDecision,
+        promotionStatus,
+        promotionEventType,
+        promotionEvent,
+        eventType,
       })
       return {
         cardId: row.card_id,
@@ -1836,6 +1895,11 @@ function warningStrings(value: unknown): string[] {
 
 function stringOr(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value.trim() : undefined
+}
+
+function objectRecord(value: unknown): Record<string, unknown> | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  return value as Record<string, unknown>
 }
 
 function dominantCountKey(counts: Record<string, number> | undefined): string | undefined {

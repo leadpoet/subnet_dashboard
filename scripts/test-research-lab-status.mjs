@@ -305,6 +305,104 @@ try {
       },
     },
     {
+      name: 'scored_promising small_gain renders Small gain below threshold',
+      input: {
+        outcomeLabel: 'scored_promising',
+        outcomeBand: 'small_gain',
+        currentCandidateStatus: 'scored',
+        improvementGateDecision: 'not_eligible',
+        runId: 'run-small-gain',
+        receiptId: 'receipt-small-gain',
+      },
+      expected: {
+        key: 'small_gain',
+        label: 'Small gain',
+        band: 'small_gain',
+        active: false,
+        scoring: false,
+        promising: false,
+        detail: 'Below threshold',
+      },
+    },
+    {
+      name: 'passed threshold band renders Model improved',
+      input: {
+        outcomeLabel: 'scored_promising',
+        outcomeBand: 'passed_threshold',
+        currentCandidateStatus: 'scored',
+        runId: 'run-passed-threshold',
+        receiptId: 'receipt-passed-threshold',
+      },
+      expected: {
+        key: 'scored',
+        label: 'Model improved',
+        band: 'passed_threshold',
+        active: false,
+        scoring: false,
+        promising: true,
+      },
+    },
+    {
+      name: 'rejected below-threshold promotion event is not Model improved',
+      input: {
+        outcomeLabel: 'scored_promising',
+        outcomeBand: 'small_gain',
+        currentCandidateStatus: 'scored',
+        promotionStatus: 'rejected',
+        promotionEventType: 'below_threshold',
+        runId: 'run-rejected-promotion',
+        receiptId: 'receipt-rejected-promotion',
+      },
+      expected: {
+        key: 'small_gain',
+        label: 'Small gain',
+        band: 'small_gain',
+        active: false,
+        scoring: false,
+        promising: false,
+        detail: 'Below threshold',
+      },
+    },
+    {
+      name: 'not eligible improvement gate is not Model improved',
+      input: {
+        outcomeLabel: 'scored_promising',
+        outcomeBand: 'small_gain',
+        currentCandidateStatus: 'scored',
+        improvementGateDecision: 'not_eligible',
+        runId: 'run-not-eligible',
+        receiptId: 'receipt-not-eligible',
+      },
+      expected: {
+        key: 'small_gain',
+        label: 'Small gain',
+        band: 'small_gain',
+        active: false,
+        scoring: false,
+        promising: false,
+        detail: 'Below threshold',
+      },
+    },
+    {
+      name: 'promotion pass event renders Model improved',
+      input: {
+        outcomeLabel: 'scored_promising',
+        outcomeBand: 'pending',
+        currentCandidateStatus: 'scored',
+        promotionEventType: 'active_version_created',
+        runId: 'run-active-version',
+        receiptId: 'receipt-active-version',
+      },
+      expected: {
+        key: 'scored',
+        label: 'Model improved',
+        band: 'passed_threshold',
+        active: false,
+        scoring: false,
+        promising: true,
+      },
+    },
+    {
       name: 'scored_no_gain with failed band and failed queue stays Completed',
       input: {
         outcomeLabel: 'scored_no_gain',
@@ -371,6 +469,9 @@ try {
     assert.equal(actual.band, fixture.expected.band, fixture.name)
     assert.equal(actual.active, fixture.expected.active, fixture.name)
     assert.equal(actual.scoring, fixture.expected.scoring, fixture.name)
+    if ('promising' in fixture.expected) {
+      assert.equal(actual.promising, fixture.expected.promising, fixture.name)
+    }
     if (fixture.expected.detail) {
       assert.equal(actual.note?.detail, fixture.expected.detail, fixture.name)
     }
@@ -387,6 +488,7 @@ try {
     'needs_rescore',
     'blocked_for_credit',
     'scored_no_gain',
+    'small_gain',
     'scored',
     'completed_no_candidate',
     'failed',
@@ -517,14 +619,26 @@ try {
       lastActivityAt: '2026-01-03T00:00:00Z',
     },
     {
-      id: 'scored-beta-a',
+      id: 'small-gain-beta-a',
       minerHotkey: 'beta-hotkey',
       topicSignatureHash: 'direction-a',
       topicTags: ['query_generation'],
       researchArea: 'ops',
       outcomeLabel: 'scored_promising',
-      statusKey: 'scored_promising',
+      outcomeBand: 'small_gain',
+      statusKey: 'small_gain',
       lastActivityAt: '2026-01-02T00:00:00Z',
+    },
+    {
+      id: 'improved-beta-a',
+      minerHotkey: 'beta-hotkey',
+      topicSignatureHash: 'direction-a',
+      topicTags: ['query_generation'],
+      researchArea: 'ops',
+      outcomeLabel: 'scored_promising',
+      outcomeBand: 'passed_threshold',
+      statusKey: 'scored',
+      lastActivityAt: '2026-01-02T01:00:00Z',
     },
     {
       id: 'scoring-alpha-b',
@@ -620,12 +734,17 @@ try {
   )
   assert.deepEqual(
     byId(filterResearchLabActivityLoops(activityLoops, { status: 'scored' })),
-    ['scored-beta-a'],
-    'Model improved status filter should include scored_promising records'
+    ['improved-beta-a'],
+    'Model improved status filter should include only threshold-passing records'
+  )
+  assert.deepEqual(
+    byId(filterResearchLabActivityLoops(activityLoops, { status: 'small_gain' })),
+    ['small-gain-beta-a'],
+    'Small gain filter should include below-threshold scored_promising records'
   )
   assert.deepEqual(
     byId(filterResearchLabActivityLoops(activityLoops, { direction: 'query_generation' })),
-    ['scoring-alpha-a', 'scored-beta-a'],
+    ['scoring-alpha-a', 'improved-beta-a', 'small-gain-beta-a'],
     'direction filter should match loops where the selected tag is one of several tags'
   )
   assert.deepEqual(
