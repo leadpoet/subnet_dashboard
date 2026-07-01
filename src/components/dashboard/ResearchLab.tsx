@@ -23,7 +23,7 @@ import {
   isPromisingResearchLabLoopStatus,
   isScoredResearchLabLoopStatus,
   researchLabOutcomeFilterOptionsWithCounts,
-  researchLabLoopDirectionKey as getResearchLabLoopDirectionKey,
+  researchLabLoopDirectionKeys as getResearchLabLoopDirectionKeys,
 } from '@/lib/research-lab-status'
 
 type ResearchLabData = {
@@ -274,7 +274,6 @@ export function ResearchLab({ onSync }: { onSync?: () => void } = {}) {
       <ResearchActivityDialog
         open={activityOpen}
         loops={loops}
-        topicGroups={topicGroups}
         onOpenChange={setActivityOpen}
       />
 
@@ -1029,12 +1028,10 @@ function IssueRow({ issue }: { issue: BenchmarkIssue }) {
 function ResearchActivityDialog({
   open,
   loops,
-  topicGroups,
   onOpenChange,
 }: {
   open: boolean
   loops: ResearchLoop[]
-  topicGroups: TopicGroup[]
   onOpenChange: (open: boolean) => void
 }) {
   const [minerQuery, setMinerQuery] = useState('')
@@ -1056,8 +1053,8 @@ function ResearchActivityDialog({
   }, [open, minerQuery, direction, outcome])
 
   const directionOptions = useMemo(
-    () => buildDirectionOptions(topicGroups, loops),
-    [topicGroups, loops]
+    () => buildDirectionOptions(loops),
+    [loops]
   )
 
   const minerCount = useMemo(() => {
@@ -1416,27 +1413,18 @@ type DirectionOption = {
   count: number
 }
 
-function buildDirectionOptions(groups: TopicGroup[], loops: ResearchLoop[]): DirectionOption[] {
+function buildDirectionOptions(loops: ResearchLoop[]): DirectionOption[] {
   const options = new Map<string, DirectionOption>()
 
-  for (const group of groups) {
-    const value = groupDirectionKey(group)
-    options.set(value, {
-      value,
-      label: directionLabel(group.topicTags),
-      count: group.total,
-    })
-  }
-
   for (const loop of loops) {
-    const value = loopDirectionKey(loop)
-    if (options.has(value)) continue
-    const matchingLoops = loops.filter((item) => loopDirectionKey(item) === value)
-    options.set(value, {
-      value,
-      label: directionLabel(loop.topicTags, loop.researchArea),
-      count: matchingLoops.length,
-    })
+    for (const value of loopDirectionKeys(loop)) {
+      const current = options.get(value)
+      options.set(value, {
+        value,
+        label: readableTag(value),
+        count: (current?.count ?? 0) + 1,
+      })
+    }
   }
 
   return Array.from(options.values()).sort((a, b) => {
@@ -1449,22 +1437,8 @@ function loopStatusKey(loop: ResearchLoop): string {
   return loop.statusKey || loop.outcomeLabel
 }
 
-function loopDirectionKey(loop: ResearchLoop): string {
-  return getResearchLabLoopDirectionKey(loop)
-}
-
-function groupDirectionKey(group: TopicGroup): string {
-  return getResearchLabLoopDirectionKey({
-    topicSignatureHash: group.topicSignatureHash,
-    topicTags: group.topicTags,
-  })
-}
-
-function directionLabel(tags: string[], fallback = 'generalist'): string {
-  const visible = tags.filter(Boolean).slice(0, 2).map(readableTag)
-  if (visible.length === 0) return readableTag(fallback)
-  const suffix = tags.length > visible.length ? ` +${tags.length - visible.length}` : ''
-  return `${visible.join(' / ')}${suffix}`
+function loopDirectionKeys(loop: ResearchLoop): string[] {
+  return getResearchLabLoopDirectionKeys(loop)
 }
 
 function OutcomeBadge({ label, band }: { label: string; band: string }) {

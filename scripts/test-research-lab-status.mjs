@@ -284,7 +284,7 @@ try {
       id: 'scoring-alpha-a',
       minerHotkey: 'alpha-hotkey',
       topicSignatureHash: 'direction-a',
-      topicTags: ['sales_ops'],
+      topicTags: ['intent_quality', 'query_generation'],
       researchArea: 'ops',
       outcomeLabel: 'scoring',
       statusKey: 'scoring',
@@ -294,7 +294,7 @@ try {
       id: 'scored-no-gain-failed-ops',
       minerHotkey: 'alpha-hotkey',
       topicSignatureHash: 'direction-a',
-      topicTags: ['sales_ops'],
+      topicTags: ['intent_quality', 'evidence_freshness'],
       researchArea: 'ops',
       outcomeLabel: 'scored_no_gain',
       statusKey: deriveResearchLabLoopStatus({
@@ -310,7 +310,7 @@ try {
       id: 'waiting-alpha-a',
       minerHotkey: 'alpha-hotkey',
       topicSignatureHash: 'direction-a',
-      topicTags: ['sales_ops'],
+      topicTags: ['intent_quality'],
       researchArea: 'ops',
       outcomeLabel: 'scoring',
       statusKey: 'waiting_for_baseline',
@@ -320,7 +320,7 @@ try {
       id: 'scored-beta-a',
       minerHotkey: 'beta-hotkey',
       topicSignatureHash: 'direction-a',
-      topicTags: ['sales_ops'],
+      topicTags: ['query_generation'],
       researchArea: 'ops',
       outcomeLabel: 'scored_promising',
       statusKey: 'scored_promising',
@@ -330,7 +330,7 @@ try {
       id: 'scoring-alpha-b',
       minerHotkey: 'alpha-hotkey',
       topicSignatureHash: 'direction-b',
-      topicTags: ['revops'],
+      topicTags: ['revops', 'intent_quality'],
       researchArea: 'ops',
       outcomeLabel: 'scoring',
       statusKey: 'scoring',
@@ -350,7 +350,7 @@ try {
       id: 'failed-alpha-a',
       minerHotkey: 'alpha-hotkey',
       topicSignatureHash: 'direction-a',
-      topicTags: ['sales_ops'],
+      topicTags: ['intent_quality'],
       researchArea: 'ops',
       outcomeLabel: 'failed',
       statusKey: deriveResearchLabLoopStatus({
@@ -389,9 +389,19 @@ try {
     'Scored outcome filter should include scored_promising records'
   )
   assert.deepEqual(
+    byId(filterResearchLabActivityLoops(activityLoops, { direction: 'query_generation' })),
+    ['scoring-alpha-a', 'scored-beta-a'],
+    'direction filter should match loops where the selected tag is one of several tags'
+  )
+  assert.deepEqual(
+    byId(filterResearchLabActivityLoops(activityLoops, { direction: 'evidence_freshness' })),
+    ['scored-no-gain-failed-ops'],
+    'direction filter should expose isolated tags instead of combined signatures'
+  )
+  assert.deepEqual(
     byId(filterResearchLabActivityLoops(activityLoops, {
       minerQuery: 'alpha',
-      direction: 'direction-a',
+      direction: 'query_generation',
       outcome: 'scoring',
     })),
     ['scoring-alpha-a'],
@@ -400,7 +410,7 @@ try {
 
   const countedOutcomeOptions = researchLabOutcomeFilterOptionsWithCounts(activityLoops, {
     minerQuery: 'alpha',
-    direction: 'direction-a',
+    direction: 'intent_quality',
   })
   const countedOutcomeValues = countedOutcomeOptions.map((option) => option.value)
   const countByValue = Object.fromEntries(
@@ -411,8 +421,8 @@ try {
     ['all', 'scoring', 'waiting_for_baseline', 'failed', 'scored_no_gain'],
     'outcome dropdown should hide empty buckets'
   )
-  assert.equal(countByValue.all, 4, 'All outcomes count should match visible miner+direction records')
-  assert.equal(countByValue.scoring, 1, 'Scoring outcome count should match visible filtered records')
+  assert.equal(countByValue.all, 5, 'All outcomes count should match visible miner+direction records')
+  assert.equal(countByValue.scoring, 2, 'Scoring outcome count should match visible filtered records')
   assert.equal(countByValue.waiting_for_baseline, 1, 'Waiting outcome count should match visible filtered records')
   assert.equal(countByValue.scored_no_gain, 1, 'Scored, no gain outcome count should match visible filtered records')
   assert.equal(countByValue.failed, 1, 'Failed outcome count should match visible filtered records')

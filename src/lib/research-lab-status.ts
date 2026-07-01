@@ -251,8 +251,23 @@ export function researchLabOutcomeFilterKey(value: string | null | undefined): s
 }
 
 export function researchLabLoopDirectionKey(loop: ResearchLabActivityFilterInput): string {
+  return researchLabLoopDirectionKeys(loop)[0] ?? 'generalist'
+}
+
+export function researchLabLoopDirectionKeys(loop: ResearchLabActivityFilterInput): string[] {
   const tags = Array.isArray(loop.topicTags) ? loop.topicTags.filter(Boolean) : []
-  return normalize(loop.topicSignatureHash) || tags.join('|') || normalize(loop.researchArea) || 'generalist'
+  const tagKeys = Array.from(new Set(tags.map(normalize).filter(Boolean)))
+  if (tagKeys.length > 0) return tagKeys
+  return [normalize(loop.researchArea) || 'generalist']
+}
+
+export function researchLabLoopMatchesDirection(
+  loop: ResearchLabActivityFilterInput,
+  direction: string | null | undefined,
+): boolean {
+  const normalizedDirection = normalize(direction)
+  if (!normalizedDirection || normalizedDirection === 'all') return true
+  return researchLabLoopDirectionKeys(loop).includes(normalizedDirection)
 }
 
 export function researchLabOutcomeFilterOptionsWithCounts<T extends ResearchLabActivityFilterInput>(
@@ -290,7 +305,7 @@ export function filterResearchLabActivityLoops<T extends ResearchLabActivityFilt
 
   return loops
     .filter((loop) => {
-      if (direction !== 'all' && researchLabLoopDirectionKey(loop) !== direction) return false
+      if (!researchLabLoopMatchesDirection(loop, direction)) return false
       if (outcome !== 'all' && researchLabOutcomeFilterKey(loop.statusKey || loop.outcomeLabel) !== outcome) return false
       if (!q) return true
       return normalize(loop.minerHotkey).includes(q)
