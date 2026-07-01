@@ -269,6 +269,7 @@ type ResearchLabPayload = {
   loops: NormalizedLoop[]
   topicGroups: TopicGroup[]
   labMinerSpend: LabMinerSpendRollup
+  labMinerActivity: LabMinerActivityRollup
   stats: {
     activeLoopCount: number
     opsPendingLoopCount: number
@@ -282,6 +283,7 @@ type ResearchLabPayload = {
 type LabMinerSpendRollup = {
   window: LabMinerSpendWindow
   byHotkey: Record<string, LabMinerSpendEntry>
+  allTime: LabMinerAllTimeRollup
 }
 
 type LabMinerSpendWindow = {
@@ -295,6 +297,36 @@ type LabMinerSpendEntry = {
   scheduledReimbursementUsd: number
   activeAwardCount: number
   reimbursementEpochs: number | null
+}
+
+type LabMinerAllTimeRollup = {
+  firstEpoch: number | null
+  latestEpoch: number | null
+  allocationSnapshotCount: number
+  byHotkey: Record<string, LabMinerAllTimeEntry>
+}
+
+type LabMinerAllTimeEntry = {
+  alphaEarned: number
+  computeSpendUsd: number
+  scheduledReimbursementUsd: number
+  awardCount: number
+  reimbursementEpochs: number | null
+  alphaAllocationCount: number
+}
+
+type LabMinerActivityRollup = {
+  windowStartedAt: string
+  allTime: Record<string, LabMinerActivityEntry>
+  last24h: Record<string, LabMinerActivityEntry>
+}
+
+type LabMinerActivityEntry = {
+  count: number
+  active: number
+  scored: number
+  promising: number
+  lastActivityAt: string
 }
 
 type NormalizedBenchmark = {
@@ -390,6 +422,24 @@ type ReimbursementAwardRow = {
   reimbursement_epochs: number | null
 }
 
+type EmissionAllocationSnapshotRow = {
+  epoch: number | null
+  allocation_doc: EmissionAllocationDoc | null
+  created_at: string | null
+}
+
+type EmissionAllocationDoc = {
+  reimbursement_allocations?: EmissionAllocationEntry[]
+  champion_allocations?: EmissionAllocationEntry[]
+  queued_champion_allocations?: EmissionAllocationEntry[]
+}
+
+type EmissionAllocationEntry = {
+  miner_hotkey?: string | null
+  paid_alpha_percent?: number | string | null
+  alpha_percent?: number | string | null
+}
+
 let cache: CachedResponse | null = null
 
 function getSupabase() {
@@ -408,17 +458,20 @@ export async function GET() {
     }
 
     const supabase = getSupabase()
-    const [benchmark, loops, labMinerSpend] = await Promise.all([
+    const [benchmark, loops, allLoops, labMinerSpend] = await Promise.all([
       fetchLatestBenchmark(supabase),
       fetchPublicLoops(supabase),
+      fetchPublicLoops(supabase, 5_000, 5_000),
       fetchLabMinerSpend(supabase),
     ])
     const topicGroups = groupLoopsByTopic(loops)
+    const labMinerActivity = buildLabMinerActivityRollup(allLoops)
     const data: ResearchLabPayload = {
       benchmark,
       loops,
       topicGroups,
       labMinerSpend,
+      labMinerActivity,
       stats: {
         activeLoopCount: loops.filter((loop) => isActiveResearchLabLoopStatus(loop.statusKey)).length,
         opsPendingLoopCount: loops.filter((loop) =>
@@ -903,21 +956,44 @@ function stripInternalIcpFields(icps: PublicIcpEntry[]): PublicIcpEntry[] {
 
 async function fetchLabMinerSpend(supabase: ReturnType<typeof getSupabase>): Promise<LabMinerSpendRollup> {
   const empty = emptyLabMinerSpend()
-  const { data: scheduleData, error: scheduleError } = await supabase
-    .from('research_reimbursement_schedules')
-    .select('award_id, schedule_status, start_epoch, epoch_count, total_microusd')
-    .eq('schedule_status', 'scheduled')
-    .order('start_epoch', { ascending: false, nullsFirst: false })
-    .limit(1000)
+  const [scheduleResult, allAwardsResult, allocationResult] = await Promise.all([
+    supabase
+      .from('research_reimbursement_schedules')
+      .select('award_id, schedule_status, start_epoch, epoch_count, total_microusd')
+      .eq('schedule_status', 'scheduled')
+      .order('start_epoch', { ascending: false, nullsFirst: false })
+      .limit(5_000),
+    supabase
+      .from('research_reimbursement_awards')
+      .select('award_id, miner_hotkey, eligible_cost_microusd, target_reimbursement_microusd, reimbursement_epochs')
+      .limit(5_000),
+    supabase
+      .from('research_lab_emission_allocation_snapshots')
+      .select('epoch, allocation_doc, created_at')
+      .order('epoch', { ascending: true, nullsFirst: false })
+      .limit(5_000),
+  ])
 
-  if (scheduleError) {
-    console.error('[Research Lab API] reimbursement schedule query failed:', scheduleError)
-    return empty
+  if (scheduleResult.error) {
+    console.error('[Research Lab API] reimbursement schedule query failed:', scheduleResult.error)
+  }
+  if (allAwardsResult.error) {
+    console.error('[Research Lab API] all-time reimbursement award query failed:', allAwardsResult.error)
+  }
+  if (allocationResult.error) {
+    console.error('[Research Lab API] emission allocation snapshot query failed:', allocationResult.error)
   }
 
-  const schedules = ((scheduleData ?? []) as ReimbursementScheduleRow[])
+  const allTime = buildLabMinerAllTimeRollup(
+    (allAwardsResult.data ?? []) as ReimbursementAwardRow[],
+    (allocationResult.data ?? []) as EmissionAllocationSnapshotRow[]
+  )
+
+  if (scheduleResult.error) return { ...empty, allTime }
+
+  const schedules = ((scheduleResult.data ?? []) as ReimbursementScheduleRow[])
     .filter((row) => row.award_id && Number.isFinite(Number(row.start_epoch)))
-  if (schedules.length === 0) return empty
+  if (schedules.length === 0) return { ...empty, allTime }
 
   const latestEpoch = Math.max(...schedules.map((row) => numberOr(row.start_epoch, 0)))
   const activeSchedules = schedules.filter((row) => {
@@ -929,6 +1005,7 @@ async function fetchLabMinerSpend(supabase: ReturnType<typeof getSupabase>): Pro
     return {
       window: { latestEpoch, epochCount: null, activeScheduleCount: 0 },
       byHotkey: {},
+      allTime,
     }
   }
 
@@ -946,6 +1023,7 @@ async function fetchLabMinerSpend(supabase: ReturnType<typeof getSupabase>): Pro
       return {
         window: spendWindowForSchedules(latestEpoch, activeSchedules),
         byHotkey: {},
+        allTime,
       }
     }
     awardRows.push(...((awardData ?? []) as ReimbursementAwardRow[]))
@@ -990,16 +1068,92 @@ async function fetchLabMinerSpend(supabase: ReturnType<typeof getSupabase>): Pro
         },
       ])
     ),
+    allTime,
   }
 }
 
-async function fetchPublicLoops(supabase: ReturnType<typeof getSupabase>): Promise<NormalizedLoop[]> {
+function buildLabMinerAllTimeRollup(
+  awards: ReimbursementAwardRow[],
+  snapshots: EmissionAllocationSnapshotRow[],
+): LabMinerAllTimeRollup {
+  const byHotkey: Record<string, LabMinerAllTimeEntry> = {}
+  for (const award of awards) {
+    const hotkey = award.miner_hotkey ? String(award.miner_hotkey) : ''
+    if (!hotkey) continue
+    const current = byHotkey[hotkey] ?? emptyLabMinerAllTimeEntry()
+    current.computeSpendUsd += microusdToUsd(award.eligible_cost_microusd)
+    current.scheduledReimbursementUsd += microusdToUsd(award.target_reimbursement_microusd)
+    current.awardCount += 1
+    current.reimbursementEpochs = Math.max(
+      current.reimbursementEpochs ?? 0,
+      Math.round(numberOr(award.reimbursement_epochs, 0))
+    ) || current.reimbursementEpochs
+    byHotkey[hotkey] = current
+  }
+
+  const epochs = snapshots
+    .map((snapshot) => numberOr(snapshot.epoch, NaN))
+    .filter((epoch) => Number.isFinite(epoch))
+  for (const snapshot of snapshots) {
+    const doc = snapshot.allocation_doc ?? {}
+    for (const allocation of labAllocationEntries(doc)) {
+      const hotkey = allocation.miner_hotkey ? String(allocation.miner_hotkey) : ''
+      if (!hotkey) continue
+      const current = byHotkey[hotkey] ?? emptyLabMinerAllTimeEntry()
+      current.alphaEarned += numberOr(allocation.paid_alpha_percent ?? allocation.alpha_percent, 0)
+      current.alphaAllocationCount += 1
+      byHotkey[hotkey] = current
+    }
+  }
+
+  return {
+    firstEpoch: epochs.length ? Math.min(...epochs) : null,
+    latestEpoch: epochs.length ? Math.max(...epochs) : null,
+    allocationSnapshotCount: snapshots.length,
+    byHotkey: Object.fromEntries(
+      Object.entries(byHotkey).map(([hotkey, entry]) => [
+        hotkey,
+        {
+          ...entry,
+          alphaEarned: roundAlpha(entry.alphaEarned),
+          computeSpendUsd: roundUsd(entry.computeSpendUsd),
+          scheduledReimbursementUsd: roundUsd(entry.scheduledReimbursementUsd),
+        },
+      ])
+    ),
+  }
+}
+
+function labAllocationEntries(doc: EmissionAllocationDoc): EmissionAllocationEntry[] {
+  return [
+    ...(Array.isArray(doc.reimbursement_allocations) ? doc.reimbursement_allocations : []),
+    ...(Array.isArray(doc.champion_allocations) ? doc.champion_allocations : []),
+    ...(Array.isArray(doc.queued_champion_allocations) ? doc.queued_champion_allocations : []),
+  ]
+}
+
+function emptyLabMinerAllTimeEntry(): LabMinerAllTimeEntry {
+  return {
+    alphaEarned: 0,
+    computeSpendUsd: 0,
+    scheduledReimbursementUsd: 0,
+    awardCount: 0,
+    reimbursementEpochs: null,
+    alphaAllocationCount: 0,
+  }
+}
+
+async function fetchPublicLoops(
+  supabase: ReturnType<typeof getSupabase>,
+  limit = LOOP_LIMIT,
+  fetchLimit = LOOP_FETCH_LIMIT,
+): Promise<NormalizedLoop[]> {
   const { data, error } = await supabase
     .from('research_lab_public_loop_card_current')
     .select('*')
     .order('current_last_activity_at', { ascending: false, nullsFirst: false })
     .order('created_at', { ascending: false })
-    .limit(LOOP_FETCH_LIMIT)
+    .limit(fetchLimit)
 
   if (error) {
     console.error('[Research Lab API] public loop query failed:', error)
@@ -1008,7 +1162,7 @@ async function fetchPublicLoops(supabase: ReturnType<typeof getSupabase>): Promi
 
   return ((data ?? []) as PublicLoopRow[])
     .filter(isVisiblePublicLoop)
-    .slice(0, LOOP_LIMIT)
+    .slice(0, limit)
     .map((row) => {
       const projectedOutcomeLabel = row.current_outcome_label || 'submitted'
       const projectedOutcomeBand = row.current_outcome_band || 'pending'
@@ -1156,6 +1310,42 @@ function groupLoopsByTopic(loops: NormalizedLoop[]): TopicGroup[] {
   )
 }
 
+function buildLabMinerActivityRollup(loops: NormalizedLoop[]): LabMinerActivityRollup {
+  const windowStartedAt = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
+  const allTime: Record<string, LabMinerActivityEntry> = {}
+  const last24h: Record<string, LabMinerActivityEntry> = {}
+  for (const loop of loops) {
+    addLabMinerActivityEntry(allTime, loop)
+    if (new Date(loop.lastActivityAt).getTime() >= new Date(windowStartedAt).getTime()) {
+      addLabMinerActivityEntry(last24h, loop)
+    }
+  }
+  return { windowStartedAt, allTime, last24h }
+}
+
+function addLabMinerActivityEntry(
+  rollup: Record<string, LabMinerActivityEntry>,
+  loop: NormalizedLoop,
+) {
+  const hotkey = loop.minerHotkey
+  if (!hotkey) return
+  const current = rollup[hotkey] ?? {
+    count: 0,
+    active: 0,
+    scored: 0,
+    promising: 0,
+    lastActivityAt: loop.lastActivityAt,
+  }
+  current.count += 1
+  if (isActiveResearchLabLoopStatus(loop.statusKey)) current.active += 1
+  if (isScoredResearchLabLoopStatus(loop.statusKey)) current.scored += 1
+  if (isPromisingResearchLabLoopStatus(loop.statusKey, loop.outcomeBand)) current.promising += 1
+  if (new Date(loop.lastActivityAt).getTime() > new Date(current.lastActivityAt).getTime()) {
+    current.lastActivityAt = loop.lastActivityAt
+  }
+  rollup[hotkey] = current
+}
+
 function emptyLabMinerSpend(): LabMinerSpendRollup {
   return {
     window: {
@@ -1164,6 +1354,12 @@ function emptyLabMinerSpend(): LabMinerSpendRollup {
       activeScheduleCount: 0,
     },
     byHotkey: {},
+    allTime: {
+      firstEpoch: null,
+      latestEpoch: null,
+      allocationSnapshotCount: 0,
+      byHotkey: {},
+    },
   }
 }
 
@@ -1186,6 +1382,10 @@ function microusdToUsd(value: unknown): number {
 }
 
 function roundUsd(value: number): number {
+  return Math.round(value * 1_000_000) / 1_000_000
+}
+
+function roundAlpha(value: number): number {
   return Math.round(value * 1_000_000) / 1_000_000
 }
 
