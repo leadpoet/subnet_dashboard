@@ -272,10 +272,12 @@ export function researchLabOutcomeFilterOptionsWithCounts<T extends ResearchLabA
     counts.set(key, (counts.get(key) ?? 0) + 1)
   }
 
-  return RESEARCH_LAB_OUTCOME_FILTER_OPTIONS.map((option) => ({
-    ...option,
-    count: counts.get(option.value) ?? 0,
-  }))
+  return RESEARCH_LAB_OUTCOME_FILTER_OPTIONS
+    .map((option) => ({
+      ...option,
+      count: counts.get(option.value) ?? 0,
+    }))
+    .filter((option) => option.value === 'all' || (option.count ?? 0) > 0)
 }
 
 export function filterResearchLabActivityLoops<T extends ResearchLabActivityFilterInput>(

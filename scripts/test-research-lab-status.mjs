@@ -402,8 +402,14 @@ try {
     minerQuery: 'alpha',
     direction: 'direction-a',
   })
+  const countedOutcomeValues = countedOutcomeOptions.map((option) => option.value)
   const countByValue = Object.fromEntries(
     countedOutcomeOptions.map((option) => [option.value, option.count])
+  )
+  assert.deepEqual(
+    countedOutcomeValues,
+    ['all', 'scoring', 'waiting_for_baseline', 'failed', 'scored_no_gain'],
+    'outcome dropdown should hide empty buckets'
   )
   assert.equal(countByValue.all, 4, 'All outcomes count should match visible miner+direction records')
   assert.equal(countByValue.scoring, 1, 'Scoring outcome count should match visible filtered records')

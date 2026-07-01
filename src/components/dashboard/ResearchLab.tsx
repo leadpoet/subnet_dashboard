@@ -1076,6 +1076,12 @@ function ResearchActivityDialog({
     return researchLabOutcomeFilterOptionsWithCounts(loops, { minerQuery, direction })
   }, [loops, minerQuery, direction])
 
+  useEffect(() => {
+    if (outcome === 'all') return
+    if (outcomeOptions.some((option) => option.value === outcome)) return
+    setOutcome('all')
+  }, [outcome, outcomeOptions])
+
   const totalPages = Math.max(1, Math.ceil(filteredLoops.length / ACTIVITY_PAGE_SIZE))
   const safePage = Math.min(currentPage, totalPages)
   const pageStart = (safePage - 1) * ACTIVITY_PAGE_SIZE
