@@ -386,7 +386,7 @@ function Hero({ benchmark }: { benchmark: BenchmarkReport | null }) {
             <b className="font-medium text-[var(--platinum)]">{splitSummary}</b>
           </>
         ) : null}
-        . Research loops are scored against this baseline.
+        . Research loops are scored against paired current-model runs.
       </p>
 
       <div className="mt-6 font-mono text-[11px] text-[var(--muted-2)]">
