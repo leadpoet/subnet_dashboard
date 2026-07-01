@@ -25,6 +25,7 @@ import {
   researchLabOutcomeFilterOptionsWithCounts,
   researchLabLoopDirectionKeys as getResearchLabLoopDirectionKeys,
 } from '@/lib/research-lab-status'
+import type { MetagraphData } from '@/lib/types'
 
 type ResearchLabData = {
   benchmark: BenchmarkReport | null
@@ -183,11 +184,15 @@ type TopicGroup = {
 
 const ACTIVITY_PAGE_SIZE = 20
 
-export function ResearchLab({ onSync }: { onSync?: () => void } = {}) {
+export function ResearchLab({
+  onSync,
+  metagraph,
+}: { onSync?: () => void; metagraph?: MetagraphData | null } = {}) {
   const [data, setData] = useState<ResearchLabData | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [activityOpen, setActivityOpen] = useState(false)
+  const [selectedEmissionHotkey, setSelectedEmissionHotkey] = useState<string | null>(null)
 
   const fetchData = useCallback(async () => {
     try {
@@ -263,7 +268,12 @@ export function ResearchLab({ onSync }: { onSync?: () => void } = {}) {
 
       <KpiRail stats={stats} />
 
-      <LabEmissionSplit loops={loops} />
+      <LabEmissionSplit
+        loops={loops}
+        metagraph={metagraph}
+        selectedHotkey={selectedEmissionHotkey}
+        onSelectHotkey={setSelectedEmissionHotkey}
+      />
 
       <BenchmarkSection benchmark={benchmark} />
 
@@ -396,12 +406,35 @@ type LabMinerRow = {
   active: number
   scored: number
   promising: number
+  emission: number
+  activeSubnetPct: number
+  labEmissionPct: number
   lastActivityAt: string
 }
 
-function LabEmissionSplit({ loops }: { loops: ResearchLoop[] }) {
+function LabEmissionSplit({
+  loops,
+  metagraph,
+  selectedHotkey,
+  onSelectHotkey,
+}: {
+  loops: ResearchLoop[]
+  metagraph?: MetagraphData | null
+  selectedHotkey: string | null
+  onSelectHotkey: (hotkey: string | null) => void
+}) {
+  const emissions = useMemo(() => metagraph?.emissions ?? {}, [metagraph?.emissions])
+  const validatorMap = useMemo(() => metagraph?.isValidator ?? {}, [metagraph?.isValidator])
+  const activeSubnetEmission = useMemo(() => {
+    return Object.entries(emissions).reduce((sum, [hotkey, emission]) => {
+      if (!Number.isFinite(emission) || emission <= 0) return sum
+      if (validatorMap[hotkey] === true) return sum
+      return sum + emission
+    }, 0)
+  }, [emissions, validatorMap])
+
   const rows = useMemo(() => {
-    const byHotkey = new Map<string, LabMinerRow>()
+    const byHotkey = new Map<string, Omit<LabMinerRow, 'emission' | 'activeSubnetPct' | 'labEmissionPct'>>()
     for (const loop of loops) {
       if (!loop.minerHotkey) continue
       const current = byHotkey.get(loop.minerHotkey) ?? {
@@ -422,18 +455,50 @@ function LabEmissionSplit({ loops }: { loops: ResearchLoop[] }) {
       }
       byHotkey.set(loop.minerHotkey, current)
     }
-    return Array.from(byHotkey.values()).sort(
-      (a, b) => b.count - a.count || b.scored - a.scored || a.hotkey.localeCompare(b.hotkey)
-    )
-  }, [loops])
+    const rowsWithEmission = Array.from(byHotkey.values()).map((row) => {
+      const emission = Math.max(0, emissions[row.hotkey] ?? 0)
+      return {
+        ...row,
+        emission,
+        activeSubnetPct: activeSubnetEmission > 0 ? (emission / activeSubnetEmission) * 100 : 0,
+        labEmissionPct: 0,
+      }
+    })
+    const activeLabEmission = rowsWithEmission.reduce((sum, row) => sum + row.emission, 0)
+    return rowsWithEmission
+      .map((row) => ({
+        ...row,
+        labEmissionPct: activeLabEmission > 0 ? (row.emission / activeLabEmission) * 100 : 0,
+      }))
+      .sort(
+        (a, b) =>
+          b.emission - a.emission ||
+          b.count - a.count ||
+          b.scored - a.scored ||
+          a.hotkey.localeCompare(b.hotkey)
+      )
+  }, [activeSubnetEmission, emissions, loops])
 
   const totalLoops = rows.reduce((sum, row) => sum + row.count, 0)
+  const activeLabEmission = rows.reduce((sum, row) => sum + row.emission, 0)
+  const barRows = rows.filter((row) => row.emission > 0)
+  const selected = rows.find((row) => row.hotkey === selectedHotkey) ?? rows[0] ?? null
+  const hasEmissionData = Object.keys(emissions).length > 0 && !metagraph?.error
+
+  useEffect(() => {
+    if (rows.length === 0) {
+      if (selectedHotkey) onSelectHotkey(null)
+      return
+    }
+    if (selectedHotkey && rows.some((row) => row.hotkey === selectedHotkey)) return
+    onSelectHotkey(rows[0].hotkey)
+  }, [onSelectHotkey, rows, selectedHotkey])
 
   if (rows.length === 0) {
     return (
       <section className="border-b border-[var(--line)] py-8">
         <div className="font-mono text-[10.5px] uppercase tracking-[0.16em] text-[var(--muted-2)]">
-          Lab activity by miner
+          Active emissions by lab miner
         </div>
         <p className="mt-3 text-[13px] text-[var(--muted-2)]">No Research Lab miner activity yet.</p>
       </section>
@@ -442,58 +507,181 @@ function LabEmissionSplit({ loops }: { loops: ResearchLoop[] }) {
 
   return (
     <section className="border-b border-[var(--line)] py-8 md:py-10">
-      <div className="mb-5">
-        <div className="font-mono text-[10.5px] uppercase tracking-[0.16em] text-[var(--muted-2)]">
-          Lab activity by miner
+      <div className="mb-5 flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+        <div>
+          <div className="font-mono text-[10.5px] uppercase tracking-[0.16em] text-[var(--muted-2)]">
+            Active emissions by lab miner
+          </div>
+          <div className="mt-2 font-display text-[22px] font-medium tracking-[-0.025em] text-[var(--platinum)]">
+            {rows.length} hotkeys · {formatEmission(activeLabEmission)} ㄴ active emission
+          </div>
+          <div className="mt-1 font-mono text-[10px] text-[var(--muted-2)]">
+            {totalLoops} lab loops · {hasEmissionData ? 'live metagraph emission' : 'waiting for metagraph emission'}
+          </div>
         </div>
-        <div className="mt-2 font-display text-[22px] font-medium tracking-[-0.025em] text-[var(--platinum)]">
-          {rows.length} hotkeys · {totalLoops} lab loops
+        {selected ? (
+          <div className="rounded-md border border-[var(--line)] bg-[rgba(236,234,230,0.018)] px-3 py-2 md:min-w-[300px]">
+            <div className="font-mono text-[9.5px] uppercase tracking-[0.12em] text-[var(--muted-2)]">
+              Selected hotkey
+            </div>
+            <div className="mt-1 flex items-start justify-between gap-3">
+              <HotkeyCopyButton hotkey={selected.hotkey} />
+              <span className="text-right">
+                <span className="block font-display text-[18px] font-medium text-[var(--white)]">
+                  {formatEmission(selected.emission)} ㄴ
+                </span>
+                <span className="block font-mono text-[9.5px] uppercase tracking-[0.08em] text-[var(--muted-2)]">
+                  {formatPercent(selected.activeSubnetPct)} active subnet
+                </span>
+              </span>
+            </div>
+          </div>
+        ) : null}
+      </div>
+
+      <div className="h-9 w-full overflow-hidden rounded-[5px] border border-[var(--line-2)] bg-[rgba(236,234,230,0.025)] p-[3px]">
+        <div className="flex h-full w-full gap-[2px]">
+          {barRows.length > 0 ? (
+            barRows.map((row, index) => {
+              const isSelected = selected?.hotkey === row.hotkey
+              const labelFits = row.labEmissionPct >= 7
+              return (
+                <button
+                  key={row.hotkey}
+                  type="button"
+                  onClick={() => onSelectHotkey(row.hotkey)}
+                  className={cn(
+                    'group relative flex h-full min-w-[2px] items-center justify-center overflow-hidden rounded-[3px] transition-[filter,opacity,box-shadow]',
+                    isSelected
+                      ? 'shadow-[inset_0_0_0_1px_rgba(255,255,255,0.48)]'
+                      : 'opacity-80 hover:opacity-100 hover:brightness-125'
+                  )}
+                  style={{
+                    width: `${row.labEmissionPct}%`,
+                    background: labEmissionTone(index),
+                  }}
+                  title={`${row.hotkey} · ${formatEmission(row.emission)} ㄴ active emission · ${formatPercent(row.activeSubnetPct)} of active subnet emission`}
+                  aria-label={`${formatEmission(row.emission)} active emission for hotkey ${row.hotkey}`}
+                >
+                  {labelFits ? (
+                    <span
+                      className={cn(
+                        'truncate px-1 font-mono text-[10px] font-semibold tabular-nums',
+                        index < 3 ? 'text-slate-950' : 'text-[var(--platinum)]'
+                      )}
+                    >
+                      {formatCompactEmission(row.emission)} ㄴ
+                    </span>
+                  ) : null}
+                </button>
+              )
+            })
+          ) : (
+            <div className="flex h-full w-full items-center justify-center rounded-[3px] font-mono text-[10px] uppercase tracking-[0.12em] text-[var(--muted-2)]">
+              No active emission for these lab hotkeys in the current metagraph
+            </div>
+          )}
         </div>
       </div>
 
-      <div className="overflow-hidden rounded-md border border-[var(--line)]">
-        <div className="hidden grid-cols-[minmax(0,1fr)_72px_72px_86px_92px] gap-3 border-b border-[var(--line)] bg-[rgba(236,234,230,0.018)] px-3 py-2 font-mono text-[9.5px] uppercase tracking-[0.1em] text-[var(--muted-2)] md:grid">
+      <div className="mt-5 overflow-hidden rounded-md border border-[var(--line)]">
+        <div className="hidden grid-cols-[minmax(0,1fr)_132px_72px_72px_86px_92px] gap-3 border-b border-[var(--line)] bg-[rgba(236,234,230,0.018)] px-3 py-2 font-mono text-[9.5px] uppercase tracking-[0.1em] text-[var(--muted-2)] md:grid">
           <span>Hotkey</span>
+          <span className="text-right">Active emission</span>
           <span className="text-right">Loops</span>
           <span className="text-right">Active</span>
           <span className="text-right">Scored</span>
           <span className="text-right">Latest</span>
         </div>
-        {rows.map((row, index) => (
-          <div
-            key={row.hotkey}
-            className="grid w-full grid-cols-1 gap-3 border-b border-[var(--line)] px-3 py-3 text-left transition-colors last:border-b-0 hover-bg-warm md:grid-cols-[minmax(0,1fr)_72px_72px_86px_92px] md:items-center"
-          >
-            <span className="flex min-w-0 items-center gap-2">
-              <span
-                className="h-4 w-1.5 shrink-0 rounded-full"
-                style={{ background: labEmissionTone(index) }}
-              />
-              <span className="min-w-0">
-                <HotkeyCopyButton hotkey={row.hotkey} />
-                <span className="mt-1 block font-mono text-[10px] text-[var(--muted-2)] md:hidden">
-                  {row.count} loops · {row.scored} scored · {formatRelative(row.lastActivityAt)}
+        {rows.map((row, index) => {
+          const isSelected = selected?.hotkey === row.hotkey
+          return (
+            <div
+              key={row.hotkey}
+              role="button"
+              tabIndex={0}
+              onClick={() => onSelectHotkey(row.hotkey)}
+              onKeyDown={(event) => {
+                if (event.key !== 'Enter' && event.key !== ' ') return
+                event.preventDefault()
+                onSelectHotkey(row.hotkey)
+              }}
+              className={cn(
+                'grid w-full grid-cols-[minmax(0,1fr)_104px] gap-3 border-b border-[var(--line)] px-3 py-3 text-left transition-colors last:border-b-0 md:grid-cols-[minmax(0,1fr)_132px_72px_72px_86px_92px] md:items-center',
+                isSelected ? 'bg-[rgba(232,240,255,0.055)]' : 'hover-bg-warm'
+              )}
+            >
+              <span className="flex min-w-0 items-center gap-2">
+                <span
+                  className="h-4 w-1.5 shrink-0 rounded-full"
+                  style={{ background: labEmissionTone(index) }}
+                />
+                <span className="min-w-0">
+                  <HotkeyCopyButton hotkey={row.hotkey} />
+                  <span className="mt-1 block font-mono text-[10px] text-[var(--muted-2)] md:hidden">
+                    {row.count} loops · {row.scored} scored · {formatPercent(row.activeSubnetPct)} active subnet
+                  </span>
                 </span>
               </span>
-            </span>
-            <span className="hidden text-right font-mono text-[11px] tabular-nums text-[var(--muted)] md:block">
-              {row.count}
-            </span>
-            <span className="hidden text-right font-mono text-[11px] tabular-nums text-[var(--muted)] md:block">
-              {row.active}
-            </span>
-            <span className="hidden text-right font-mono text-[11px] tabular-nums text-[var(--muted)] md:block">
-              {row.scored}
-              {row.promising > 0 ? <span className="ml-1.5 text-[var(--white)]">+{row.promising}</span> : null}
-            </span>
-            <span className="hidden text-right font-mono text-[10.5px] tabular-nums text-[var(--muted-2)] md:block">
-              {formatRelative(row.lastActivityAt)}
-            </span>
-          </div>
-        ))}
+              <span className="text-right tabular-nums">
+                <span className="block font-display text-[16px] font-medium text-[var(--platinum)]">
+                  {formatEmission(row.emission)} ㄴ
+                </span>
+                <span className="block font-mono text-[9.5px] uppercase tracking-[0.08em] text-[var(--muted-2)]">
+                  {formatPercent(row.activeSubnetPct)} subnet
+                </span>
+              </span>
+              <span className="hidden text-right font-mono text-[11px] tabular-nums text-[var(--muted)] md:block">
+                {row.count}
+              </span>
+              <span className="hidden text-right font-mono text-[11px] tabular-nums text-[var(--muted)] md:block">
+                {row.active}
+              </span>
+              <span className="hidden text-right font-mono text-[11px] tabular-nums text-[var(--muted)] md:block">
+                {row.scored}
+                {row.promising > 0 ? <span className="ml-1.5 text-[var(--white)]">+{row.promising}</span> : null}
+              </span>
+              <span className="hidden text-right font-mono text-[10.5px] tabular-nums text-[var(--muted-2)] md:block">
+                {formatRelative(row.lastActivityAt)}
+              </span>
+            </div>
+          )
+        })}
       </div>
     </section>
   )
+}
+
+function formatEmission(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) return '0.0000'
+  if (value >= 1000) {
+    return value.toLocaleString(undefined, { maximumFractionDigits: 2 })
+  }
+  if (value >= 1) {
+    return value.toLocaleString(undefined, {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 4,
+    })
+  }
+  if (value >= 0.0001) return value.toFixed(4)
+  return '<0.0001'
+}
+
+function formatCompactEmission(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) return '0'
+  if (value >= 1000) return value.toLocaleString(undefined, { maximumFractionDigits: 0 })
+  if (value >= 100) return value.toFixed(0)
+  if (value >= 10) return value.toFixed(1)
+  if (value >= 1) return value.toFixed(2)
+  return '<0.0001'
+}
+
+function formatPercent(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) return '0%'
+  if (value >= 10) return `${value.toFixed(1)}%`
+  if (value >= 1) return `${value.toFixed(2)}%`
+  if (value >= 0.01) return `${value.toFixed(3)}%`
+  return '<0.01%'
 }
 
 function labEmissionTone(index: number): string {
