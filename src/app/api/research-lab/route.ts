@@ -919,7 +919,7 @@ function groupLoopsByTopic(loops: NormalizedLoop[]): TopicGroup[] {
     }
     if (isScoredResearchLabLoopStatus(loop.statusKey)) group.scored += 1
     if (isPromisingResearchLabLoopStatus(loop.statusKey, loop.outcomeBand)) group.promisingOrPromoted += 1
-    if (isNoGainOrFailedResearchLabLoopStatus(loop.statusKey, loop.outcomeBand)) group.noGainOrFailed += 1
+    if (isNoGainOrFailedResearchLabLoopStatus(loop.statusKey)) group.noGainOrFailed += 1
     if (new Date(loop.lastActivityAt).getTime() > new Date(group.latestActivityAt).getTime()) {
       group.latestActivityAt = loop.lastActivityAt
     }

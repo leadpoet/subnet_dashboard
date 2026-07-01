@@ -22,7 +22,7 @@ import {
   isActiveResearchLabLoopStatus,
   isPromisingResearchLabLoopStatus,
   isScoredResearchLabLoopStatus,
-  RESEARCH_LAB_OUTCOME_FILTER_OPTIONS,
+  researchLabOutcomeFilterOptionsWithCounts,
   researchLabLoopDirectionKey as getResearchLabLoopDirectionKey,
 } from '@/lib/research-lab-status'
 
@@ -1072,6 +1072,10 @@ function ResearchActivityDialog({
     return filterResearchLabActivityLoops(loops, { minerQuery, direction, outcome })
   }, [loops, minerQuery, direction, outcome])
 
+  const outcomeOptions = useMemo(() => {
+    return researchLabOutcomeFilterOptionsWithCounts(loops, { minerQuery, direction })
+  }, [loops, minerQuery, direction])
+
   const totalPages = Math.max(1, Math.ceil(filteredLoops.length / ACTIVITY_PAGE_SIZE))
   const safePage = Math.min(currentPage, totalPages)
   const pageStart = (safePage - 1) * ACTIVITY_PAGE_SIZE
@@ -1175,13 +1179,13 @@ function ResearchActivityDialog({
                 <SelectValue placeholder="All outcomes" />
               </SelectTrigger>
               <SelectContent className="z-[70] border-[var(--line-2)] bg-[var(--canvas-2)] text-[var(--platinum)]">
-                {RESEARCH_LAB_OUTCOME_FILTER_OPTIONS.map((option) => (
+                {outcomeOptions.map((option) => (
                   <SelectItem
                     key={option.value}
                     value={option.value}
                     className="font-mono text-[11px] text-[var(--muted)] focus:bg-[rgba(236,234,230,0.06)] focus:text-[var(--platinum)]"
                   >
-                    {option.label}
+                    {option.label} ({option.count ?? 0})
                   </SelectItem>
                 ))}
               </SelectContent>

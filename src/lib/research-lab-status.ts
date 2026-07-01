@@ -58,6 +58,7 @@ export type ResearchLabActivityFilters = {
 export type ResearchLabOutcomeFilterOption = {
   value: string
   label: string
+  count?: number
 }
 
 const FAILED_VALUES = new Set([
@@ -161,6 +162,39 @@ export function deriveResearchLabLoopStatus(input: ResearchLabLoopStatusInput): 
   const receiptStatus = normalize(input.currentReceiptStatus ?? input.receiptStatus)
   const currentStatus = normalize(input.currentStatus)
   const operationalValues = [candidateStatus, queueStatus, receiptStatus, currentStatus].filter(Boolean)
+  const scoredOpsNote = scoredOutcomeOpsFailureNote(
+    projectedLabel,
+    candidateStatus,
+    queueStatus,
+    receiptStatus
+  )
+
+  const promotion = promotionStatus(projectedLabel, projectedBand, candidateStatus, scoredOpsNote)
+  if (promotion) return promotion
+
+  if (projectedLabel === 'scored_no_gain' || projectedBand === 'no_gain' || candidateStatus === 'scored_no_gain') {
+    return status('scored_no_gain', 'Scored, no gain', 'no_gain', scoredOpsNote)
+  }
+
+  if (projectedLabel === 'scored') {
+    return status('scored', 'Scored', canonicalBand(projectedBand, 'completed'), scoredOpsNote)
+  }
+
+  if (FAILED_VALUES.has(projectedLabel)) {
+    return status('failed', 'Failed', 'failed', {
+      tone: 'error',
+      label: 'Failed',
+      detail: 'The canonical public outcome is terminal failed.',
+    })
+  }
+
+  if (isNeedsRescore(projectedLabel, candidateStatus, reason)) {
+    return status('needs_rescore', 'Needs rescore', 'stale', {
+      tone: 'warning',
+      label: 'Needs rescore',
+      detail: 'Candidate was created against an older parent model and needs to be rebased or rescored against the current parent.',
+    })
+  }
 
   if (isBaselineNotReady(projectedLabel, reason, operationalValues)) {
     const completedGeneration = queueStatus === 'completed' || projectedLabel === 'completed'
@@ -170,33 +204,6 @@ export function deriveResearchLabLoopStatus(input: ResearchLabLoopStatusInput): 
       detail: completedGeneration
         ? 'Candidate generation completed, but scoring is waiting for the benchmark baseline.'
         : 'Scoring is waiting for the benchmark baseline to become ready.',
-    })
-  }
-
-  if (projectedLabel === 'failed' || projectedBand === 'failed' || hasAny(operationalValues, FAILED_VALUES)) {
-    return status('failed', 'Failed', 'failed', {
-      tone: 'error',
-      label: 'Failed',
-      detail: 'The queue, receipt, or candidate state is terminal failed.',
-    })
-  }
-
-  const promotion = promotionStatus(projectedLabel, projectedBand, candidateStatus)
-  if (promotion) return promotion
-
-  if (projectedLabel === 'scored_no_gain' || projectedBand === 'no_gain' || candidateStatus === 'scored_no_gain') {
-    return status('scored_no_gain', 'Scored, no gain', 'no_gain')
-  }
-
-  if (projectedLabel === 'scored') {
-    return status('scored', 'Scored', projectedBand === 'pending' ? 'completed' : projectedBand)
-  }
-
-  if (isNeedsRescore(projectedLabel, candidateStatus, reason)) {
-    return status('needs_rescore', 'Needs rescore', 'stale', {
-      tone: 'warning',
-      label: 'Needs rescore',
-      detail: 'Candidate was created against an older parent model and needs to be rebased or rescored against the current parent.',
     })
   }
 
@@ -225,8 +232,8 @@ export function isPromisingResearchLabLoopStatus(key: string, band?: string | nu
   return PROMISING_STATUS_KEYS.has(normalize(key)) || PROMISING_BANDS.has(normalize(band))
 }
 
-export function isNoGainOrFailedResearchLabLoopStatus(key: string, band?: string | null): boolean {
-  return NO_GAIN_OR_FAILED_KEYS.has(normalize(key)) || normalize(band) === 'failed'
+export function isNoGainOrFailedResearchLabLoopStatus(key: string): boolean {
+  return NO_GAIN_OR_FAILED_KEYS.has(normalize(key))
 }
 
 export function isPendingOrBlockingResearchLabLoopStatus(key: string): boolean {
@@ -246,6 +253,29 @@ export function researchLabOutcomeFilterKey(value: string | null | undefined): s
 export function researchLabLoopDirectionKey(loop: ResearchLabActivityFilterInput): string {
   const tags = Array.isArray(loop.topicTags) ? loop.topicTags.filter(Boolean) : []
   return normalize(loop.topicSignatureHash) || tags.join('|') || normalize(loop.researchArea) || 'generalist'
+}
+
+export function researchLabOutcomeFilterOptionsWithCounts<T extends ResearchLabActivityFilterInput>(
+  loops: T[],
+  filters: Pick<ResearchLabActivityFilters, 'minerQuery' | 'direction'> = {},
+): ResearchLabOutcomeFilterOption[] {
+  const scopedLoops = filterResearchLabActivityLoops(loops, {
+    minerQuery: filters.minerQuery,
+    direction: filters.direction,
+    outcome: 'all',
+  })
+  const counts = new Map<string, number>([['all', scopedLoops.length]])
+
+  for (const loop of scopedLoops) {
+    const key = researchLabOutcomeFilterKey(loop.statusKey || loop.outcomeLabel)
+    if (!key) continue
+    counts.set(key, (counts.get(key) ?? 0) + 1)
+  }
+
+  return RESEARCH_LAB_OUTCOME_FILTER_OPTIONS.map((option) => ({
+    ...option,
+    count: counts.get(option.value) ?? 0,
+  }))
 }
 
 export function filterResearchLabActivityLoops<T extends ResearchLabActivityFilterInput>(
@@ -271,23 +301,48 @@ function promotionStatus(
   projectedLabel: string,
   projectedBand: string,
   candidateStatus: string,
+  note?: ResearchLabLoopStatusNote,
 ): ResearchLabLoopStatus | null {
   if (projectedLabel === 'promoted' || candidateStatus === 'promoted') {
-    return status('promoted', 'Promoted', 'promoted')
+    return status('promoted', 'Promoted', canonicalBand(projectedBand, 'promoted'), note)
   }
-  if (projectedLabel === 'winner' || candidateStatus === 'winner' || projectedBand === 'winner') {
-    return status('winner', 'Winner', 'promoted')
+  if (projectedLabel === 'winner' || candidateStatus === 'winner') {
+    return status('winner', 'Winner', canonicalBand(projectedBand, 'promoted'), note)
   }
-  if (projectedLabel === 'high_gain' || projectedBand === 'high_gain') {
-    return status('high_gain', 'High gain', 'high_gain')
+  if (projectedLabel === 'high_gain') {
+    return status('high_gain', 'High gain', canonicalBand(projectedBand, 'high_gain'), note)
   }
   if (projectedLabel === 'promotion_passed') {
-    return status('promotion_passed', 'Promotion passed', 'passed_threshold')
+    return status('promotion_passed', 'Promotion passed', canonicalBand(projectedBand, 'passed_threshold'), note)
   }
-  if (projectedLabel === 'scored_promising' || projectedBand === 'small_gain') {
-    return status('scored_promising', 'Scored', projectedBand || 'small_gain')
+  if (projectedLabel === 'scored_promising') {
+    return status('scored_promising', 'Scored', canonicalBand(projectedBand, 'small_gain'), note)
   }
   return null
+}
+
+function canonicalBand(projectedBand: string, fallback: string): string {
+  if (!projectedBand || projectedBand === 'pending' || projectedBand === 'failed') return fallback
+  return projectedBand
+}
+
+function scoredOutcomeOpsFailureNote(
+  projectedLabel: string,
+  candidateStatus: string,
+  queueStatus: string,
+  receiptStatus: string,
+): ResearchLabLoopStatusNote | undefined {
+  if (!hasAny([queueStatus, receiptStatus].filter(Boolean), FAILED_VALUES)) return undefined
+  if (candidateStatus !== 'scored' && !isCanonicalScoredOutcome(projectedLabel)) return undefined
+  return {
+    tone: 'warning',
+    label: 'Ops warning',
+    detail: 'Queue or receipt state is terminal failed, but the canonical model outcome is preserved.',
+  }
+}
+
+function isCanonicalScoredOutcome(value: string): boolean {
+  return SCORED_STATUS_KEYS.has(normalize(value))
 }
 
 function isBaselineNotReady(projectedLabel: string, reason: string, operationalValues: string[]): boolean {
@@ -325,7 +380,7 @@ function status(
     completed: COMPLETED_STATUS_KEYS.has(normalizedKey),
     scored: SCORED_STATUS_KEYS.has(normalizedKey),
     promising: isPromisingResearchLabLoopStatus(normalizedKey, normalizedBand),
-    noGainOrFailed: isNoGainOrFailedResearchLabLoopStatus(normalizedKey, normalizedBand),
+    noGainOrFailed: isNoGainOrFailedResearchLabLoopStatus(normalizedKey),
     pendingOrBlocking: PENDING_OR_BLOCKING_STATUS_KEYS.has(normalizedKey),
   }
 }

@@ -30,6 +30,7 @@ try {
     deriveResearchLabLoopStatus,
     filterResearchLabActivityLoops,
     RESEARCH_LAB_OUTCOME_FILTER_OPTIONS,
+    researchLabOutcomeFilterOptionsWithCounts,
   } = require(join(outDir, 'research-lab-status.js'))
 
   const cases = [
@@ -136,7 +137,7 @@ try {
       },
     },
     {
-      name: 'terminal failed queue overrides stale loop running',
+      name: 'terminal failed queue does not become primary Failed without canonical failed outcome',
       input: {
         outcomeLabel: 'running',
         outcomeBand: 'stale',
@@ -147,9 +148,9 @@ try {
         receiptId: 'receipt-3',
       },
       expected: {
-        key: 'failed',
-        label: 'Failed',
-        band: 'failed',
+        key: 'needs_rescore',
+        label: 'Needs rescore',
+        band: 'stale',
         active: false,
         scoring: false,
       },
@@ -188,6 +189,48 @@ try {
         key: 'scored_no_gain',
         label: 'Scored, no gain',
         band: 'no_gain',
+        active: false,
+        scoring: false,
+      },
+    },
+    {
+      name: 'scored_no_gain with failed band and failed queue stays Scored, no gain',
+      input: {
+        outcomeLabel: 'scored_no_gain',
+        outcomeBand: 'failed',
+        currentCandidateStatus: 'scored',
+        currentQueueStatus: 'failed',
+        currentReceiptStatus: 'failed',
+        candidateCount: 1,
+        scoredCandidateCount: 1,
+        runId: 'a45c7b0d-e2db-4933-b214-8afe6f80e21f',
+        receiptId: 'receipt-ef544527',
+      },
+      expected: {
+        key: 'scored_no_gain',
+        label: 'Scored, no gain',
+        band: 'no_gain',
+        active: false,
+        scoring: false,
+        detail: 'Queue or receipt state is terminal failed, but the canonical model outcome is preserved.',
+      },
+    },
+    {
+      name: 'canonical failed outcome renders Failed',
+      input: {
+        outcomeLabel: 'failed',
+        outcomeBand: 'failed',
+        currentCandidateStatus: 'scored',
+        currentQueueStatus: 'completed',
+        candidateCount: 1,
+        scoredCandidateCount: 1,
+        runId: 'run-failed',
+        receiptId: 'receipt-failed',
+      },
+      expected: {
+        key: 'failed',
+        label: 'Failed',
+        band: 'failed',
         active: false,
         scoring: false,
       },
@@ -248,6 +291,22 @@ try {
       lastActivityAt: '2026-01-04T00:00:00Z',
     },
     {
+      id: 'scored-no-gain-failed-ops',
+      minerHotkey: 'alpha-hotkey',
+      topicSignatureHash: 'direction-a',
+      topicTags: ['sales_ops'],
+      researchArea: 'ops',
+      outcomeLabel: 'scored_no_gain',
+      statusKey: deriveResearchLabLoopStatus({
+        outcomeLabel: 'scored_no_gain',
+        outcomeBand: 'failed',
+        currentCandidateStatus: 'scored',
+        currentQueueStatus: 'failed',
+        scoredCandidateCount: 1,
+      }).key,
+      lastActivityAt: '2026-01-03T12:00:00Z',
+    },
+    {
       id: 'waiting-alpha-a',
       minerHotkey: 'alpha-hotkey',
       topicSignatureHash: 'direction-a',
@@ -287,6 +346,20 @@ try {
       statusKey: 'failed',
       lastActivityAt: '2025-12-31T00:00:00Z',
     },
+    {
+      id: 'failed-alpha-a',
+      minerHotkey: 'alpha-hotkey',
+      topicSignatureHash: 'direction-a',
+      topicTags: ['sales_ops'],
+      researchArea: 'ops',
+      outcomeLabel: 'failed',
+      statusKey: deriveResearchLabLoopStatus({
+        outcomeLabel: 'failed',
+        outcomeBand: 'failed',
+        currentCandidateStatus: 'scored',
+      }).key,
+      lastActivityAt: '2025-12-30T00:00:00Z',
+    },
   ]
 
   const byId = (loops) => loops.map((loop) => loop.id)
@@ -299,6 +372,16 @@ try {
     byId(filterResearchLabActivityLoops(activityLoops, { outcome: 'scoring' })),
     ['scoring-alpha-a', 'scoring-alpha-b'],
     'outcome filter should find only scoring statuses'
+  )
+  assert.deepEqual(
+    byId(filterResearchLabActivityLoops(activityLoops, { outcome: 'scored_no_gain' })),
+    ['scored-no-gain-failed-ops'],
+    'Scored, no gain filter should include failed-ops scored_no_gain rows'
+  )
+  assert.deepEqual(
+    byId(filterResearchLabActivityLoops(activityLoops, { outcome: 'failed' })),
+    ['failed-gamma-b', 'failed-alpha-a'],
+    'Failed filter should exclude scored_no_gain rows even if ops failed'
   )
   assert.deepEqual(
     byId(filterResearchLabActivityLoops(activityLoops, { outcome: 'scored' })),
@@ -314,6 +397,19 @@ try {
     ['scoring-alpha-a'],
     'miner, direction, and outcome filters should combine'
   )
+
+  const countedOutcomeOptions = researchLabOutcomeFilterOptionsWithCounts(activityLoops, {
+    minerQuery: 'alpha',
+    direction: 'direction-a',
+  })
+  const countByValue = Object.fromEntries(
+    countedOutcomeOptions.map((option) => [option.value, option.count])
+  )
+  assert.equal(countByValue.all, 4, 'All outcomes count should match visible miner+direction records')
+  assert.equal(countByValue.scoring, 1, 'Scoring outcome count should match visible filtered records')
+  assert.equal(countByValue.waiting_for_baseline, 1, 'Waiting outcome count should match visible filtered records')
+  assert.equal(countByValue.scored_no_gain, 1, 'Scored, no gain outcome count should match visible filtered records')
+  assert.equal(countByValue.failed, 1, 'Failed outcome count should match visible filtered records')
 
   console.log(`research-lab-status: ${cases.length} status fixtures and filter fixtures passed`)
 } finally {
