@@ -18,6 +18,13 @@ import {
   type ResearchLabTimelineRawRow,
   type ResearchLabTimelineSourceInput,
 } from '@/lib/research-lab-timeline'
+import {
+  buildResearchLabAllocationRollup,
+  researchLabAllocationEntries,
+  type ResearchLabEmissionAllocationDoc,
+  type ResearchLabEmissionAllocationRollup,
+  type ResearchLabEmissionAllocationSnapshot,
+} from '@/lib/research-lab-emissions'
 
 export const dynamic = 'force-dynamic'
 
@@ -292,6 +299,7 @@ type LabMinerSpendRollup = {
   window: LabMinerSpendWindow
   byHotkey: Record<string, LabMinerSpendEntry>
   allTime: LabMinerAllTimeRollup
+  currentAllocation: ResearchLabEmissionAllocationRollup
 }
 
 type LabMinerSpendWindow = {
@@ -432,20 +440,9 @@ type ReimbursementAwardRow = {
 
 type EmissionAllocationSnapshotRow = {
   epoch: number | null
-  allocation_doc: EmissionAllocationDoc | null
+  allocation_doc: ResearchLabEmissionAllocationDoc | null
   created_at: string | null
-}
-
-type EmissionAllocationDoc = {
-  reimbursement_allocations?: EmissionAllocationEntry[]
-  champion_allocations?: EmissionAllocationEntry[]
-  queued_champion_allocations?: EmissionAllocationEntry[]
-}
-
-type EmissionAllocationEntry = {
-  miner_hotkey?: string | null
-  paid_alpha_percent?: number | string | null
-  alpha_percent?: number | string | null
+  lab_cap_alpha_percent?: number | string | null
 }
 
 let cache: CachedResponse | null = null
@@ -1340,12 +1337,19 @@ async function fetchLabMinerSpend(supabase: ReturnType<typeof getSupabase>): Pro
     (allAwardsResult.data ?? []) as ReimbursementAwardRow[],
     (allocationResult.data ?? []) as EmissionAllocationSnapshotRow[]
   )
+  const allocationSnapshots = (allocationResult.data ?? []) as EmissionAllocationSnapshotRow[]
+  const latestPublishedWeightEpoch = await fetchLatestPublishedWeightEpoch(supabase)
+  const currentAllocation = await fetchCurrentLabAllocation(
+    supabase,
+    latestPublishedWeightEpoch,
+    allocationSnapshots,
+  )
 
-  if (scheduleResult.error) return { ...empty, allTime }
+  if (scheduleResult.error) return { ...empty, allTime, currentAllocation }
 
   const schedules = ((scheduleResult.data ?? []) as ReimbursementScheduleRow[])
     .filter((row) => row.award_id && Number.isFinite(Number(row.start_epoch)))
-  if (schedules.length === 0) return { ...empty, allTime }
+  if (schedules.length === 0) return { ...empty, allTime, currentAllocation }
 
   const latestEpoch = Math.max(...schedules.map((row) => numberOr(row.start_epoch, 0)))
   const activeSchedules = schedules.filter((row) => {
@@ -1358,6 +1362,7 @@ async function fetchLabMinerSpend(supabase: ReturnType<typeof getSupabase>): Pro
       window: { latestEpoch, epochCount: null, activeScheduleCount: 0 },
       byHotkey: {},
       allTime,
+      currentAllocation,
     }
   }
 
@@ -1376,6 +1381,7 @@ async function fetchLabMinerSpend(supabase: ReturnType<typeof getSupabase>): Pro
         window: spendWindowForSchedules(latestEpoch, activeSchedules),
         byHotkey: {},
         allTime,
+        currentAllocation,
       }
     }
     awardRows.push(...((awardData ?? []) as ReimbursementAwardRow[]))
@@ -1421,7 +1427,71 @@ async function fetchLabMinerSpend(supabase: ReturnType<typeof getSupabase>): Pro
       ])
     ),
     allTime,
+    currentAllocation,
   }
+}
+
+async function fetchLatestPublishedWeightEpoch(
+  supabase: ReturnType<typeof getSupabase>,
+): Promise<number | null> {
+  const { data, error } = await supabase
+    .from('published_weight_bundles')
+    .select('epoch_id')
+    .eq('netuid', 71)
+    .order('epoch_id', { ascending: false, nullsFirst: false })
+    .limit(1)
+
+  if (error) {
+    console.error('[Research Lab API] published weight epoch query failed:', error)
+    return null
+  }
+  const epoch = numberOr((data?.[0] as { epoch_id?: unknown } | undefined)?.epoch_id, NaN)
+  return Number.isFinite(epoch) ? epoch : null
+}
+
+async function fetchCurrentLabAllocation(
+  supabase: ReturnType<typeof getSupabase>,
+  latestPublishedWeightEpoch: number | null,
+  snapshots: EmissionAllocationSnapshotRow[],
+): Promise<ResearchLabEmissionAllocationRollup> {
+  if (latestPublishedWeightEpoch !== null) {
+    const row = await fetchCurrentLabAllocationRow(supabase, latestPublishedWeightEpoch)
+    if (row) return buildResearchLabAllocationRollup(row, 'latest_weight_epoch')
+  }
+
+  const latestCurrentRow = await fetchCurrentLabAllocationRow(supabase, null)
+  if (latestCurrentRow) return buildResearchLabAllocationRollup(latestCurrentRow, 'latest_allocation_current')
+
+  const latestSnapshot = snapshots
+    .slice()
+    .sort((a, b) => numberOr(b.epoch, -Infinity) - numberOr(a.epoch, -Infinity))[0]
+  if (latestSnapshot) {
+    return buildResearchLabAllocationRollup(latestSnapshot, 'latest_allocation_snapshot')
+  }
+
+  return buildResearchLabAllocationRollup(null, 'none')
+}
+
+async function fetchCurrentLabAllocationRow(
+  supabase: ReturnType<typeof getSupabase>,
+  epoch: number | null,
+): Promise<ResearchLabEmissionAllocationSnapshot | null> {
+  let query = supabase
+    .from('research_lab_emission_allocation_current')
+    .select('*')
+    .order('epoch', { ascending: false, nullsFirst: false })
+    .limit(1)
+
+  if (epoch !== null) query = query.eq('epoch', epoch)
+
+  const { data, error } = await query
+  if (error) {
+    console.error('[Research Lab API] current emission allocation query failed:', error)
+    return null
+  }
+
+  const row = data?.[0] as ResearchLabEmissionAllocationSnapshot | undefined
+  return row ?? null
 }
 
 function buildLabMinerAllTimeRollup(
@@ -1448,7 +1518,7 @@ function buildLabMinerAllTimeRollup(
     .filter((epoch) => Number.isFinite(epoch))
   for (const snapshot of snapshots) {
     const doc = snapshot.allocation_doc ?? {}
-    for (const allocation of labAllocationEntries(doc)) {
+    for (const allocation of researchLabAllocationEntries(doc)) {
       const hotkey = allocation.miner_hotkey ? String(allocation.miner_hotkey) : ''
       if (!hotkey) continue
       const current = byHotkey[hotkey] ?? emptyLabMinerAllTimeEntry()
@@ -1474,14 +1544,6 @@ function buildLabMinerAllTimeRollup(
       ])
     ),
   }
-}
-
-function labAllocationEntries(doc: EmissionAllocationDoc): EmissionAllocationEntry[] {
-  return [
-    ...(Array.isArray(doc.reimbursement_allocations) ? doc.reimbursement_allocations : []),
-    ...(Array.isArray(doc.champion_allocations) ? doc.champion_allocations : []),
-    ...(Array.isArray(doc.queued_champion_allocations) ? doc.queued_champion_allocations : []),
-  ]
 }
 
 function emptyLabMinerAllTimeEntry(): LabMinerAllTimeEntry {
@@ -1712,6 +1774,7 @@ function emptyLabMinerSpend(): LabMinerSpendRollup {
       allocationSnapshotCount: 0,
       byHotkey: {},
     },
+    currentAllocation: buildResearchLabAllocationRollup(null, 'none'),
   }
 }
 
