@@ -25,7 +25,6 @@ import {
   type ResearchLabEmissionAllocationRollup,
   type ResearchLabEmissionAllocationSnapshot,
 } from '@/lib/research-lab-emissions'
-import { researchLabTemporaryImprovementOverride } from '@/lib/research-lab-temporary-overrides'
 
 export const dynamic = 'force-dynamic'
 
@@ -568,7 +567,6 @@ export async function GET(request: Request) {
       : null
     const topicGroups = groupLoopsByTopic(loops)
     const labMinerActivity = buildLabMinerActivityRollup(allLoops)
-    const promisingLoopCount = countPromisingLoopsWithTemporaryOverrides(loops)
     const data: ResearchLabPayload = {
       benchmark: displayBenchmark,
       loops,
@@ -583,7 +581,9 @@ export async function GET(request: Request) {
         scoredLoopCount: loops.filter((loop) =>
           isScoredResearchLabLoopStatus(loop.statusKey)
         ).length,
-        promisingLoopCount,
+        promisingLoopCount: loops.filter((loop) =>
+          isPromisingResearchLabLoopStatus(loop.statusKey, loop.outcomeBand)
+        ).length,
         totalBenchmarkIcpCount: displayBenchmark?.itemCount ?? 0,
       },
       fetchedAt: new Date().toISOString(),
@@ -1950,25 +1950,6 @@ function buildLabMinerActivityRollup(loops: NormalizedLoop[]): LabMinerActivityR
   return { windowStartedAt, allTime, last24h }
 }
 
-function countPromisingLoopsWithTemporaryOverrides(loops: NormalizedLoop[]): number {
-  const actualByHotkey = new Map<string, number>()
-  const hotkeys = new Set<string>()
-  let total = 0
-  for (const loop of loops) {
-    const hotkey = loop.minerHotkey
-    if (hotkey) hotkeys.add(hotkey)
-    if (!isPromisingResearchLabLoopStatus(loop.statusKey, loop.outcomeBand)) continue
-    total += 1
-    if (hotkey) actualByHotkey.set(hotkey, (actualByHotkey.get(hotkey) ?? 0) + 1)
-  }
-  for (const hotkey of hotkeys) {
-    const override = researchLabTemporaryImprovementOverride(hotkey)
-    if (override <= 0) continue
-    total += Math.max(0, override - (actualByHotkey.get(hotkey) ?? 0))
-  }
-  return total
-}
-
 function addLabMinerActivityEntry(
   rollup: Record<string, LabMinerActivityEntry>,
   loop: NormalizedLoop,
@@ -1986,7 +1967,6 @@ function addLabMinerActivityEntry(
   if (isActiveResearchLabLoopStatus(loop.statusKey)) current.active += 1
   if (isScoredResearchLabLoopStatus(loop.statusKey)) current.scored += 1
   if (isPromisingResearchLabLoopStatus(loop.statusKey, loop.outcomeBand)) current.promising += 1
-  current.promising = Math.max(current.promising, researchLabTemporaryImprovementOverride(hotkey))
   if (new Date(loop.lastActivityAt).getTime() > new Date(current.lastActivityAt).getTime()) {
     current.lastActivityAt = loop.lastActivityAt
   }
