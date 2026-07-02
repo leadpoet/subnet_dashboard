@@ -358,6 +358,7 @@ type PublicLoopEventDoc = {
 type ResearchLabPayload = {
   benchmark: NormalizedBenchmark | null
   loops: NormalizedLoop[]
+  activityLoops: NormalizedLoop[]
   topicGroups: TopicGroup[]
   labMinerSpend: LabMinerSpendRollup
   labMinerActivity: LabMinerActivityRollup
@@ -570,6 +571,7 @@ export async function GET(request: Request) {
     const data: ResearchLabPayload = {
       benchmark: displayBenchmark,
       loops,
+      activityLoops: allLoops,
       topicGroups,
       labMinerSpend,
       labMinerActivity,

@@ -30,6 +30,7 @@ import type { MetagraphData } from '@/lib/types'
 type ResearchLabData = {
   benchmark: BenchmarkReport | null
   loops: ResearchLoop[]
+  activityLoops?: ResearchLoop[]
   topicGroups: TopicGroup[]
   labMinerSpend?: LabMinerSpendRollup | null
   labMinerActivity?: LabMinerActivityRollup | null
@@ -368,6 +369,7 @@ export function ResearchLab({
 
   const benchmark = data?.benchmark ?? null
   const loops = data?.loops ?? []
+  const activityLoops = data?.activityLoops ?? loops
   const topicGroups = data?.topicGroups ?? []
   const stats = data?.stats ?? {
     activeLoopCount: 0,
@@ -435,7 +437,7 @@ export function ResearchLab({
 
       <ResearchActivityDialog
         open={activityOpen}
-        loops={loops}
+        loops={activityLoops}
         onOpenChange={setActivityOpen}
       />
 
@@ -628,21 +630,6 @@ function LabEmissionSplit({
         byHotkey.set(loop.minerHotkey, current)
       }
     }
-    const spendHotkeys = new Set([
-      ...Object.keys(mode === 'all_time' ? spend?.allTime?.byHotkey ?? {} : spend?.byHotkey ?? {}),
-    ])
-    for (const hotkey of spendHotkeys) {
-      if (!byHotkey.has(hotkey)) {
-        byHotkey.set(hotkey, {
-          count: 0,
-          active: 0,
-          scored: 0,
-          promising: 0,
-          lastActivityAt: '',
-        })
-      }
-    }
-
     const rowsWithEmission = Array.from(byHotkey.entries()).map(([hotkey, activityEntry]) => {
       const metagraphIncentivePct = Math.max(0, incentives[hotkey] ?? 0) * 100
       const windowSpendEntry = spend?.byHotkey?.[hotkey]
@@ -1582,17 +1569,17 @@ function ResearchActivityDialog({
     [loops]
   )
 
-  const minerCount = useMemo(() => {
-    const miners = new Set<string>()
-    for (const loop of loops) {
-      if (loop.minerHotkey) miners.add(loop.minerHotkey)
-    }
-    return miners.size
-  }, [loops])
-
   const filteredLoops = useMemo(() => {
     return filterResearchLabActivityLoops(loops, { minerQuery, direction, status })
   }, [loops, minerQuery, direction, status])
+
+  const visibleMinerCount = useMemo(() => {
+    const miners = new Set<string>()
+    for (const loop of filteredLoops) {
+      if (loop.minerHotkey) miners.add(loop.minerHotkey)
+    }
+    return miners.size
+  }, [filteredLoops])
 
   const statusOptions = useMemo(() => {
     return researchLabStatusFilterOptionsWithCounts(loops, { minerQuery, direction })
@@ -1638,7 +1625,7 @@ function ResearchActivityDialog({
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
             <ActivityPanelStat label="Visible" value={filteredLoops.length} />
             <ActivityPanelStat label="Runs" value={loops.length} />
-            <ActivityPanelStat label="Miners" value={minerCount} />
+            <ActivityPanelStat label="Visible miners" value={visibleMinerCount} />
             <ActivityPanelStat label="Directions" value={directionOptions.length} />
           </div>
 
