@@ -487,8 +487,6 @@ function Hero({ benchmark }: { benchmark: BenchmarkReport | null }) {
   const tone = scoreTone(score)
   const isPromotedModel = displayScore?.source === 'latest_promoted_model'
   const scoreDate = displayScore?.statusAt || benchmark.currentStatusAt || benchmark.benchmarkDate
-  const delta = displayScore?.deltaVsDailyBaseline
-  const dailyBenchmarkScore = numberOr(benchmark.aggregateScore, 0)
 
   return (
     <section className="pt-12 pb-14">
@@ -509,7 +507,7 @@ function Hero({ benchmark }: { benchmark: BenchmarkReport | null }) {
 
       <p className="mt-7 max-w-[560px] text-[14px] leading-[1.7] text-[var(--muted)]">
         {isPromotedModel
-          ? "The latest promoted model score for Leadpoet's sales agent. The next daily rebenchmark will become the displayed score once it publishes."
+          ? "The latest model score for Leadpoet's sales agent. The next daily rebenchmark will become the displayed score once it publishes."
           : "The current daily rebenchmark score for Leadpoet's sales agent. Each loop tests whether a miner's change improves the current model."}
       </p>
 
@@ -517,10 +515,6 @@ function Hero({ benchmark }: { benchmark: BenchmarkReport | null }) {
         {isPromotedModel ? (
           <>
             Promoted {formatDate(scoreDate)}
-            {Number.isFinite(delta) ? (
-              <> · {(delta ?? 0) >= 0 ? '+' : ''}{formatScore(delta ?? 0)} vs daily baseline</>
-            ) : null}
-            <> · daily rebenchmark {formatScore(dailyBenchmarkScore)}</>
           </>
         ) : (
           <>Published {formatDate(benchmark.benchmarkDate)}</>
