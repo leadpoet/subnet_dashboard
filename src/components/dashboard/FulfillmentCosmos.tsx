@@ -69,6 +69,8 @@ interface LayoutResult {
 const REQUEST_RADIUS = 9
 const MINER_RADIUS = 3.2
 const PENDING_COMPLETED_BUFFER = 72
+const INDUSTRY_CLUSTER_SPACING = 132
+const MAX_INDUSTRY_CLUSTER_RADIUS = 430
 
 // Platinum-monochrome palette. Hierarchy by brightness, never hue:
 // fulfilled (the win) is the rationed near-white accent; everything
@@ -163,12 +165,15 @@ function computeLayout(requests: CosmosRequest[], leads: CosmosConsensusLead[]):
     (a, b) => b[1].length - a[1].length
   )
 
-  // Place each industry cluster on a sunflower spiral
+  // Place each industry cluster on a compact sunflower spiral. The largest
+  // group owns the center; smaller singleton industries stay capped near the
+  // constellation so hidden cluster anchors don't read as escaped nodes.
   const golden = Math.PI * (3 - Math.sqrt(5))
-  const clusterSpacing = 220
 
   sortedIndustries.forEach(([key, group], i) => {
-    const r = clusterSpacing * Math.sqrt(i + 1)
+    const r = i === 0
+      ? 0
+      : Math.min(MAX_INDUSTRY_CLUSTER_RADIUS, INDUSTRY_CLUSTER_SPACING * Math.sqrt(i))
     const a = i * golden
     const cx = r * Math.cos(a)
     const cy = r * Math.sin(a)
