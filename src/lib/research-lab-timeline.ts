@@ -39,6 +39,14 @@ export type ResearchLabTimelineRun = {
 // Public-safe per-candidate diagnostics shown in the loop timeline dialog.
 // Never carries the patch, per-ICP detail, company data, or any external-
 // service name/HTTP code — only the outcome a miner can act on.
+export type ResearchLabCandidateFunnel = {
+  sourced: number
+  fit_pass: number
+  verified: number
+  intent_valid: number
+  scored: number
+}
+
 export type ResearchLabCandidateDiagnostic = {
   candidate: string
   status: string
@@ -47,6 +55,7 @@ export type ResearchLabCandidateDiagnostic = {
   delta: number
   icpCount: number
   externalFailures: number
+  funnel?: ResearchLabCandidateFunnel
 }
 
 export type ResearchLabLoopTimeline = {

@@ -306,6 +306,14 @@ type LoopTimelineRun = {
   events: LoopTimelineEvent[]
 }
 
+type LoopCandidateFunnel = {
+  sourced: number
+  fit_pass: number
+  verified: number
+  intent_valid: number
+  scored: number
+}
+
 type LoopCandidateDiagnostic = {
   candidate: string
   status: string
@@ -314,6 +322,7 @@ type LoopCandidateDiagnostic = {
   delta: number
   icpCount: number
   externalFailures: number
+  funnel?: LoopCandidateFunnel
 }
 
 type LoopTimeline = {
@@ -2083,10 +2092,44 @@ function LoopCandidateDiagnostics({ items }: { items: LoopCandidateDiagnostic[] 
                   </span>
                 ) : null}
               </div>
+              {c.funnel ? <CandidateFunnelStrip funnel={c.funnel} /> : null}
             </div>
           )
         })}
       </div>
+    </div>
+  )
+}
+
+const CANDIDATE_FUNNEL_STAGES: { key: keyof LoopCandidateFunnel; label: string }[] = [
+  { key: 'sourced', label: 'Discovered' },
+  { key: 'fit_pass', label: 'Passed fit' },
+  { key: 'verified', label: 'Verified' },
+  { key: 'intent_valid', label: 'Valid intent' },
+  { key: 'scored', label: 'Scored' },
+]
+
+function CandidateFunnelStrip({ funnel }: { funnel: LoopCandidateFunnel }) {
+  const top = Math.max(1, funnel.sourced)
+  return (
+    <div className="mt-2.5 space-y-1">
+      {CANDIDATE_FUNNEL_STAGES.map((stage, i) => {
+        const value = funnel[stage.key]
+        const prev = i === 0 ? value : funnel[CANDIDATE_FUNNEL_STAGES[i - 1].key]
+        const dropped = Math.max(0, prev - value)
+        return (
+          <div key={stage.key} className="grid grid-cols-[74px_minmax(0,1fr)_64px] items-center gap-2">
+            <span className="font-mono text-[9.5px] text-[var(--muted-2)]">{stage.label}</span>
+            <span className="h-[5px] overflow-hidden rounded-full bg-[rgba(236,234,230,0.06)]">
+              <span className="block h-full rounded-full bg-[var(--muted)]" style={{ width: `${(value / top) * 100}%` }} />
+            </span>
+            <span className="text-right font-mono text-[10px] tabular-nums text-[var(--muted)]">
+              {value}
+              {i > 0 && dropped > 0 ? <span className="ml-1 text-[var(--faint)]">−{dropped}</span> : null}
+            </span>
+          </div>
+        )
+      })}
     </div>
   )
 }

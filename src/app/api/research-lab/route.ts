@@ -689,6 +689,18 @@ async function fetchCandidateDiagnostics(
       const blob = `${r.status ?? ''} ${r.failure_reason ?? ''}`.toLowerCase()
       return blob.includes('provider') || blob.includes('infra_excluded')
     }).length
+    const funnelTotals = { sourced: 0, fit_pass: 0, verified: 0, intent_valid: 0, scored: 0 }
+    let hasFunnel = false
+    for (const r of perIcp) {
+      const f = r.funnel as Record<string, unknown> | undefined
+      if (!f || typeof f !== 'object') continue
+      hasFunnel = true
+      funnelTotals.sourced += numberOr(f.sourced, 0)
+      funnelTotals.fit_pass += numberOr(f.fit_pass, 0)
+      funnelTotals.verified += numberOr(f.verified, 0)
+      funnelTotals.intent_valid += numberOr(f.intent_valid, 0)
+      funnelTotals.scored += numberOr(f.scored, 0)
+    }
     out.push({
       candidate: String(c.candidate_id ?? '').slice(0, 18),
       status,
@@ -697,6 +709,7 @@ async function fetchCandidateDiagnostics(
       delta: numberOr(gateDoc?.candidate_delta_vs_daily_baseline ?? agg?.mean_delta, 0),
       icpCount: perIcp.length,
       externalFailures,
+      funnel: hasFunnel ? funnelTotals : undefined,
     })
   }
   return out
