@@ -1,7 +1,22 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
-import { Loader2, Search } from 'lucide-react'
+import type { ReactNode } from 'react'
+import {
+  Activity,
+  AlertTriangle,
+  BarChart3,
+  Clock3,
+  Database,
+  Gauge,
+  Loader2,
+  PauseCircle,
+  PlayCircle,
+  Search,
+  ShieldCheck,
+  ShieldX,
+  Siren,
+} from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { formatDateTime, formatRelative, shortHotkey } from '@/lib/admin-format'
 
@@ -19,6 +34,9 @@ type LabTimelineTimestampKind =
   | 'projection_written'
   | 'last_activity_represented'
 
+type AdminHealthState = 'healthy' | 'degraded' | 'critical' | 'unknown'
+type AdminScoringState = 'active' | 'paused' | 'stalled' | 'blocked' | 'idle' | 'unknown'
+
 export type AdminLabLoopSummary = {
   cardId: string
   ticketId: string
@@ -31,6 +49,18 @@ export type AdminLabLoopSummary = {
   topicSignatureHash: string
   outcomeLabel: string
   outcomeBand: string
+  publicStatus?: string
+  paymentState?: string
+  executionState?: string
+  candidateState?: string
+  resultState?: string
+  opsReason?: string
+  statusDetail?: string
+  opsWarnings?: string[]
+  statusKey: string
+  statusLabel: string
+  statusNote?: AdminLoopStatusNote
+  actionNote?: AdminLoopStatusNote
   candidateCount: number
   scoredCandidateCount: number
   bestCandidatePublicSummary: string
@@ -38,8 +68,163 @@ export type AdminLabLoopSummary = {
   submittedAt: string
 }
 
+type AdminLoopStatusNote = {
+  tone: 'info' | 'warning' | 'error'
+  label: string
+  detail: string
+}
+
+type AdminLabHealthSignal = {
+  id: string
+  label: string
+  value: string
+  state: AdminHealthState
+  detail: string
+  updatedAt?: string | null
+}
+
+type AdminLabScoringSummary = {
+  state: AdminScoringState
+  label: string
+  detail: string
+  source: 'explicit' | 'inferred' | 'missing'
+  paused: boolean
+  pauseReason: string | null
+  controlUpdatedAt: string | null
+  activeRuns: number
+  scoringRuns: number
+  queuedRuns: number
+  blockedRuns: number
+  staleRuns: number
+  candidatesRemaining: number
+  icpsRemaining: number | null
+  scoreBundlesLastHour: number
+  scoreBundlesLast24h: number
+  lastScoringAt: string | null
+  oldestActiveRunAt: string | null
+}
+
+type AdminLabActiveRun = {
+  ticketId: string
+  runId: string | null
+  receiptId: string | null
+  minerHotkey: string
+  researchFocusSummary: string
+  topicTags: string[]
+  statusKey: string
+  statusLabel: string
+  phase: string
+  candidateCount: number
+  scoredCandidateCount: number
+  candidatesRemaining: number
+  icpTotal: number | null
+  icpsScored: number | null
+  icpsRemaining: number | null
+  scoreBundleId: string | null
+  scoreBundleStatus: string | null
+  blocker: string | null
+  submittedAt: string
+  lastActivityAt: string
+  ageMs: number
+  idleMs: number
+  stale: boolean
+}
+
+type AdminLabPipelineStage = {
+  id: string
+  label: string
+  count: number
+  staleCount: number
+  percent: number
+}
+
+type AdminLabBenchmarkSummary = {
+  state: AdminHealthState
+  reportId: string | null
+  benchmarkDate: string | null
+  rollingWindowHash: string | null
+  aggregateScore: number | null
+  itemCount: number
+  publicIcpCount: number
+  privateHoldoutIcpCount: number
+  currentStatusAt: string | null
+  ageMs: number | null
+  issueCount: number
+  topIssues: Array<{ key: string; count: number }>
+  detail: string
+}
+
+type AdminLabAlertSummary = {
+  state: AdminHealthState
+  sourceAvailable: boolean
+  unavailableReason: string | null
+  totalLast24h: number
+  criticalLast24h: number
+  warningLast24h: number
+  activeCount: number
+  recent: AdminLabAlert[]
+}
+
+type AdminLabAlert = {
+  id: string
+  severity: string
+  source: string
+  title: string
+  fingerprint: string
+  status: string
+  count: number
+  firstSeenAt: string | null
+  lastSeenAt: string | null
+}
+
+type AdminLabAttestationSummary = {
+  state: AdminHealthState
+  sourceAvailable: boolean
+  unavailableReason: string | null
+  totalNodes: number
+  matchedNodes: number
+  mismatchedNodes: number
+  missingNodes: number
+  expectedPcr0: string | null
+  latestAttestedAt: string | null
+  nodes: AdminLabAttestationNode[]
+}
+
+type AdminLabAttestationNode = {
+  id: string
+  component: string
+  nodeId: string
+  hotkey: string | null
+  expectedPcr0: string | null
+  observedPcr0: string | null
+  matched: boolean | null
+  buildId: string | null
+  gitSha: string | null
+  attestedAt: string | null
+}
+
+type AdminLabDataFreshness = {
+  state: AdminHealthState
+  latestActivityAt: string | null
+  ageMs: number | null
+  loopCount: number
+}
+
+type AdminLabOpsSummary = {
+  state: AdminHealthState
+  healthSignals: AdminLabHealthSignal[]
+  dataFreshness: AdminLabDataFreshness
+  scoring: AdminLabScoringSummary
+  activeRuns: AdminLabActiveRun[]
+  pipeline: AdminLabPipelineStage[]
+  benchmark: AdminLabBenchmarkSummary
+  alerts: AdminLabAlertSummary
+  attestation: AdminLabAttestationSummary
+}
+
 export type AdminResearchLabPayload = {
   loops: AdminLabLoopSummary[]
+  ops: AdminLabOpsSummary
   stats: {
     totalLoops: number
     runningLoops: number
@@ -95,6 +280,7 @@ export function AdminResearchLab({
   error: string | null
 }) {
   const loops = useMemo(() => payload?.loops ?? [], [payload?.loops])
+  const ops = payload?.ops ?? null
   const [query, setQuery] = useState('')
   const [selectedTicketId, setSelectedTicketId] = useState<string | null>(loops[0]?.ticketId ?? null)
   const [timelineByTicket, setTimelineByTicket] = useState<Record<string, LabTimelinePayload | null>>({})
@@ -118,6 +304,10 @@ export function AdminResearchLab({
         loop.researchArea,
         loop.researchFocusSummary,
         loop.outcomeLabel,
+        loop.statusKey,
+        loop.statusLabel,
+        loop.opsReason ?? '',
+        loop.statusDetail ?? '',
         ...loop.topicTags,
       ].some((value) => value.toLowerCase().includes(q)),
     )
@@ -216,6 +406,29 @@ export function AdminResearchLab({
         <Stat label="Failed" value={payload?.stats.failedLoops ?? 0} />
         <Stat label="Miners" value={payload?.stats.uniqueMiners ?? 0} />
       </div>
+
+      {ops ? (
+        <>
+          <OpsHealthStrip ops={ops} />
+
+          <section className="grid gap-4 xl:grid-cols-[minmax(0,1.3fr)_minmax(320px,0.7fr)]">
+            <ScoringPanel scoring={ops.scoring} />
+            <PipelinePanel stages={ops.pipeline} />
+          </section>
+
+          <ActiveRunsPanel
+            runs={ops.activeRuns}
+            selectedTicketId={selectedLoop?.ticketId ?? null}
+            onSelect={(ticketId) => setSelectedTicketId(ticketId)}
+          />
+
+          <section className="grid gap-4 xl:grid-cols-3">
+            <BenchmarkPanel benchmark={ops.benchmark} />
+            <AlertsPanel alerts={ops.alerts} />
+            <AttestationPanel attestation={ops.attestation} />
+          </section>
+        </>
+      ) : null}
 
       <section className="grid min-h-[640px] gap-4 xl:grid-cols-[420px_minmax(0,1fr)]">
         <div className="space-y-3">
@@ -338,6 +551,462 @@ export function AdminResearchLab({
         </div>
       </section>
     </div>
+  )
+}
+
+function OpsHealthStrip({ ops }: { ops: AdminLabOpsSummary }) {
+  return (
+    <section
+      className="rounded-xl border"
+      style={{
+        borderColor: 'var(--surface-border)',
+        background: 'var(--surface)',
+      }}
+    >
+      <div
+        className="flex flex-col gap-3 border-b px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
+        style={{ borderColor: 'var(--surface-border)' }}
+      >
+        <div className="flex items-center gap-2">
+          <Activity className={cn('h-4 w-4', stateTextClass(ops.state))} />
+          <div>
+            <div className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
+              Lab Ops
+            </div>
+            <div className="text-[11px]" style={{ color: 'var(--text-tertiary)' }}>
+              {ops.dataFreshness.latestActivityAt
+                ? `Latest activity ${formatRelative(ops.dataFreshness.latestActivityAt)}`
+                : 'No Lab activity returned'}
+            </div>
+          </div>
+        </div>
+        <StatePill state={ops.state} label={stateLabel(ops.state)} />
+      </div>
+      <div className="grid gap-px p-1 sm:grid-cols-2 lg:grid-cols-5">
+        {ops.healthSignals.map((signal) => (
+          <HealthSignalCard key={signal.id} signal={signal} />
+        ))}
+      </div>
+    </section>
+  )
+}
+
+function HealthSignalCard({ signal }: { signal: AdminLabHealthSignal }) {
+  const Icon = signalIcon(signal.id, signal.state)
+  return (
+    <div
+      className="rounded-lg border p-3"
+      style={{
+        borderColor: 'var(--surface-border)',
+        background: 'var(--surface-base)',
+      }}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <Icon className={cn('h-3.5 w-3.5 shrink-0', stateTextClass(signal.state))} />
+            <div className="truncate text-[10px] uppercase tracking-[0.14em]" style={{ color: 'var(--text-tertiary)' }}>
+              {signal.label}
+            </div>
+          </div>
+          <div className="mt-2 truncate text-lg font-medium tabular-nums" style={{ color: 'var(--text-primary)' }}>
+            {signal.value}
+          </div>
+        </div>
+        <span className={cn('mt-1 h-2 w-2 shrink-0 rounded-full', stateDotClass(signal.state))} />
+      </div>
+      <div className="mt-2 line-clamp-2 text-[11px] leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
+        {signal.detail}
+      </div>
+      {signal.updatedAt ? (
+        <div className="mt-2 font-mono text-[10px]" style={{ color: 'var(--text-tertiary)' }}>
+          {formatRelative(signal.updatedAt)}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+function ScoringPanel({ scoring }: { scoring: AdminLabScoringSummary }) {
+  const Icon = scoring.paused ? PauseCircle : scoring.state === 'active' ? PlayCircle : Gauge
+  return (
+    <section
+      className="rounded-xl border"
+      style={{
+        borderColor: 'var(--surface-border)',
+        background: 'var(--surface)',
+      }}
+    >
+      <PanelHeader
+        icon={<Icon className={cn('h-4 w-4', stateTextClass(healthStateForScoring(scoring.state)))} />}
+        title="Scoring"
+        aside={<StatePill state={healthStateForScoring(scoring.state)} label={scoring.label} />}
+      />
+      <div className="space-y-4 p-4">
+        <p className="text-sm leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
+          {scoring.detail}
+        </p>
+        <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+          <MetricBox label="Active runs" value={scoring.activeRuns} />
+          <MetricBox label="Scoring" value={scoring.scoringRuns} />
+          <MetricBox label="Queued" value={scoring.queuedRuns} />
+          <MetricBox label="Stale" value={scoring.staleRuns} tone={scoring.staleRuns > 0 ? 'critical' : 'neutral'} />
+          <MetricBox label="ICPs left" value={scoring.icpsRemaining ?? '—'} />
+          <MetricBox label="Candidates left" value={scoring.candidatesRemaining} />
+          <MetricBox label="Score bundles 1h" value={scoring.scoreBundlesLastHour} />
+          <MetricBox label="Score bundles 24h" value={scoring.scoreBundlesLast24h} />
+        </div>
+        <div className="grid gap-2 sm:grid-cols-3">
+          <MiniMeta label="Source" value={readableTag(scoring.source)} />
+          <MiniMeta label="Last scoring" value={scoring.lastScoringAt ? formatRelative(scoring.lastScoringAt) : '—'} />
+          <MiniMeta label="Oldest active" value={scoring.oldestActiveRunAt ? formatRelative(scoring.oldestActiveRunAt) : '—'} />
+        </div>
+      </div>
+    </section>
+  )
+}
+
+function PipelinePanel({ stages }: { stages: AdminLabPipelineStage[] }) {
+  const max = Math.max(1, ...stages.map((stage) => stage.count))
+  return (
+    <section
+      className="rounded-xl border"
+      style={{
+        borderColor: 'var(--surface-border)',
+        background: 'var(--surface)',
+      }}
+    >
+      <PanelHeader
+        icon={<BarChart3 className="h-4 w-4 text-gold" />}
+        title="Pipeline"
+        aside={<span className="text-[11px]" style={{ color: 'var(--text-tertiary)' }}>{stages.reduce((sum, stage) => sum + stage.count, 0)} stage hits</span>}
+      />
+      <div className="space-y-3 p-4">
+        {stages.map((stage) => (
+          <div key={stage.id}>
+            <div className="mb-1 flex items-center justify-between gap-3 text-xs">
+              <span style={{ color: 'var(--text-secondary)' }}>{stage.label}</span>
+              <span className="font-mono" style={{ color: stage.staleCount > 0 ? 'var(--accent-negative)' : 'var(--text-tertiary)' }}>
+                {stage.count}{stage.staleCount > 0 ? ` · ${stage.staleCount} stale` : ''}
+              </span>
+            </div>
+            <div className="h-2 overflow-hidden rounded-full" style={{ background: 'rgba(245, 240, 232, 0.06)' }}>
+              <div
+                className={cn('h-full rounded-full', stage.staleCount > 0 ? 'bg-burgundy-soft' : 'bg-gold-soft')}
+                style={{
+                  width: `${Math.max(3, Math.round((stage.count / max) * 100))}%`,
+                  backgroundColor: stage.staleCount > 0 ? 'rgba(168, 116, 111, 0.55)' : 'rgba(201, 169, 110, 0.55)',
+                }}
+              />
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  )
+}
+
+function ActiveRunsPanel({
+  runs,
+  selectedTicketId,
+  onSelect,
+}: {
+  runs: AdminLabActiveRun[]
+  selectedTicketId: string | null
+  onSelect: (ticketId: string) => void
+}) {
+  return (
+    <section
+      className="rounded-xl border"
+      style={{
+        borderColor: 'var(--surface-border)',
+        background: 'var(--surface)',
+      }}
+    >
+      <PanelHeader
+        icon={<Clock3 className="h-4 w-4 text-gold" />}
+        title="Current Runs"
+        aside={<span className="text-[11px]" style={{ color: 'var(--text-tertiary)' }}>{runs.length} visible</span>}
+      />
+      {runs.length === 0 ? (
+        <div className="p-6 text-sm" style={{ color: 'var(--text-secondary)' }}>
+          No active or blocked Lab runs are visible in the current window.
+        </div>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[980px] text-left text-xs">
+            <thead
+              className="border-b"
+              style={{ borderColor: 'var(--surface-border)', color: 'var(--text-tertiary)' }}
+            >
+              <tr>
+                <th className="px-4 py-3 font-medium">Run</th>
+                <th className="px-3 py-3 font-medium">Phase</th>
+                <th className="px-3 py-3 text-right font-medium">ICPs left</th>
+                <th className="px-3 py-3 text-right font-medium">Candidates</th>
+                <th className="px-3 py-3 font-medium">Bundle</th>
+                <th className="px-3 py-3 font-medium">Idle</th>
+                <th className="px-4 py-3 font-medium">Blocker</th>
+              </tr>
+            </thead>
+            <tbody>
+              {runs.map((run) => {
+                const active = selectedTicketId === run.ticketId
+                return (
+                  <tr
+                    key={`${run.ticketId}:${run.runId ?? 'ticket'}`}
+                    onClick={() => onSelect(run.ticketId)}
+                    className={cn('cursor-pointer border-b transition-colors hover-bg-warm', active ? 'bg-gold-soft' : '')}
+                    style={{ borderColor: 'var(--surface-border)' }}
+                  >
+                    <td className="max-w-[320px] px-4 py-3">
+                      <div className="flex items-center gap-2">
+                        <span className={cn('h-2 w-2 shrink-0 rounded-full', run.stale ? 'bg-burgundy-soft' : 'bg-gold-soft')} style={{ backgroundColor: run.stale ? 'var(--accent-negative)' : 'var(--accent-positive)' }} />
+                        <span className="truncate font-medium" style={{ color: 'var(--text-primary)' }}>
+                          {run.researchFocusSummary || 'No focus summary'}
+                        </span>
+                      </div>
+                      <div className="mt-1 flex flex-wrap items-center gap-2 font-mono text-[10px]" style={{ color: 'var(--text-tertiary)' }}>
+                        <span>{shortHotkey(run.minerHotkey)}</span>
+                        <span>Ticket {shortId(run.ticketId)}</span>
+                        {run.runId ? <span>Run {shortId(run.runId)}</span> : null}
+                      </div>
+                    </td>
+                    <td className="px-3 py-3">
+                      <StatusPill label={run.statusLabel || run.statusKey} band={run.stale ? 'failed' : 'running'} compact />
+                      <div className="mt-1 text-[10px]" style={{ color: 'var(--text-tertiary)' }}>
+                        {readableTag(run.phase)}
+                      </div>
+                    </td>
+                    <td className="px-3 py-3 text-right font-mono" style={{ color: 'var(--text-primary)' }}>
+                      {run.icpsRemaining === null ? '—' : run.icpsRemaining}
+                      <div className="text-[10px]" style={{ color: 'var(--text-tertiary)' }}>
+                        {run.icpTotal === null ? 'unknown total' : `${run.icpsScored ?? 0}/${run.icpTotal}`}
+                      </div>
+                    </td>
+                    <td className="px-3 py-3 text-right font-mono" style={{ color: 'var(--text-primary)' }}>
+                      {run.candidatesRemaining}
+                      <div className="text-[10px]" style={{ color: 'var(--text-tertiary)' }}>
+                        {run.scoredCandidateCount}/{run.candidateCount}
+                      </div>
+                    </td>
+                    <td className="max-w-[170px] px-3 py-3">
+                      <div className="truncate font-mono text-[11px]" style={{ color: 'var(--text-secondary)' }} title={run.scoreBundleId ?? undefined}>
+                        {run.scoreBundleId ? shortId(run.scoreBundleId) : '—'}
+                      </div>
+                      <div className="mt-1 truncate text-[10px]" style={{ color: 'var(--text-tertiary)' }}>
+                        {run.scoreBundleStatus ? readableTag(run.scoreBundleStatus) : 'No bundle yet'}
+                      </div>
+                    </td>
+                    <td className="px-3 py-3 font-mono" style={{ color: run.stale ? 'var(--accent-negative)' : 'var(--text-secondary)' }}>
+                      {formatDurationMs(run.idleMs)}
+                      <div className="text-[10px]" style={{ color: 'var(--text-tertiary)' }}>
+                        age {formatDurationMs(run.ageMs)}
+                      </div>
+                    </td>
+                    <td className="max-w-[260px] px-4 py-3">
+                      <div className="line-clamp-2 text-[11px] leading-relaxed" style={{ color: run.blocker ? 'var(--text-secondary)' : 'var(--text-tertiary)' }}>
+                        {run.blocker || 'No blocker reported'}
+                      </div>
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
+  )
+}
+
+function BenchmarkPanel({ benchmark }: { benchmark: AdminLabBenchmarkSummary }) {
+  return (
+    <section className="rounded-xl border" style={{ borderColor: 'var(--surface-border)', background: 'var(--surface)' }}>
+      <PanelHeader
+        icon={<Database className={cn('h-4 w-4', stateTextClass(benchmark.state))} />}
+        title="Benchmark"
+        aside={<StatePill state={benchmark.state} label={stateLabel(benchmark.state)} />}
+      />
+      <div className="space-y-4 p-4">
+        <div className="grid grid-cols-2 gap-2">
+          <MetricBox label="Score" value={benchmark.aggregateScore === null ? '—' : benchmark.aggregateScore.toFixed(2)} />
+          <MetricBox label="ICPs" value={benchmark.itemCount} />
+          <MetricBox label="Public" value={benchmark.publicIcpCount} />
+          <MetricBox label="Holdout" value={benchmark.privateHoldoutIcpCount} />
+        </div>
+        <MiniMeta label="Date" value={benchmark.benchmarkDate ?? '—'} />
+        <MiniMeta label="Updated" value={benchmark.currentStatusAt ? formatRelative(benchmark.currentStatusAt) : '—'} />
+        {benchmark.topIssues.length > 0 ? (
+          <div className="space-y-1">
+            {benchmark.topIssues.slice(0, 3).map((issue) => (
+              <div key={issue.key} className="flex items-center justify-between gap-3 text-xs">
+                <span className="truncate" style={{ color: 'var(--text-secondary)' }}>{readableTag(issue.key)}</span>
+                <span className="font-mono" style={{ color: 'var(--text-tertiary)' }}>{issue.count}</span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-xs leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
+            {benchmark.detail}
+          </p>
+        )}
+      </div>
+    </section>
+  )
+}
+
+function AlertsPanel({ alerts }: { alerts: AdminLabAlertSummary }) {
+  return (
+    <section className="rounded-xl border" style={{ borderColor: 'var(--surface-border)', background: 'var(--surface)' }}>
+      <PanelHeader
+        icon={<Siren className={cn('h-4 w-4', stateTextClass(alerts.state))} />}
+        title="Alerts"
+        aside={<StatePill state={alerts.state} label={alerts.sourceAvailable ? stateLabel(alerts.state) : 'Not wired'} />}
+      />
+      <div className="space-y-4 p-4">
+        <div className="grid grid-cols-3 gap-2">
+          <MetricBox label="24h" value={alerts.totalLast24h} />
+          <MetricBox label="Critical" value={alerts.criticalLast24h} tone={alerts.criticalLast24h > 0 ? 'critical' : 'neutral'} />
+          <MetricBox label="Active" value={alerts.activeCount} />
+        </div>
+        {!alerts.sourceAvailable ? (
+          <p className="text-xs leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
+            Alert telemetry table is not available yet.
+          </p>
+        ) : alerts.recent.length === 0 ? (
+          <p className="text-xs leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
+            No recent alerts in the telemetry source.
+          </p>
+        ) : (
+          <div className="space-y-2">
+            {alerts.recent.slice(0, 4).map((alert) => (
+              <div key={alert.id} className="border-t pt-2" style={{ borderColor: 'var(--surface-border)' }}>
+                <div className="flex items-center justify-between gap-3">
+                  <span className="truncate text-xs font-medium" style={{ color: 'var(--text-primary)' }}>{alert.title}</span>
+                  <span className="font-mono text-[10px]" style={{ color: alert.severity === 'critical' ? 'var(--accent-negative)' : 'var(--text-tertiary)' }}>
+                    {readableTag(alert.severity)}
+                  </span>
+                </div>
+                <div className="mt-1 flex items-center justify-between gap-3 text-[10px]" style={{ color: 'var(--text-tertiary)' }}>
+                  <span className="truncate">{alert.source}</span>
+                  <span>{alert.lastSeenAt ? formatRelative(alert.lastSeenAt) : '—'}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </section>
+  )
+}
+
+function AttestationPanel({ attestation }: { attestation: AdminLabAttestationSummary }) {
+  return (
+    <section className="rounded-xl border" style={{ borderColor: 'var(--surface-border)', background: 'var(--surface)' }}>
+      <PanelHeader
+        icon={attestation.state === 'critical' ? <ShieldX className="h-4 w-4 text-burgundy" /> : <ShieldCheck className={cn('h-4 w-4', stateTextClass(attestation.state))} />}
+        title="PCR0"
+        aside={<StatePill state={attestation.state} label={attestation.sourceAvailable ? stateLabel(attestation.state) : 'Not wired'} />}
+      />
+      <div className="space-y-4 p-4">
+        <div className="grid grid-cols-3 gap-2">
+          <MetricBox label="Nodes" value={attestation.totalNodes} />
+          <MetricBox label="Matched" value={attestation.matchedNodes} />
+          <MetricBox label="Mismatch" value={attestation.mismatchedNodes} tone={attestation.mismatchedNodes > 0 ? 'critical' : 'neutral'} />
+        </div>
+        {attestation.expectedPcr0 ? (
+          <MiniMeta label="Expected PCR0" value={compactHash(attestation.expectedPcr0)} title={attestation.expectedPcr0} />
+        ) : null}
+        {!attestation.sourceAvailable ? (
+          <p className="text-xs leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
+            Attestation telemetry table is not available yet.
+          </p>
+        ) : attestation.nodes.length === 0 ? (
+          <p className="text-xs leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
+            No attestation rows are reporting.
+          </p>
+        ) : (
+          <div className="space-y-2">
+            {attestation.nodes.slice(0, 5).map((node) => (
+              <div key={node.id} className="flex items-center justify-between gap-3 border-t pt-2" style={{ borderColor: 'var(--surface-border)' }}>
+                <div className="min-w-0">
+                  <div className="truncate text-xs" style={{ color: 'var(--text-primary)' }}>{node.component} · {node.nodeId}</div>
+                  <div className="mt-1 truncate font-mono text-[10px]" style={{ color: 'var(--text-tertiary)' }}>
+                    {node.observedPcr0 ? compactHash(node.observedPcr0) : 'missing PCR0'}
+                  </div>
+                </div>
+                <StatePill
+                  state={node.matched === false ? 'critical' : node.matched === null ? 'degraded' : 'healthy'}
+                  label={node.matched === false ? 'Mismatch' : node.matched === null ? 'Missing' : 'Match'}
+                />
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </section>
+  )
+}
+
+function PanelHeader({
+  icon,
+  title,
+  aside,
+}: {
+  icon: ReactNode
+  title: string
+  aside?: ReactNode
+}) {
+  return (
+    <div className="flex items-center justify-between gap-3 border-b px-4 py-3" style={{ borderColor: 'var(--surface-border)' }}>
+      <div className="flex min-w-0 items-center gap-2">
+        {icon}
+        <h2 className="truncate text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
+          {title}
+        </h2>
+      </div>
+      {aside ? <div className="shrink-0">{aside}</div> : null}
+    </div>
+  )
+}
+
+function MetricBox({
+  label,
+  value,
+  tone = 'neutral',
+}: {
+  label: string
+  value: number | string
+  tone?: 'neutral' | 'critical'
+}) {
+  return (
+    <div className="rounded-lg border px-3 py-2" style={{ borderColor: 'var(--surface-border)', background: 'var(--surface-base)' }}>
+      <div className="text-[10px] uppercase tracking-[0.12em]" style={{ color: 'var(--text-tertiary)' }}>
+        {label}
+      </div>
+      <div className="mt-1 text-lg font-medium tabular-nums" style={{ color: tone === 'critical' ? 'var(--accent-negative)' : 'var(--text-primary)' }}>
+        {typeof value === 'number' ? value.toLocaleString() : value}
+      </div>
+    </div>
+  )
+}
+
+function MiniMeta({ label, value, title }: { label: string; value: string; title?: string }) {
+  return (
+    <div className="min-w-0 rounded-lg border px-3 py-2" style={{ borderColor: 'var(--surface-border)', background: 'var(--surface-base)' }}>
+      <div className="text-[10px] uppercase tracking-[0.12em]" style={{ color: 'var(--text-tertiary)' }}>{label}</div>
+      <div className="mt-1 truncate font-mono text-[11px]" title={title ?? value} style={{ color: 'var(--text-secondary)' }}>{value}</div>
+    </div>
+  )
+}
+
+function StatePill({ state, label }: { state: AdminHealthState; label: string }) {
+  return (
+    <span className={cn('inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.12em]', statePillClass(state))}>
+      <span className={cn('h-1.5 w-1.5 rounded-full', stateDotClass(state))} />
+      {label}
+    </span>
   )
 }
 
@@ -585,6 +1254,80 @@ function statusTone(label: string, band: string): string {
     return 'border-burgundy-soft bg-burgundy-soft text-burgundy'
   }
   return 'border-white/10 text-white/60'
+}
+
+function healthStateForScoring(state: AdminScoringState): AdminHealthState {
+  if (state === 'active' || state === 'idle') return 'healthy'
+  if (state === 'paused' || state === 'stalled' || state === 'blocked') return 'degraded'
+  if (state === 'unknown') return 'unknown'
+  return 'degraded'
+}
+
+function stateLabel(state: AdminHealthState): string {
+  switch (state) {
+    case 'healthy':
+      return 'Healthy'
+    case 'degraded':
+      return 'Degraded'
+    case 'critical':
+      return 'Critical'
+    default:
+      return 'Unknown'
+  }
+}
+
+function statePillClass(state: AdminHealthState): string {
+  switch (state) {
+    case 'healthy':
+      return 'border-gold-soft bg-gold-soft text-gold'
+    case 'degraded':
+      return 'border-amber-warm-soft bg-amber-warm-soft text-amber-warm'
+    case 'critical':
+      return 'border-burgundy-soft bg-burgundy-soft text-burgundy'
+    default:
+      return 'border-white/10 text-white/55'
+  }
+}
+
+function stateTextClass(state: AdminHealthState): string {
+  switch (state) {
+    case 'healthy':
+      return 'text-gold'
+    case 'degraded':
+      return 'text-amber-warm'
+    case 'critical':
+      return 'text-burgundy'
+    default:
+      return 'text-white/45'
+  }
+}
+
+function stateDotClass(state: AdminHealthState): string {
+  switch (state) {
+    case 'healthy':
+      return 'bg-[var(--accent-positive)]'
+    case 'degraded':
+      return 'bg-[var(--accent-pending)]'
+    case 'critical':
+      return 'bg-[var(--accent-negative)]'
+    default:
+      return 'bg-white/30'
+  }
+}
+
+function signalIcon(id: string, state: AdminHealthState) {
+  if (id === 'pcr0') return state === 'critical' ? ShieldX : ShieldCheck
+  if (id === 'alerts') return state === 'critical' || state === 'degraded' ? AlertTriangle : Siren
+  if (id === 'benchmark') return Database
+  if (id === 'freshness') return Clock3
+  if (id === 'scoring') return Gauge
+  return Activity
+}
+
+function compactHash(value: string): string {
+  if (!value) return '—'
+  if (value.length <= 18) return value
+  return `${value.slice(0, 10)}…${value.slice(-6)}`
 }
 
 function timestampKindLabel(kind: LabTimelineTimestampKind | undefined): string {
