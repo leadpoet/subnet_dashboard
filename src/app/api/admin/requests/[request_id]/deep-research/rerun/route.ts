@@ -19,6 +19,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { getAdminSupabase, AdminFulfillmentRequest } from '@/lib/admin-supabase'
+import { isDeepResearchEnabled } from '@/lib/deep-research/config'
 import { runForRequest } from '@/lib/deep-research/worker'
 
 export const runtime = 'nodejs'
@@ -53,6 +54,17 @@ export async function POST(
   _req: NextRequest,
   ctx: { params: Promise<{ request_id: string }> },
 ) {
+  if (!isDeepResearchEnabled()) {
+    return NextResponse.json(
+      {
+        ok: false,
+        disabled: true,
+        error: 'Deep Research is disabled.',
+      },
+      { status: 409, headers: { 'Cache-Control': 'no-store' } },
+    )
+  }
+
   const { request_id } = await ctx.params
   if (!request_id || !/^[0-9a-f-]{36}$/i.test(request_id)) {
     return NextResponse.json({ error: 'invalid request_id' }, { status: 400 })

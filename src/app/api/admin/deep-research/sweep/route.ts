@@ -18,6 +18,7 @@
  */
 
 import { NextResponse } from 'next/server'
+import { isDeepResearchEnabled } from '@/lib/deep-research/config'
 import { runSweep } from '@/lib/deep-research/sweep'
 
 export const runtime = 'nodejs'
@@ -27,6 +28,17 @@ export const dynamic = 'force-dynamic'
 export const maxDuration = 300
 
 async function handle() {
+  if (!isDeepResearchEnabled()) {
+    return NextResponse.json(
+      {
+        ok: true,
+        disabled: true,
+        reason: 'Deep Research is disabled. Set DEEP_RESEARCH_ENABLED=true to enable.',
+      },
+      { headers: { 'Cache-Control': 'no-store' } },
+    )
+  }
+
   try {
     const result = await runSweep()
     return NextResponse.json(result, {

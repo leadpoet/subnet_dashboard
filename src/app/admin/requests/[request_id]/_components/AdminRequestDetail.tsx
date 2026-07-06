@@ -99,12 +99,13 @@ interface RequestLeadsResponse {
 
 type TabKey = 'deep_research' | 'leads' | 'icp' | 'chain'
 
+const DEEP_RESEARCH_ADMIN_TAB_ENABLED = false
+
 // Order matters — left-to-right tab order is the public contract.
-// Deep Research sits FIRST because the whole point is to QA before
-// delivery: an operator should see the verdict before scrolling
-// through the raw leads.
 const TABS: { key: TabKey; label: string }[] = [
-  { key: 'deep_research', label: 'Deep Research' },
+  ...(DEEP_RESEARCH_ADMIN_TAB_ENABLED
+    ? [{ key: 'deep_research' as const, label: 'Deep Research' }]
+    : []),
   { key: 'leads', label: 'Leads' },
   { key: 'icp', label: 'Client ICP' },
   { key: 'chain', label: 'Chain History' },
@@ -117,14 +118,7 @@ export function AdminRequestDetail({
   requestId: string
   payload: RequestDetailPayload
 }) {
-  // Default landing tab: Deep Research IF the chain has reached the QA
-  // pass (any non-null deep_research_status), otherwise Winning leads.
-  // This keeps the new tab in operators' face once a chain is
-  // fulfilled, without disrupting the existing flow for in-flight
-  // chains where the analysis isn't yet meaningful.
-  const initialTab: TabKey =
-    payload.deep_research?.status != null ? 'deep_research' : 'leads'
-  const [tab, setTab] = useState<TabKey>(initialTab)
+  const [tab, setTab] = useState<TabKey>('leads')
 
   const { chain, icp, winners, target_num_leads, delivered_count } = payload
   const approvedLeads = payload.approved_leads ?? winners

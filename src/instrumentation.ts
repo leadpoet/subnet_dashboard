@@ -11,9 +11,9 @@
  *      running, `/api/model-competition` returns 503 forever and the
  *      UI shows "Failed to fetch data".
  *
- *   2. Deep Research auto-sweep loop. A background interval that calls
- *      the QA sweep every 60 seconds so chains hitting status='fulfilled'
- *      get analyzed automatically, without anyone opening /admin.
+ *   2. Optional Deep Research auto-sweep loop. When explicitly enabled,
+ *      a background interval calls the QA sweep every 60 seconds so
+ *      chains hitting status='fulfilled' get analyzed automatically.
  *
  * IMPORTANT — webpack runtime gating:
  *   This hook is bundled for BOTH the Node.js and Edge runtimes. The
@@ -96,9 +96,10 @@ export async function register(): Promise<void> {
       return
     }
 
-    if (process.env.DEEP_RESEARCH_SWEEP_DISABLED === 'true') {
+    const { isDeepResearchEnabled } = await import('./lib/deep-research/config')
+    if (!isDeepResearchEnabled()) {
       console.log(
-        '[deep_research] sweep disabled by DEEP_RESEARCH_SWEEP_DISABLED env',
+        '[deep_research] sweep disabled; set DEEP_RESEARCH_ENABLED=true to enable',
       )
       return
     }
