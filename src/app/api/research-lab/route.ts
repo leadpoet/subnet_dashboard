@@ -121,6 +121,34 @@ type ScoreBundleCurrentRow = {
   created_at: string | null
 }
 
+type CandidateEvaluationCurrentStatusRow = {
+  ticket_id: string | null
+  run_id: string | null
+  current_candidate_status: string | null
+  current_reason: string | null
+  current_status_at: string | null
+  created_at: string | null
+}
+
+type RunQueueEventStatusRow = {
+  ticket_id: string | null
+  run_id: string | null
+  event_type: string | null
+  reason: string | null
+  event_doc: Record<string, unknown> | null
+  created_at: string | null
+}
+
+type LoopProjectionOverlay = {
+  candidateCount: number
+  scoredCandidateCount: number
+  currentCandidateStatus?: string
+  currentReason?: string
+  currentQueueStatus?: string
+  currentStatus?: string
+  lastActivityAt?: string
+}
+
 type ScoreBundleDoc = {
   private_holdout_gate?: {
     candidate_total_score?: number | string | null
@@ -2091,18 +2119,25 @@ async function fetchPublicLoops(
     return []
   }
 
-  return ((data ?? []) as PublicLoopRow[])
+  const visibleRows = ((data ?? []) as PublicLoopRow[])
     .filter(isVisiblePublicLoop)
     .slice(0, limit)
+  const projectionOverlays = await fetchLoopProjectionOverlays(supabase, visibleRows)
+
+  return visibleRows
     .map((row) => {
       const projectedOutcomeLabel = row.current_outcome_label || 'submitted'
       const projectedOutcomeBand = row.current_outcome_band || 'pending'
       const doc = row.current_event_doc ?? {}
+      const overlay = projectionOverlays.get(row.ticket_id)
       const improvementGate = objectRecord(doc.improvement_gate) ?? objectRecord(doc.improvementGate)
       const promotionDoc = objectRecord(doc.promotion)
-      const lastActivityAt = row.current_last_activity_at || row.created_at
-      const candidateCount = numberOr(row.current_candidate_count, 0)
-      const scoredCandidateCount = numberOr(row.current_scored_candidate_count, 0)
+      const lastActivityAt = latestIso(row.current_last_activity_at || row.created_at, overlay?.lastActivityAt)
+      const candidateCount = Math.max(numberOr(row.current_candidate_count, 0), overlay?.candidateCount ?? 0)
+      const scoredCandidateCount = Math.max(
+        numberOr(row.current_scored_candidate_count, 0),
+        overlay?.scoredCandidateCount ?? 0,
+      )
       const publicStatus =
         stringOr(row.public_status) ??
         stringOr(row.current_public_status) ??
@@ -2189,19 +2224,21 @@ async function fetchPublicLoops(
         candidateCount,
         scoredCandidateCount,
         currentCandidateStatus:
+          overlay?.currentCandidateStatus ??
           row.current_candidate_status ??
           stringOr(doc.current_candidate_status) ??
           stringOr(doc.candidate_status) ??
           dominantCountKey(doc.candidate_status_counts),
         currentReason:
+          overlay?.currentReason ??
           row.current_reason ??
           stringOr(doc.current_reason) ??
           stringOr(doc.candidate_reason) ??
           dominantCountKey(doc.candidate_reason_counts) ??
           doc.projection_reason,
-        currentQueueStatus: row.current_queue_status ?? doc.queue_status,
+        currentQueueStatus: overlay?.currentQueueStatus ?? row.current_queue_status ?? doc.queue_status,
         currentReceiptStatus: row.current_receipt_status ?? doc.receipt_status,
-        currentStatus: row.current_status,
+        currentStatus: overlay?.currentStatus ?? row.current_status,
         improvementGateDecision,
         promotionStatus,
         promotionEventType,
@@ -2243,6 +2280,135 @@ async function fetchPublicLoops(
 
 function isVisiblePublicLoop(row: PublicLoopRow): boolean {
   return !HIDDEN_LOOP_MINER_PREFIXES.some((prefix) => row.miner_hotkey.startsWith(prefix))
+}
+
+async function fetchLoopProjectionOverlays(
+  supabase: ReturnType<typeof getSupabase>,
+  rows: PublicLoopRow[],
+): Promise<Map<string, LoopProjectionOverlay>> {
+  const overlays = new Map<string, LoopProjectionOverlay>()
+  const ticketIds = uniqueStrings(rows.map((row) => row.ticket_id))
+  if (ticketIds.length === 0) return overlays
+
+  await applyCandidateEvaluationOverlays(supabase, ticketIds, overlays)
+  await applyRunQueueEventOverlays(supabase, ticketIds, overlays)
+  return overlays
+}
+
+async function applyCandidateEvaluationOverlays(
+  supabase: ReturnType<typeof getSupabase>,
+  ticketIds: string[],
+  overlays: Map<string, LoopProjectionOverlay>,
+) {
+  for (const batch of chunked(ticketIds, SUPABASE_IN_FILTER_BATCH_SIZE)) {
+    const { data, error } = await supabase
+      .from('research_lab_candidate_evaluation_current')
+      .select('ticket_id, run_id, current_candidate_status, current_reason, current_status_at, created_at')
+      .in('ticket_id', batch)
+      .order('current_status_at', { ascending: false, nullsFirst: false })
+      .order('created_at', { ascending: false, nullsFirst: false })
+      .limit(5_000)
+
+    if (error) {
+      console.error('[Research Lab API] candidate projection overlay query failed:', error)
+      continue
+    }
+
+    for (const row of (data ?? []) as CandidateEvaluationCurrentStatusRow[]) {
+      const ticketId = stringOr(row.ticket_id)
+      if (!ticketId) continue
+      const status = stringOr(row.current_candidate_status)
+      const reason = stringOr(row.current_reason)
+      const statusAt = row.current_status_at || row.created_at || undefined
+      const current = overlays.get(ticketId) ?? emptyLoopProjectionOverlay()
+      current.candidateCount += 1
+      if (status === 'scored') current.scoredCandidateCount += 1
+      const previousSelectedAt = current.lastActivityAt
+      current.lastActivityAt = latestIso(current.lastActivityAt, statusAt)
+
+      const rank = candidateProjectionStatusRank(status)
+      const currentRank = candidateProjectionStatusRank(current.currentCandidateStatus)
+      if (
+        !current.currentCandidateStatus ||
+        rank > currentRank ||
+        (rank === currentRank && timestampOrZero(statusAt) > timestampOrZero(previousSelectedAt))
+      ) {
+        current.currentCandidateStatus = status
+        current.currentReason = reason
+      }
+      overlays.set(ticketId, current)
+    }
+  }
+}
+
+async function applyRunQueueEventOverlays(
+  supabase: ReturnType<typeof getSupabase>,
+  ticketIds: string[],
+  overlays: Map<string, LoopProjectionOverlay>,
+) {
+  for (const batch of chunked(ticketIds, SUPABASE_IN_FILTER_BATCH_SIZE)) {
+    const { data, error } = await supabase
+      .from('research_loop_run_queue_events')
+      .select('ticket_id, run_id, event_type, reason, event_doc, created_at')
+      .in('ticket_id', batch)
+      .order('created_at', { ascending: false, nullsFirst: false })
+      .limit(5_000)
+
+    if (error) {
+      console.error('[Research Lab API] queue projection overlay query failed:', error)
+      continue
+    }
+
+    const seenTickets = new Set<string>()
+    for (const row of (data ?? []) as RunQueueEventStatusRow[]) {
+      const ticketId = stringOr(row.ticket_id)
+      if (!ticketId || seenTickets.has(ticketId)) continue
+      seenTickets.add(ticketId)
+      const doc = row.event_doc ?? {}
+      const queueStatus =
+        stringOr(row.event_type) ??
+        stringOr(doc.queue_status) ??
+        stringOr(doc.status)
+      const currentStatus =
+        stringOr(doc.current_status) ??
+        stringOr(doc.public_status) ??
+        queueStatus
+      const current = overlays.get(ticketId) ?? emptyLoopProjectionOverlay()
+      current.currentQueueStatus = queueStatus
+      current.currentStatus = current.currentStatus ?? currentStatus
+      current.lastActivityAt = latestIso(current.lastActivityAt, row.created_at || undefined)
+      overlays.set(ticketId, current)
+    }
+  }
+}
+
+function emptyLoopProjectionOverlay(): LoopProjectionOverlay {
+  return {
+    candidateCount: 0,
+    scoredCandidateCount: 0,
+  }
+}
+
+function candidateProjectionStatusRank(status: string | undefined): number {
+  switch (status) {
+    case 'scored':
+      return 50
+    case 'failed':
+      return 40
+    case 'rejected':
+      return 30
+    case 'completed_no_candidate':
+      return 20
+    case 'queued':
+    case 'running':
+    case 'scoring':
+    case 'evaluating':
+    case 'evaluation_running':
+    case 'processing':
+      return 10
+    default:
+      return status ? 1 : 0
+  }
 }
 
 function groupLoopsByTopic(loops: NormalizedLoop[]): TopicGroup[] {
@@ -2372,6 +2538,20 @@ function timestampOrZero(value: unknown): number {
   if (typeof value !== 'string' || !value.trim()) return 0
   const time = new Date(value).getTime()
   return Number.isFinite(time) ? time : 0
+}
+
+function latestIso(a: string | null | undefined, b: string | null | undefined): string {
+  const aTime = timestampOrZero(a)
+  const bTime = timestampOrZero(b)
+  return bTime > aTime ? String(b) : String(a ?? b ?? '')
+}
+
+function chunked<T>(values: T[], size: number): T[][] {
+  const chunks: T[][] = []
+  for (let i = 0; i < values.length; i += size) {
+    chunks.push(values.slice(i, i + size))
+  }
+  return chunks
 }
 
 function arrayOfStrings(value: unknown): string[] {

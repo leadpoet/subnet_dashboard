@@ -93,6 +93,16 @@ const FAILED_VALUES = new Set([
   'timed_out',
 ])
 
+const CANCELLED_VALUES = new Set(['cancelled', 'canceled'])
+
+const COMPLETED_VALUES = new Set([
+  'completed',
+  'complete',
+  'done',
+  'succeeded',
+  'success',
+])
+
 const ACTIVE_VALUES = new Set([
   'queued',
   'assigned',
@@ -241,8 +251,11 @@ const COMPLETED_STATUS_KEYS = new Set([
   'completed_no_candidate',
   'scoring_failed',
   'failed_after_scoring',
+  'not_promoted',
   'rebase_unavailable',
   'failed',
+  'cancelled',
+  'canceled',
 ])
 const PROMISING_STATUS_KEYS = new Set([
   'scored_promising',
@@ -258,6 +271,7 @@ const PROMISING_STATUS_KEYS = new Set([
 const PROMISING_BANDS = PASSED_THRESHOLD_BANDS
 const NO_GAIN_OR_FAILED_KEYS = new Set([
   'scored_no_gain',
+  'not_promoted',
   'completed_no_candidate',
   'scoring_failed',
   'failed_after_scoring',
@@ -349,6 +363,19 @@ export function deriveResearchLabLoopStatus(input: ResearchLabLoopStatusInput): 
     })
   }
 
+  const terminalOverride = legacyTerminalOverrideStatus({
+    projectedLabel,
+    projectedBand,
+    candidateStatus,
+    queueStatus,
+    receiptStatus,
+    currentStatus,
+    candidateCount: input.candidateCount,
+    scoredCandidateCount: input.scoredCandidateCount,
+    action: scoredOpsAction,
+  })
+  if (terminalOverride) return terminalOverride
+
   if (ACTIVE_STATUS_KEYS.has(projectedLabel) && (!operationalValues.length || hasAny(operationalValues, ACTIVE_VALUES))) {
     if (projectedLabel === 'scoring') return status('scoring', 'Scoring', 'running')
     if (projectedLabel === 'running') return status('running', 'Running', 'running')
@@ -402,10 +429,12 @@ export function researchLabStatusFilterKey(
   if (normalized === 'reward_created') return 'promoted'
   if (normalized === 'scored_promising') return 'scored'
   if (normalized === 'scored_no_gain') return 'scored'
+  if (normalized === 'not_promoted') return 'scored'
   if (normalized === 'scored') return 'scored'
   if (normalized === 'completed_no_candidate') return 'completed_no_candidate'
   if (normalized === 'scoring_failed' || normalized === 'failed_after_scoring') return 'failed'
   if (normalized === 'failed' || normalized === 'rebase_unavailable') return 'failed'
+  if (normalized === 'cancelled' || normalized === 'canceled') return 'failed'
   if (normalized === 'awaiting_payment') return 'awaiting_payment'
   if (normalized === 'not_started') return 'paid_not_started'
   return normalized
@@ -720,6 +749,10 @@ function normalizedModelOutcomeStatus(input: NormalizedModelOutcomeStatusInput):
     return noGainStatus(input.action)
   }
 
+  if (candidateStatus === 'rejected' || resultState === 'rejected' || publicStatus === 'rejected') {
+    return notPromotedStatus(input.action)
+  }
+
   if (statusValues.includes('scored_promising')) {
     return status('scored_promising', 'Scored · Promising', canonicalBand(projectedBand, 'small_gain'), input.note, input.action)
   }
@@ -735,6 +768,15 @@ function normalizedModelOutcomeStatus(input: NormalizedModelOutcomeStatusInput):
 
   if (projectedLabel === 'scored' || resultState === 'scored' || publicStatus === 'scored') {
     return status('scored_promising', 'Scored · Promising', canonicalBand(projectedBand, 'completed'), input.note, input.action)
+  }
+
+  if (
+    candidateStatus === 'scored' &&
+    !FAILED_VALUES.has(projectedLabel) &&
+    !FAILED_VALUES.has(resultState) &&
+    !FAILED_VALUES.has(publicStatus)
+  ) {
+    return noGainStatus(input.action)
   }
 
   return null
@@ -768,10 +810,95 @@ function noGainStatus(action?: ResearchLabLoopStatusNote): ResearchLabLoopStatus
   ), action)
 }
 
+function notPromotedStatus(action?: ResearchLabLoopStatusNote): ResearchLabLoopStatus {
+  return status('not_promoted', 'Not promoted', 'no_gain', finalOutcomeNote(
+    'Final outcome: candidate did not advance to promotion.'
+  ), action)
+}
+
 function completedNoCandidateStatus(action?: ResearchLabLoopStatusNote): ResearchLabLoopStatus {
   return status('completed_no_candidate', 'No candidate', 'completed', finalOutcomeNote(
     'Final outcome: no valid candidate was produced.'
   ), action)
+}
+
+function completedStatus(action?: ResearchLabLoopStatusNote): ResearchLabLoopStatus {
+  return status('completed', 'Complete', 'completed', finalOutcomeNote(
+    'Final outcome: loop completed.'
+  ), action)
+}
+
+function cancelledStatus(action?: ResearchLabLoopStatusNote): ResearchLabLoopStatus {
+  return status('cancelled', 'Cancelled', 'failed', finalOutcomeNote(
+    'Final outcome: loop was cancelled.'
+  ), action)
+}
+
+function failedTerminalStatus(action?: ResearchLabLoopStatusNote): ResearchLabLoopStatus {
+  return status('failed', 'Failed', 'failed', finalOutcomeNote(
+    'Final outcome: loop failed terminally.'
+  ), action)
+}
+
+function legacyTerminalOverrideStatus(input: {
+  projectedLabel: string
+  projectedBand: string
+  candidateStatus: string
+  queueStatus: string
+  receiptStatus: string
+  currentStatus: string
+  candidateCount?: number | null
+  scoredCandidateCount?: number | null
+  action?: ResearchLabLoopStatusNote
+}): ResearchLabLoopStatus | null {
+  const candidateCount = countValue(input.candidateCount)
+  const scoredCandidateCount = countValue(input.scoredCandidateCount)
+  const operationalValues = [
+    input.candidateStatus,
+    input.queueStatus,
+    input.receiptStatus,
+    input.currentStatus,
+  ].filter(Boolean)
+  const runValues = [
+    input.queueStatus,
+    input.receiptStatus,
+    input.currentStatus,
+  ].filter(Boolean)
+
+  if (input.candidateStatus === 'scored' || scoredCandidateCount > 0) return noGainStatus(input.action)
+  if (input.candidateStatus === 'rejected') return notPromotedStatus(input.action)
+  if (COMPLETED_NO_CANDIDATE_VALUES.has(input.candidateStatus)) return completedNoCandidateStatus(input.action)
+  if (input.candidateStatus === 'failed') {
+    return terminalFailureStatus({
+      candidateCount: candidateCount || 1,
+      scoredCandidateCount,
+    }, input.action)
+  }
+
+  if (hasAny(runValues, CANCELLED_VALUES)) return cancelledStatus(input.action)
+  if (hasAny(runValues, FAILED_VALUES)) return failedTerminalStatus(input.action)
+
+  if (candidateCount === 0 && hasAny(runValues, COMPLETED_VALUES)) {
+    return completedNoCandidateStatus(input.action)
+  }
+
+  if (
+    ACTIVE_STATUS_KEYS.has(input.projectedLabel) &&
+    operationalValues.length > 0 &&
+    !hasAny(operationalValues, ACTIVE_VALUES)
+  ) {
+    if (hasAny(runValues, COMPLETED_VALUES)) return completedStatus(input.action)
+    const fallbackStatus = input.currentStatus || input.queueStatus || input.receiptStatus || 'completed'
+    return status(
+      fallbackStatus,
+      labelForStatus(fallbackStatus),
+      canonicalBand(input.projectedBand, 'completed'),
+      undefined,
+      input.action,
+    )
+  }
+
+  return null
 }
 
 function terminalFailureStatus(
@@ -984,6 +1111,7 @@ function labelForStatus(value: string): string {
     public_holdout_rejected: 'Scored',
     holdout_rejected: 'Scored',
     promotion_rejected: 'Scored',
+    not_promoted: 'Not promoted',
     promotion_passed: 'Model Improvement',
     active_version_created: 'Model Improvement',
     champion_reward_created: 'Model Improvement',
@@ -999,6 +1127,8 @@ function labelForStatus(value: string): string {
     awaiting_payment: 'Awaiting funding',
     not_started: 'Not started',
     failed: 'Failed',
+    cancelled: 'Cancelled',
+    canceled: 'Cancelled',
   }
   if (explicit[value]) return explicit[value]
   return value.replace(/_/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase())
