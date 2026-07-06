@@ -705,7 +705,7 @@ try {
       },
     },
     {
-      name: 'promotion pass event upgrades scored candidate to Model Improvement',
+      name: 'active version event stays scored promising until champion reward',
       input: {
         outcomeLabel: 'scored_promising',
         outcomeBand: 'pending',
@@ -715,12 +715,32 @@ try {
         receiptId: 'receipt-active-version',
       },
       expected: {
-        key: 'promoted',
-        label: 'Model Improvement',
-        band: 'passed_threshold',
+        key: 'scored_promising',
+        label: 'Scored · Promising',
+        band: 'small_gain',
         active: false,
         scoring: false,
         promising: true,
+      },
+    },
+    {
+      name: 'canonical score bundle plus active version is not Model Improvement',
+      input: {
+        scoreBundleCount: 1,
+        currentScoreBundleStatus: 'scored',
+        currentCandidateStatus: 'scored',
+        promotionEventType: 'active_version_created',
+        promotionStatus: 'merged',
+        candidateCount: 1,
+        scoredCandidateCount: 1,
+      },
+      expected: {
+        key: 'scored_no_gain',
+        label: 'Scored',
+        band: 'no_gain',
+        active: false,
+        scoring: false,
+        promising: false,
       },
     },
     {
@@ -737,7 +757,7 @@ try {
       expected: {
         key: 'promoted',
         label: 'Model Improvement',
-        band: 'passed_threshold',
+        band: 'promoted',
         active: false,
         scoring: false,
         promising: true,

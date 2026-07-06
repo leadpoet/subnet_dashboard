@@ -2456,13 +2456,7 @@ async function applyPromotionEventOverlays(
 
 function promotionProjectionSignalRank(row: CandidatePromotionEventRow): number {
   const eventType = stringOr(row.event_type)
-  const status = stringOr(row.promotion_status)
-  if (eventType === 'champion_reward_created' || status === 'reward_created') return 50
-  if (eventType === 'active_version_created' || status === 'merged') return 40
-  if (eventType === 'promotion_passed' || status === 'passed') return 30
-  if (eventType === 'promoted' || status === 'promoted') return 30
-  if (eventType === 'winner' || status === 'winner') return 30
-  if (eventType === 'high_gain' || status === 'high_gain') return 30
+  if (eventType === 'champion_reward_created') return 50
   return 0
 }
 
