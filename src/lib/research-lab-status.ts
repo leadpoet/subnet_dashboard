@@ -837,6 +837,9 @@ function modelImprovedStatus(
   if (projectedLabel === 'promotion_passed' || promotionSignals.includes('promotion_passed')) {
     return status('promoted', 'Model Improvement', canonicalBand(projectedBand, 'passed_threshold'), undefined, action)
   }
+  if (promotionSignals.some((signal) => PROMOTION_PASS_VALUES.has(signal))) {
+    return status('promoted', 'Model Improvement', canonicalBand(projectedBand, 'passed_threshold'), undefined, action)
+  }
   return status('scored_promising', 'Scored · Promising', canonicalBand(projectedBand, 'passed_threshold'), undefined, action)
 }
 
@@ -890,11 +893,21 @@ function canonicalProjectionStatus(input: ResearchLabLoopStatusInput): ResearchL
   const projectedLabel = normalize(input.outcomeLabel)
   const projectedBand = normalize(input.outcomeBand)
   const hasProjectedModelOutcome = hasExplicitProjectedModelOutcome(projectedLabel, projectedBand)
+  const promotionSignals = [
+    input.promotionStatus,
+    input.promotionEventType,
+    input.promotionEvent,
+    input.eventType,
+  ].map(normalize).filter(Boolean)
+  const candidateStatus = normalize(input.currentCandidateStatus ?? input.candidateStatus)
+  if (hasAny(promotionSignals, PROMOTION_PASS_VALUES)) {
+    return modelImprovedStatus(projectedLabel, projectedBand, candidateStatus, promotionSignals)
+  }
+
   const scoreBundleStatus = normalize(input.currentScoreBundleStatus ?? input.scoreBundleStatus)
   const scoreBundleCount = countValue(input.scoreBundleCount)
   if ((scoreBundleCount > 0 || scoreBundleStatus) && !hasProjectedModelOutcome) return noGainStatus()
 
-  const candidateStatus = normalize(input.currentCandidateStatus ?? input.candidateStatus)
   const reason = normalize(input.currentReason ?? input.reason)
   if (
     candidateStatus === 'scored' &&

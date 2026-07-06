@@ -705,7 +705,7 @@ try {
       },
     },
     {
-      name: 'promotion pass event keeps scored_promising primary unless outcome is promoted',
+      name: 'promotion pass event upgrades scored candidate to Model Improvement',
       input: {
         outcomeLabel: 'scored_promising',
         outcomeBand: 'pending',
@@ -715,9 +715,29 @@ try {
         receiptId: 'receipt-active-version',
       },
       expected: {
-        key: 'scored_promising',
-        label: 'Scored · Promising',
-        band: 'small_gain',
+        key: 'promoted',
+        label: 'Model Improvement',
+        band: 'passed_threshold',
+        active: false,
+        scoring: false,
+        promising: true,
+      },
+    },
+    {
+      name: 'canonical score bundle plus champion reward renders Model Improvement',
+      input: {
+        scoreBundleCount: 1,
+        currentScoreBundleStatus: 'scored',
+        currentCandidateStatus: 'scored',
+        promotionEventType: 'champion_reward_created',
+        promotionStatus: 'reward_created',
+        candidateCount: 1,
+        scoredCandidateCount: 1,
+      },
+      expected: {
+        key: 'promoted',
+        label: 'Model Improvement',
+        band: 'passed_threshold',
         active: false,
         scoring: false,
         promising: true,

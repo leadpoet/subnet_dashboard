@@ -159,11 +159,22 @@ type TicketCurrentStatusRow = {
   current_status_at: string | null
 }
 
+type CandidatePromotionEventRow = {
+  source_score_bundle_id: string | null
+  event_type: string | null
+  promotion_status: string | null
+  created_at: string | null
+}
+
 type LoopProjectionOverlay = {
   candidateCount: number
   scoredCandidateCount: number
   scoreBundleCount: number
+  scoreBundleIds?: string[]
   currentScoreBundleStatus?: string
+  currentPromotionStatus?: string
+  currentPromotionEventType?: string
+  currentPromotionEvent?: string
   currentCandidateStatus?: string
   currentReason?: string
   currentLoopStatus?: string
@@ -2212,18 +2223,21 @@ async function fetchPublicLoops(
         stringOr(doc.current_improvement_gate_decision) ??
         stringOr(improvementGate?.decision)
       const promotionStatus =
+        overlay?.currentPromotionStatus ??
         stringOr(row.promotion_status) ??
         stringOr(row.current_promotion_status) ??
         stringOr(doc.promotion_status) ??
         stringOr(doc.current_promotion_status) ??
         stringOr(promotionDoc?.status)
       const promotionEventType =
+        overlay?.currentPromotionEventType ??
         stringOr(row.promotion_event_type) ??
         stringOr(row.current_promotion_event_type) ??
         stringOr(doc.promotion_event_type) ??
         stringOr(doc.current_promotion_event_type) ??
         stringOr(promotionDoc?.event_type)
       const promotionEvent =
+        overlay?.currentPromotionEvent ??
         stringOr(row.promotion_event) ??
         stringOr(row.current_promotion_event) ??
         stringOr(doc.promotion_event) ??
@@ -2329,6 +2343,7 @@ async function fetchLoopProjectionOverlays(
   if (ticketIds.length === 0) return overlays
 
   await applyScoreBundleOverlays(supabase, ticketIds, overlays)
+  await applyPromotionEventOverlays(supabase, overlays)
   await applyCandidateEvaluationOverlays(supabase, ticketIds, overlays)
   await applyAutoResearchLoopOverlays(supabase, ticketIds, overlays)
   await applyRunQueueCurrentOverlays(supabase, ticketIds, overlays)
@@ -2344,7 +2359,7 @@ async function applyScoreBundleOverlays(
   for (const batch of chunked(ticketIds, SUPABASE_IN_FILTER_BATCH_SIZE)) {
     const { data, error } = await supabase
       .from('research_evaluation_score_bundle_current')
-      .select('ticket_id, run_id, bundle_status, current_event_status, current_event_type, current_reason, current_status_at, created_at')
+      .select('score_bundle_id, ticket_id, run_id, bundle_status, current_event_status, current_event_type, current_reason, current_status_at, created_at')
       .in('ticket_id', batch)
       .order('current_status_at', { ascending: false, nullsFirst: false })
       .order('created_at', { ascending: false, nullsFirst: false })
@@ -2366,12 +2381,89 @@ async function applyScoreBundleOverlays(
       const statusAt = row.current_status_at || row.created_at || undefined
       const current = overlays.get(ticketId) ?? emptyLoopProjectionOverlay()
       current.scoreBundleCount += 1
+      const scoreBundleId = stringOr(row.score_bundle_id)
+      if (scoreBundleId) {
+        current.scoreBundleIds = Array.from(new Set([...(current.scoreBundleIds ?? []), scoreBundleId]))
+      }
       current.currentScoreBundleStatus = current.currentScoreBundleStatus ?? status
       current.scoredCandidateCount = Math.max(current.scoredCandidateCount, 1)
       current.lastActivityAt = latestIso(current.lastActivityAt, statusAt)
       overlays.set(ticketId, current)
     }
   }
+}
+
+async function applyPromotionEventOverlays(
+  supabase: ReturnType<typeof getSupabase>,
+  overlays: Map<string, LoopProjectionOverlay>,
+) {
+  const scoreBundleToTicketIds = new Map<string, string[]>()
+  for (const [ticketId, overlay] of overlays) {
+    for (const scoreBundleId of overlay.scoreBundleIds ?? []) {
+      scoreBundleToTicketIds.set(scoreBundleId, [
+        ...(scoreBundleToTicketIds.get(scoreBundleId) ?? []),
+        ticketId,
+      ])
+    }
+  }
+
+  const scoreBundleIds = Array.from(scoreBundleToTicketIds.keys())
+  if (scoreBundleIds.length === 0) return
+
+  const selectedPromotionByScoreBundle = new Map<string, CandidatePromotionEventRow>()
+  for (const batch of chunked(scoreBundleIds, SUPABASE_IN_FILTER_BATCH_SIZE)) {
+    const { data, error } = await supabase
+      .from('research_lab_candidate_promotion_events')
+      .select('source_score_bundle_id, event_type, promotion_status, created_at')
+      .in('source_score_bundle_id', batch)
+      .order('created_at', { ascending: false, nullsFirst: false })
+      .limit(5_000)
+
+    if (error) {
+      console.error('[Research Lab API] promotion projection overlay query failed:', error)
+      continue
+    }
+
+    for (const row of (data ?? []) as CandidatePromotionEventRow[]) {
+      const scoreBundleId = stringOr(row.source_score_bundle_id)
+      if (!scoreBundleId) continue
+      const rank = promotionProjectionSignalRank(row)
+      if (rank <= 0) continue
+      const selected = selectedPromotionByScoreBundle.get(scoreBundleId)
+      const selectedRank = selected ? promotionProjectionSignalRank(selected) : -1
+      if (
+        !selected ||
+        rank > selectedRank ||
+        (rank === selectedRank && timestampOrZero(row.created_at) > timestampOrZero(selected.created_at))
+      ) {
+        selectedPromotionByScoreBundle.set(scoreBundleId, row)
+      }
+    }
+  }
+
+  for (const [scoreBundleId, row] of selectedPromotionByScoreBundle) {
+    const ticketIds = scoreBundleToTicketIds.get(scoreBundleId) ?? []
+    for (const ticketId of ticketIds) {
+      const current = overlays.get(ticketId) ?? emptyLoopProjectionOverlay()
+      current.currentPromotionStatus = stringOr(row.promotion_status)
+      current.currentPromotionEventType = stringOr(row.event_type)
+      current.currentPromotionEvent = stringOr(row.event_type)
+      current.lastActivityAt = latestIso(current.lastActivityAt, row.created_at || undefined)
+      overlays.set(ticketId, current)
+    }
+  }
+}
+
+function promotionProjectionSignalRank(row: CandidatePromotionEventRow): number {
+  const eventType = stringOr(row.event_type)
+  const status = stringOr(row.promotion_status)
+  if (eventType === 'champion_reward_created' || status === 'reward_created') return 50
+  if (eventType === 'active_version_created' || status === 'merged') return 40
+  if (eventType === 'promotion_passed' || status === 'passed') return 30
+  if (eventType === 'promoted' || status === 'promoted') return 30
+  if (eventType === 'winner' || status === 'winner') return 30
+  if (eventType === 'high_gain' || status === 'high_gain') return 30
+  return 0
 }
 
 async function applyCandidateEvaluationOverlays(
