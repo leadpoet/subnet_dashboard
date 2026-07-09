@@ -17,12 +17,28 @@ import {
   isScoredResearchLabLoopStatus,
   type ResearchLabLoopStatusNote,
 } from '@/lib/research-lab-status'
+import {
+  buildResearchLabDailyComputeSpend,
+  type ResearchLabDailyComputeSpendPoint,
+  type ResearchLabTerminalReceiptEvent,
+} from '@/lib/research-lab-compute-spend'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
 const LOOP_LIMIT = 250
 const ACTIVE_RUN_LIMIT = 40
+const COMPUTE_SPEND_DAYS = 30
+const COMPUTE_SPEND_BATCH_SIZE = 1_000
+const LEADPOET_NETUID = 71
+const PUBLIC_LOG_WINDOW_MS = 24 * 60 * 60 * 1000
+const PUBLIC_LOG_LIMIT = 1_000
+const FRESH_PUBLISHED_ATTESTATION_MS = 3 * 60 * 60 * 1000
+const DEGRADED_PUBLISHED_ATTESTATION_MS = 6 * 60 * 60 * 1000
+const FRESH_WEIGHT_SUBMISSION_MS = 3 * 60 * 60 * 1000
+const DEGRADED_WEIGHT_SUBMISSION_MS = 6 * 60 * 60 * 1000
+const FRESH_ARWEAVE_CHECKPOINT_MS = 6 * 60 * 60 * 1000
+const DEGRADED_ARWEAVE_CHECKPOINT_MS = 12 * 60 * 60 * 1000
 const STALE_ACTIVE_MS = 30 * 60 * 1000
 const STALE_SCORING_MS = 15 * 60 * 1000
 const FRESH_DATA_MS = 15 * 60 * 1000
@@ -204,12 +220,19 @@ export type AdminLabBenchmarkSummary = {
 
 export type AdminLabAlertSummary = {
   state: AdminHealthState
+  source: 'ops_telemetry' | 'public_transparency_log' | 'none'
   sourceAvailable: boolean
   unavailableReason: string | null
   totalLast24h: number
   criticalLast24h: number
   warningLast24h: number
   activeCount: number
+  verifiedEventCount: number
+  weightSubmissionCount: number
+  epochAuditCount: number
+  latestObservedAt: string | null
+  latestCheckpointAt: string | null
+  latestCheckpointUrl: string | null
   recent: AdminLabAlert[]
 }
 
@@ -227,6 +250,8 @@ export type AdminLabAlert = {
 
 export type AdminLabAttestationSummary = {
   state: AdminHealthState
+  source: 'ops_attestation_current' | 'published_weight_bundles' | 'none'
+  verificationMode: 'expected_match' | 'observation_only'
   sourceAvailable: boolean
   unavailableReason: string | null
   totalNodes: number
@@ -235,6 +260,7 @@ export type AdminLabAttestationSummary = {
   missingNodes: number
   expectedPcr0: string | null
   latestAttestedAt: string | null
+  latestEpoch: number | null
   nodes: AdminLabAttestationNode[]
 }
 
@@ -249,6 +275,8 @@ export type AdminLabAttestationNode = {
   buildId: string | null
   gitSha: string | null
   attestedAt: string | null
+  epoch: number | null
+  transparencyEventHash: string | null
 }
 
 export type AdminLabDataFreshness = {
@@ -256,6 +284,17 @@ export type AdminLabDataFreshness = {
   latestActivityAt: string | null
   ageMs: number | null
   loopCount: number
+}
+
+export type AdminLabComputeSpendSummary = {
+  sourceAvailable: boolean
+  unavailableReason: string | null
+  days: number
+  points: ResearchLabDailyComputeSpendPoint[]
+  totalUsd: number
+  averageDailyUsd: number
+  latestDayUsd: number
+  runCount: number
 }
 
 export type AdminLabOpsSummary = {
@@ -268,6 +307,7 @@ export type AdminLabOpsSummary = {
   benchmark: AdminLabBenchmarkSummary
   alerts: AdminLabAlertSummary
   attestation: AdminLabAttestationSummary
+  computeSpend: AdminLabComputeSpendSummary
 }
 
 export type AdminResearchLabPayload = {
@@ -517,12 +557,14 @@ async function fetchAdminLabOps(
     benchmark,
     alerts,
     attestation,
+    computeSpend,
   ] = await Promise.all([
     fetchScoreBundleMetrics(supabase, loops),
     fetchScoringControl(supabase),
     fetchBenchmarkSummary(supabase),
     fetchAlertSummary(supabase),
     fetchAttestationSummary(supabase),
+    fetchComputeSpendSummary(supabase),
   ])
 
   const dataFreshness = buildDataFreshness(loops)
@@ -552,6 +594,7 @@ async function fetchAdminLabOps(
     benchmark,
     alerts,
     attestation,
+    computeSpend,
   }
 }
 
@@ -632,6 +675,89 @@ async function fetchScoreBundleVolume(
     lastScoringAt,
     scoreBundlesLastHour: rows.filter((row) => timestampOrZero(row.created_at) >= since1h).length,
     scoreBundlesLast24h: rows.length,
+  }
+}
+
+async function fetchComputeSpendSummary(
+  supabase: ReturnType<typeof getAdminSupabase>,
+): Promise<AdminLabComputeSpendSummary> {
+  const now = new Date()
+  const sinceMs = Date.UTC(
+    now.getUTCFullYear(),
+    now.getUTCMonth(),
+    now.getUTCDate(),
+  ) - (COMPUTE_SPEND_DAYS - 1) * 24 * 60 * 60 * 1000
+  const events: ResearchLabTerminalReceiptEvent[] = []
+
+  for (let offset = 0; ; offset += COMPUTE_SPEND_BATCH_SIZE) {
+    const { data, error } = await supabase
+      .from('research_loop_receipt_events')
+      .select('receipt_id, event_doc, created_at')
+      .in('event_type', ['completed', 'failed'])
+      .gte('created_at', new Date(sinceMs).toISOString())
+      .order('created_at', { ascending: false, nullsFirst: false })
+      .range(offset, offset + COMPUTE_SPEND_BATCH_SIZE - 1)
+
+    if (error) {
+      console.warn('[admin:research-lab] compute spend unavailable', error.message)
+      return emptyComputeSpendSummary(false, error.message, now)
+    }
+
+    const batch = (data ?? []) as ResearchLabTerminalReceiptEvent[]
+    events.push(...batch)
+    if (batch.length < COMPUTE_SPEND_BATCH_SIZE) break
+  }
+
+  const receiptIdsMissingRun = uniqueStrings(
+    events
+      .filter((event) => !stringOr(objectRecord(event.event_doc)?.run_id))
+      .map((event) => event.receipt_id),
+  )
+  const receiptRunIds = new Map<string, string>()
+
+  for (const batch of chunked(receiptIdsMissingRun, SUPABASE_IN_FILTER_BATCH_SIZE)) {
+    const { data, error } = await supabase
+      .from('research_loop_receipts')
+      .select('receipt_id, run_id')
+      .in('receipt_id', batch)
+
+    if (error) {
+      console.warn('[admin:research-lab] compute spend run lookup unavailable', error.message)
+      break
+    }
+
+    for (const row of (data ?? []) as Array<Record<string, unknown>>) {
+      const receiptId = stringOr(row.receipt_id)
+      const runId = stringOr(row.run_id)
+      if (receiptId && runId) receiptRunIds.set(receiptId, runId)
+    }
+  }
+
+  return {
+    sourceAvailable: true,
+    unavailableReason: null,
+    ...buildResearchLabDailyComputeSpend({
+      events,
+      receiptRunIds,
+      days: COMPUTE_SPEND_DAYS,
+      now,
+    }),
+  }
+}
+
+function emptyComputeSpendSummary(
+  sourceAvailable: boolean,
+  unavailableReason: string | null,
+  now = new Date(),
+): AdminLabComputeSpendSummary {
+  return {
+    sourceAvailable,
+    unavailableReason,
+    ...buildResearchLabDailyComputeSpend({
+      events: [],
+      days: COMPUTE_SPEND_DAYS,
+      now,
+    }),
   }
 }
 
@@ -720,10 +846,7 @@ function buildActiveRuns(
 ): AdminLabActiveRun[] {
   const now = Date.now()
   return loops
-    .filter((loop) =>
-      isActiveResearchLabLoopStatus(loop.statusKey) ||
-      isPendingOrBlockingResearchLabLoopStatus(loop.statusKey),
-    )
+    .filter((loop) => isActiveResearchLabLoopStatus(loop.statusKey))
     .map((loop) => {
       const scoreMetrics = scoreMetricsByTicket.get(loop.ticketId)
       const idleMs = Math.max(0, now - timestampOrZero(loop.lastActivityAt))
@@ -796,7 +919,9 @@ function buildScoringSummary({
 
   let state: AdminScoringState = 'idle'
   let label = 'Idle'
-  let detail = 'No active scoring runs are currently visible.'
+  let detail = blockedRuns > 0
+    ? `No executable Lab runs are currently visible. ${blockedRuns} loop${blockedRuns === 1 ? ' is' : 's are'} waiting on funding, credits, baseline, or recovery and excluded from current-run health.`
+    : 'No active scoring runs are currently visible.'
   let source: AdminLabScoringSummary['source'] = control.source === 'explicit' ? 'explicit' : 'inferred'
 
   if (control.paused) {
@@ -807,10 +932,6 @@ function buildScoringSummary({
     state = 'stalled'
     label = 'Stalled'
     detail = `${staleRuns} active run${staleRuns === 1 ? '' : 's'} have not emitted progress recently.`
-  } else if (blockedRuns > 0 && activeRuns.length === 0) {
-    state = 'blocked'
-    label = 'Blocked'
-    detail = `${blockedRuns} loop${blockedRuns === 1 ? '' : 's'} are waiting on funding, baseline, credits, or rescore recovery.`
   } else if (activeRuns.length > 0 || metrics.scoreBundlesLastHour > 0) {
     state = 'active'
     label = 'Active'
@@ -852,8 +973,18 @@ function buildPipelineStages(loops: AdminLabLoopSummary[]): AdminLabPipelineStag
       id: 'queued',
       label: 'Queued / funded',
       loops: loops.filter((loop) =>
-        ['queued', 'paid_not_started', 'awaiting_payment', 'waiting_for_baseline', 'blocked_for_credit'].includes(loop.statusKey),
+        ['queued', 'paid_not_started', 'waiting_for_baseline'].includes(loop.statusKey),
       ),
+    },
+    {
+      id: 'awaiting_funding',
+      label: 'Awaiting funding',
+      loops: loops.filter((loop) => loop.statusKey === 'awaiting_payment'),
+    },
+    {
+      id: 'waiting_credits',
+      label: 'Waiting for credits',
+      loops: loops.filter((loop) => loop.statusKey === 'blocked_for_credit'),
     },
     {
       id: 'running',
@@ -886,7 +1017,10 @@ function buildPipelineStages(loops: AdminLabLoopSummary[]): AdminLabPipelineStag
     id: stage.id,
     label: stage.label,
     count: stage.loops.length,
-    staleCount: stage.loops.filter((loop) => now - timestampOrZero(loop.lastActivityAt) >= STALE_ACTIVE_MS).length,
+    staleCount: stage.loops.filter((loop) =>
+      isActiveResearchLabLoopStatus(loop.statusKey) &&
+      now - timestampOrZero(loop.lastActivityAt) >= STALE_ACTIVE_MS,
+    ).length,
     percent: Math.round((stage.loops.length / total) * 100),
   }))
 }
@@ -967,25 +1101,24 @@ async function fetchAlertSummary(
   supabase: ReturnType<typeof getAdminSupabase>,
 ): Promise<AdminLabAlertSummary> {
   const current = await fetchOptionalRows(supabase, 'ops_alert_current', 500)
-  const fallback = current.sourceAvailable
-    ? current
-    : await fetchOptionalRows(supabase, 'ops_alert_events', 500)
-
-  if (!fallback.sourceAvailable) {
-    return {
-      state: 'unknown',
-      sourceAvailable: false,
-      unavailableReason: fallback.unavailableReason,
-      totalLast24h: 0,
-      criticalLast24h: 0,
-      warningLast24h: 0,
-      activeCount: 0,
-      recent: [],
-    }
+  if (current.sourceAvailable && current.rows.length > 0) {
+    return summarizeOpsAlerts(current.rows)
   }
 
+  const events = await fetchOptionalRows(supabase, 'ops_alert_events', 500)
+  if (events.sourceAvailable && events.rows.length > 0) {
+    return summarizeOpsAlerts(events.rows)
+  }
+
+  return fetchPublicLogAlertSummary(
+    supabase,
+    current.unavailableReason ?? events.unavailableReason,
+  )
+}
+
+function summarizeOpsAlerts(rows: Array<Record<string, unknown>>): AdminLabAlertSummary {
   const since24h = Date.now() - 24 * 60 * 60 * 1000
-  const alerts = fallback.rows
+  const alerts = rows
     .map(normalizeAlertRow)
     .filter(Boolean) as AdminLabAlert[]
   alerts.sort((a, b) => timestampOrZero(b.lastSeenAt ?? b.firstSeenAt) - timestampOrZero(a.lastSeenAt ?? a.firstSeenAt))
@@ -1003,13 +1136,224 @@ async function fetchAlertSummary(
 
   return {
     state,
+    source: 'ops_telemetry',
     sourceAvailable: true,
     unavailableReason: null,
     totalLast24h: totalWeighted,
     criticalLast24h,
     warningLast24h,
     activeCount,
+    verifiedEventCount: 0,
+    weightSubmissionCount: 0,
+    epochAuditCount: 0,
+    latestObservedAt: latestIso(...alerts.map((alert) => alert.lastSeenAt ?? alert.firstSeenAt)) ?? null,
+    latestCheckpointAt: null,
+    latestCheckpointUrl: null,
     recent: alerts.slice(0, 8),
+  }
+}
+
+type PublicTransparencyLogRow = {
+  event_type: string | null
+  ts: string | null
+  event_hash: string | null
+  tee_sequence: number | null
+  arweave_tx_id: string | null
+  payload_netuid: string | null
+  payload_epoch: string | null
+  payload_epoch_id: string | null
+  signed_event_hash: string | null
+}
+
+async function fetchPublicLogAlertSummary(
+  supabase: ReturnType<typeof getAdminSupabase>,
+  opsUnavailableReason: string | null,
+): Promise<AdminLabAlertSummary> {
+  const since = new Date(Date.now() - PUBLIC_LOG_WINDOW_MS).toISOString()
+  const { data, error } = await supabase
+    .from('transparency_log')
+    .select(
+      'event_type,ts,event_hash,tee_sequence,arweave_tx_id,payload_netuid:payload->>netuid,payload_epoch:payload->>epoch,payload_epoch_id:payload->>epoch_id,signed_event_hash:signed_log_entry->>event_hash',
+    )
+    .in('event_type', ['WEIGHT_SUBMISSION', 'RESEARCH_LAB_EPOCH_AUDIT', 'ARWEAVE_CHECKPOINT'])
+    .gte('ts', since)
+    .order('ts', { ascending: false })
+    .limit(PUBLIC_LOG_LIMIT)
+
+  if (error) {
+    return emptyAlertSummary(
+      [opsUnavailableReason, `transparency_log: ${error.message}`].filter(Boolean).join('; '),
+    )
+  }
+
+  const rows = ((data ?? []) as PublicTransparencyLogRow[]).filter((row) =>
+    row.event_type === 'ARWEAVE_CHECKPOINT' || row.payload_netuid === String(LEADPOET_NETUID),
+  )
+  const weightRows = rows.filter((row) => row.event_type === 'WEIGHT_SUBMISSION')
+  const auditRows = rows.filter((row) => row.event_type === 'RESEARCH_LAB_EPOCH_AUDIT')
+  const checkpointRows = rows.filter((row) => row.event_type === 'ARWEAVE_CHECKPOINT')
+  const signedRows = [...weightRows, ...auditRows]
+  const invalidSignedRows = signedRows.filter((row) =>
+    !row.event_hash || !row.signed_event_hash || row.event_hash !== row.signed_event_hash,
+  )
+  const verifiedEventCount = signedRows.length - invalidSignedRows.length
+  const latestWeightAt = latestIso(...weightRows.map((row) => row.ts)) ?? null
+  const latestCheckpointAt = latestIso(...checkpointRows.map((row) => row.ts)) ?? null
+  const latestObservedAt = latestIso(...rows.map((row) => row.ts)) ?? null
+  const latestCheckpoint = checkpointRows.find((row) => row.ts === latestCheckpointAt) ?? null
+  const auditEpochs = new Set(auditRows.map((row) => row.payload_epoch).filter(Boolean))
+  const missingAuditRows = weightRows.filter((row) =>
+    Boolean(row.payload_epoch_id) && !auditEpochs.has(row.payload_epoch_id),
+  )
+  const alerts: AdminLabAlert[] = []
+
+  const addAlert = (input: {
+    id: string
+    severity: 'critical' | 'warning'
+    title: string
+    count?: number
+    firstSeenAt?: string | null
+    lastSeenAt?: string | null
+  }) => {
+    alerts.push({
+      id: input.id,
+      severity: input.severity,
+      source: 'public transparency log',
+      title: input.title,
+      fingerprint: input.id,
+      status: 'active',
+      count: Math.max(1, input.count ?? 1),
+      firstSeenAt: input.firstSeenAt ?? input.lastSeenAt ?? null,
+      lastSeenAt: input.lastSeenAt ?? input.firstSeenAt ?? null,
+    })
+  }
+
+  if (weightRows.length === 0) {
+    addAlert({
+      id: 'public-log:no-weight-submission',
+      severity: 'critical',
+      title: `No subnet ${LEADPOET_NETUID} weight submission in 24h`,
+      firstSeenAt: since,
+      lastSeenAt: latestObservedAt,
+    })
+  } else if (latestWeightAt) {
+    const weightAgeMs = Date.now() - timestampOrZero(latestWeightAt)
+    if (weightAgeMs > DEGRADED_WEIGHT_SUBMISSION_MS) {
+      addAlert({
+        id: 'public-log:weight-submission-critical-stale',
+        severity: 'critical',
+        title: 'Latest subnet weight submission is over 6h old',
+        lastSeenAt: latestWeightAt,
+      })
+    } else if (weightAgeMs > FRESH_WEIGHT_SUBMISSION_MS) {
+      addAlert({
+        id: 'public-log:weight-submission-stale',
+        severity: 'warning',
+        title: 'Latest subnet weight submission is over 3h old',
+        lastSeenAt: latestWeightAt,
+      })
+    }
+  }
+
+  if (invalidSignedRows.length > 0) {
+    addAlert({
+      id: 'public-log:invalid-signature-envelope',
+      severity: 'critical',
+      title: `${invalidSignedRows.length} public log ${invalidSignedRows.length === 1 ? 'entry has' : 'entries have'} a missing or mismatched signed event hash`,
+      count: invalidSignedRows.length,
+      firstSeenAt: latestIso(...invalidSignedRows.map((row) => row.ts)) ?? null,
+      lastSeenAt: latestIso(...invalidSignedRows.map((row) => row.ts)) ?? null,
+    })
+  }
+
+  if (missingAuditRows.length > 0) {
+    const latestWeightEpoch = weightRows[0]?.payload_epoch_id ?? null
+    const latestEpochMissing = missingAuditRows.some((row) => row.payload_epoch_id === latestWeightEpoch)
+    addAlert({
+      id: 'public-log:missing-epoch-audit',
+      severity: latestEpochMissing ? 'critical' : 'warning',
+      title: `${missingAuditRows.length} weight ${missingAuditRows.length === 1 ? 'epoch is' : 'epochs are'} missing a public research audit`,
+      count: missingAuditRows.length,
+      firstSeenAt: latestIso(...missingAuditRows.map((row) => row.ts)) ?? null,
+      lastSeenAt: latestIso(...missingAuditRows.map((row) => row.ts)) ?? null,
+    })
+  }
+
+  if (!latestCheckpointAt) {
+    addAlert({
+      id: 'public-log:no-arweave-checkpoint',
+      severity: 'critical',
+      title: 'No Arweave transparency checkpoint in 24h',
+      firstSeenAt: since,
+      lastSeenAt: latestObservedAt,
+    })
+  } else {
+    const checkpointAgeMs = Date.now() - timestampOrZero(latestCheckpointAt)
+    if (checkpointAgeMs > DEGRADED_ARWEAVE_CHECKPOINT_MS) {
+      addAlert({
+        id: 'public-log:arweave-checkpoint-critical-stale',
+        severity: 'critical',
+        title: 'Latest Arweave transparency checkpoint is over 12h old',
+        lastSeenAt: latestCheckpointAt,
+      })
+    } else if (checkpointAgeMs > FRESH_ARWEAVE_CHECKPOINT_MS) {
+      addAlert({
+        id: 'public-log:arweave-checkpoint-stale',
+        severity: 'warning',
+        title: 'Latest Arweave transparency checkpoint is over 6h old',
+        lastSeenAt: latestCheckpointAt,
+      })
+    }
+  }
+
+  alerts.sort((a, b) => timestampOrZero(b.lastSeenAt) - timestampOrZero(a.lastSeenAt))
+  const criticalLast24h = alerts.filter((alert) => alert.severity === 'critical').length
+  const warningLast24h = alerts.filter((alert) => alert.severity === 'warning').length
+  const totalLast24h = alerts.reduce((sum, alert) => sum + alert.count, 0)
+  const state: AdminHealthState = criticalLast24h > 0
+    ? 'critical'
+    : warningLast24h > 0
+      ? 'degraded'
+      : 'healthy'
+
+  return {
+    state,
+    source: 'public_transparency_log',
+    sourceAvailable: true,
+    unavailableReason: null,
+    totalLast24h,
+    criticalLast24h,
+    warningLast24h,
+    activeCount: alerts.length,
+    verifiedEventCount,
+    weightSubmissionCount: weightRows.length,
+    epochAuditCount: auditRows.length,
+    latestObservedAt,
+    latestCheckpointAt,
+    latestCheckpointUrl: latestCheckpoint?.arweave_tx_id
+      ? `https://viewblock.io/arweave/tx/${encodeURIComponent(latestCheckpoint.arweave_tx_id)}`
+      : null,
+    recent: alerts.slice(0, 8),
+  }
+}
+
+function emptyAlertSummary(unavailableReason: string | null): AdminLabAlertSummary {
+  return {
+    state: 'unknown',
+    source: 'none',
+    sourceAvailable: false,
+    unavailableReason,
+    totalLast24h: 0,
+    criticalLast24h: 0,
+    warningLast24h: 0,
+    activeCount: 0,
+    verifiedEventCount: 0,
+    weightSubmissionCount: 0,
+    epochAuditCount: 0,
+    latestObservedAt: null,
+    latestCheckpointAt: null,
+    latestCheckpointUrl: null,
+    recent: [],
   }
 }
 
@@ -1037,22 +1381,15 @@ async function fetchAttestationSummary(
   supabase: ReturnType<typeof getAdminSupabase>,
 ): Promise<AdminLabAttestationSummary> {
   const result = await fetchOptionalRows(supabase, 'ops_attestation_current', 200)
-  if (!result.sourceAvailable) {
-    return {
-      state: 'unknown',
-      sourceAvailable: false,
-      unavailableReason: result.unavailableReason,
-      totalNodes: 0,
-      matchedNodes: 0,
-      mismatchedNodes: 0,
-      missingNodes: 0,
-      expectedPcr0: null,
-      latestAttestedAt: null,
-      nodes: [],
-    }
+  if (result.sourceAvailable && result.rows.length > 0) {
+    return summarizeOpsAttestations(result.rows)
   }
 
-  const nodes = result.rows.map(normalizeAttestationRow)
+  return fetchPublishedWeightAttestationSummary(supabase, result.unavailableReason)
+}
+
+function summarizeOpsAttestations(rows: Array<Record<string, unknown>>): AdminLabAttestationSummary {
+  const nodes = rows.map(normalizeAttestationRow)
   const mismatchedNodes = nodes.filter((node) => node.matched === false).length
   const missingNodes = nodes.filter((node) => node.matched === null).length
   const matchedNodes = nodes.filter((node) => node.matched === true).length
@@ -1069,6 +1406,8 @@ async function fetchAttestationSummary(
 
   return {
     state,
+    source: 'ops_attestation_current',
+    verificationMode: 'expected_match',
     sourceAvailable: true,
     unavailableReason: null,
     totalNodes: nodes.length,
@@ -1077,6 +1416,7 @@ async function fetchAttestationSummary(
     missingNodes,
     expectedPcr0,
     latestAttestedAt,
+    latestEpoch: null,
     nodes: nodes
       .sort((a, b) => {
         const aBad = a.matched === false ? 0 : a.matched === null ? 1 : 2
@@ -1084,6 +1424,107 @@ async function fetchAttestationSummary(
         return aBad - bBad || timestampOrZero(b.attestedAt) - timestampOrZero(a.attestedAt)
       })
       .slice(0, 12),
+  }
+}
+
+async function fetchPublishedWeightAttestationSummary(
+  supabase: ReturnType<typeof getAdminSupabase>,
+  opsUnavailableReason: string | null,
+): Promise<AdminLabAttestationSummary> {
+  const { data, error } = await supabase
+    .from('published_weight_bundles')
+    .select(
+      'epoch_id,validator_hotkey,validator_enclave_pubkey,validator_pcr0,pcr0_commit_hash,weight_submission_event_hash,created_at',
+    )
+    .eq('netuid', LEADPOET_NETUID)
+    .order('epoch_id', { ascending: false })
+    .order('created_at', { ascending: false })
+    .limit(200)
+
+  if (error) {
+    return emptyAttestationSummary(
+      [opsUnavailableReason, `published_weight_bundles: ${error.message}`].filter(Boolean).join('; '),
+    )
+  }
+
+  const latestByValidator = new Map<string, Record<string, unknown>>()
+  for (const row of (data ?? []) as Array<Record<string, unknown>>) {
+    const key = stringOr(row.validator_hotkey) ?? stringOr(row.validator_enclave_pubkey) ?? 'unknown'
+    if (!latestByValidator.has(key)) latestByValidator.set(key, row)
+  }
+
+  const nodes: AdminLabAttestationNode[] = Array.from(latestByValidator.values()).map((row) => {
+    const hotkey = stringOr(row.validator_hotkey) ?? null
+    const enclavePubkey = stringOr(row.validator_enclave_pubkey) ?? null
+    const epoch = finiteNumberOrNull(row.epoch_id)
+    const observedPcr0 = normalizePcr0(row.validator_pcr0)
+    const nodeId = hotkey ?? enclavePubkey ?? 'unknown'
+    return {
+      id: `published-weight:${nodeId}`,
+      component: 'validator',
+      nodeId,
+      hotkey,
+      expectedPcr0: null,
+      observedPcr0,
+      matched: null,
+      buildId: epoch === null ? null : `epoch ${Math.round(epoch)}`,
+      gitSha: stringOr(row.pcr0_commit_hash) ?? null,
+      attestedAt: isoStringOr(row.created_at) ?? null,
+      epoch,
+      transparencyEventHash: stringOr(row.weight_submission_event_hash) ?? null,
+    }
+  })
+  const missingNodes = nodes.filter((node) => !node.observedPcr0).length
+  const latestAttestedAt = latestIso(...nodes.map((node) => node.attestedAt)) ?? null
+  const latestEpoch = nodes.reduce<number | null>((latest, node) => {
+    if (node.epoch === null) return latest
+    return latest === null ? node.epoch : Math.max(latest, node.epoch)
+  }, null)
+  const attestationAgeMs = latestAttestedAt
+    ? Date.now() - timestampOrZero(latestAttestedAt)
+    : null
+  const state: AdminHealthState = nodes.length === 0
+    ? 'unknown'
+    : missingNodes === nodes.length || attestationAgeMs === null || attestationAgeMs > DEGRADED_PUBLISHED_ATTESTATION_MS
+      ? 'critical'
+      : missingNodes > 0 || attestationAgeMs > FRESH_PUBLISHED_ATTESTATION_MS
+        ? 'degraded'
+        : 'healthy'
+
+  return {
+    state,
+    source: 'published_weight_bundles',
+    verificationMode: 'observation_only',
+    sourceAvailable: true,
+    unavailableReason: null,
+    totalNodes: nodes.length,
+    matchedNodes: 0,
+    mismatchedNodes: 0,
+    missingNodes,
+    expectedPcr0: null,
+    latestAttestedAt,
+    latestEpoch,
+    nodes: nodes
+      .sort((a, b) => timestampOrZero(b.attestedAt) - timestampOrZero(a.attestedAt))
+      .slice(0, 12),
+  }
+}
+
+function emptyAttestationSummary(unavailableReason: string | null): AdminLabAttestationSummary {
+  return {
+    state: 'unknown',
+    source: 'none',
+    verificationMode: 'observation_only',
+    sourceAvailable: false,
+    unavailableReason,
+    totalNodes: 0,
+    matchedNodes: 0,
+    mismatchedNodes: 0,
+    missingNodes: 0,
+    expectedPcr0: null,
+    latestAttestedAt: null,
+    latestEpoch: null,
+    nodes: [],
   }
 }
 
@@ -1121,6 +1562,11 @@ function normalizeAttestationRow(row: Record<string, unknown>): AdminLabAttestat
       isoStringOr(row.attested_at) ??
       isoStringOr(row.updated_at) ??
       isoStringOr(row.created_at) ??
+      null,
+    epoch: finiteNumberOrNull(row.epoch_id),
+    transparencyEventHash:
+      stringOr(row.transparency_event_hash) ??
+      stringOr(row.weight_submission_event_hash) ??
       null,
   }
 }
@@ -1164,16 +1610,22 @@ function buildHealthSignals(input: {
       id: 'pcr0',
       label: 'PCR0',
       value: input.attestation.sourceAvailable
-        ? `${input.attestation.matchedNodes}/${input.attestation.totalNodes} matched`
+        ? input.attestation.verificationMode === 'observation_only'
+          ? `${input.attestation.totalNodes - input.attestation.missingNodes}/${input.attestation.totalNodes} observed`
+          : `${input.attestation.matchedNodes}/${input.attestation.totalNodes} matched`
         : 'Not wired',
       state: input.attestation.state,
       detail: input.attestation.sourceAvailable
-        ? input.attestation.mismatchedNodes > 0
-          ? `${input.attestation.mismatchedNodes} node${input.attestation.mismatchedNodes === 1 ? '' : 's'} report PCR0 mismatch.`
-          : input.attestation.missingNodes > 0
-            ? `${input.attestation.missingNodes} node${input.attestation.missingNodes === 1 ? '' : 's'} are missing PCR0 data.`
-            : 'All reporting nodes match expected PCR0.'
-        : 'ops_attestation_current is not available yet.',
+        ? input.attestation.verificationMode === 'observation_only'
+          ? input.attestation.missingNodes > 0
+            ? `${input.attestation.missingNodes} validator${input.attestation.missingNodes === 1 ? '' : 's'} are missing a published PCR0.`
+            : 'Latest published validator PCR0 is available; no expected-PCR0 allowlist is configured for comparison.'
+          : input.attestation.mismatchedNodes > 0
+            ? `${input.attestation.mismatchedNodes} node${input.attestation.mismatchedNodes === 1 ? '' : 's'} report PCR0 mismatch.`
+            : input.attestation.missingNodes > 0
+              ? `${input.attestation.missingNodes} node${input.attestation.missingNodes === 1 ? '' : 's'} are missing PCR0 data.`
+              : 'All reporting nodes match expected PCR0.'
+        : 'No PCR0 source is readable from ops_attestation_current or published_weight_bundles.',
       updatedAt: input.attestation.latestAttestedAt,
     },
     {
@@ -1184,9 +1636,11 @@ function buildHealthSignals(input: {
         : 'Not wired',
       state: input.alerts.state,
       detail: input.alerts.sourceAvailable
-        ? `${input.alerts.criticalLast24h} critical, ${input.alerts.warningLast24h} warning, ${input.alerts.activeCount} active.`
-        : 'ops_alert_current or ops_alert_events is not available yet.',
-      updatedAt: input.alerts.recent[0]?.lastSeenAt,
+        ? input.alerts.source === 'public_transparency_log'
+          ? `${input.alerts.verifiedEventCount} signed events checked (${input.alerts.weightSubmissionCount} weights, ${input.alerts.epochAuditCount} audits); ${input.alerts.activeCount} derived issues.`
+          : `${input.alerts.criticalLast24h} critical, ${input.alerts.warningLast24h} warning, ${input.alerts.activeCount} active.`
+        : 'No alert telemetry or public transparency log is readable.',
+      updatedAt: input.alerts.latestObservedAt ?? input.alerts.recent[0]?.lastSeenAt,
     },
     {
       id: 'benchmark',
@@ -1397,6 +1851,17 @@ function numberOr(value: unknown, fallback: number): number {
 function nullableNumber(value: unknown): number | null {
   const numeric = Number(value)
   return Number.isFinite(numeric) ? numeric : null
+}
+
+function finiteNumberOrNull(value: unknown): number | null {
+  if (value === null || value === undefined || value === '') return null
+  const numeric = Number(value)
+  return Number.isFinite(numeric) ? numeric : null
+}
+
+function normalizePcr0(value: unknown): string | null {
+  const text = stringOr(value)?.replace(/^0x/i, '').toLowerCase()
+  return text && /^[0-9a-f]{96}$/.test(text) ? text : null
 }
 
 function firstFiniteNumber(values: unknown[]): number | null {

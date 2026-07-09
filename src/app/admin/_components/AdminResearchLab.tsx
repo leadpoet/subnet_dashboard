@@ -7,6 +7,7 @@ import {
   AlertTriangle,
   BarChart3,
   Clock3,
+  CircleDollarSign,
   Database,
   Gauge,
   Loader2,
@@ -17,6 +18,15 @@ import {
   ShieldX,
   Siren,
 } from 'lucide-react'
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from 'recharts'
 import { cn } from '@/lib/utils'
 import { formatDateTime, formatRelative, shortHotkey } from '@/lib/admin-format'
 
@@ -156,12 +166,19 @@ type AdminLabBenchmarkSummary = {
 
 type AdminLabAlertSummary = {
   state: AdminHealthState
+  source: 'ops_telemetry' | 'public_transparency_log' | 'none'
   sourceAvailable: boolean
   unavailableReason: string | null
   totalLast24h: number
   criticalLast24h: number
   warningLast24h: number
   activeCount: number
+  verifiedEventCount: number
+  weightSubmissionCount: number
+  epochAuditCount: number
+  latestObservedAt: string | null
+  latestCheckpointAt: string | null
+  latestCheckpointUrl: string | null
   recent: AdminLabAlert[]
 }
 
@@ -179,6 +196,8 @@ type AdminLabAlert = {
 
 type AdminLabAttestationSummary = {
   state: AdminHealthState
+  source: 'ops_attestation_current' | 'published_weight_bundles' | 'none'
+  verificationMode: 'expected_match' | 'observation_only'
   sourceAvailable: boolean
   unavailableReason: string | null
   totalNodes: number
@@ -187,6 +206,7 @@ type AdminLabAttestationSummary = {
   missingNodes: number
   expectedPcr0: string | null
   latestAttestedAt: string | null
+  latestEpoch: number | null
   nodes: AdminLabAttestationNode[]
 }
 
@@ -201,6 +221,8 @@ type AdminLabAttestationNode = {
   buildId: string | null
   gitSha: string | null
   attestedAt: string | null
+  epoch: number | null
+  transparencyEventHash: string | null
 }
 
 type AdminLabDataFreshness = {
@@ -208,6 +230,23 @@ type AdminLabDataFreshness = {
   latestActivityAt: string | null
   ageMs: number | null
   loopCount: number
+}
+
+type AdminLabComputeSpendPoint = {
+  date: string
+  spendUsd: number
+  runCount: number
+}
+
+type AdminLabComputeSpendSummary = {
+  sourceAvailable: boolean
+  unavailableReason: string | null
+  days: number
+  points: AdminLabComputeSpendPoint[]
+  totalUsd: number
+  averageDailyUsd: number
+  latestDayUsd: number
+  runCount: number
 }
 
 type AdminLabOpsSummary = {
@@ -220,6 +259,7 @@ type AdminLabOpsSummary = {
   benchmark: AdminLabBenchmarkSummary
   alerts: AdminLabAlertSummary
   attestation: AdminLabAttestationSummary
+  computeSpend: AdminLabComputeSpendSummary
 }
 
 export type AdminResearchLabPayload = {
@@ -411,6 +451,8 @@ export function AdminResearchLab({
         <>
           <OpsHealthStrip ops={ops} />
 
+          <ComputeSpendPanel spend={ops.computeSpend} />
+
           <section className="grid gap-4 xl:grid-cols-[minmax(0,1.3fr)_minmax(320px,0.7fr)]">
             <ScoringPanel scoring={ops.scoring} />
             <PipelinePanel stages={ops.pipeline} />
@@ -573,7 +615,7 @@ function OpsHealthStrip({ ops }: { ops: AdminLabOpsSummary }) {
             <div className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
               Lab Ops
             </div>
-            <div className="text-[11px]" style={{ color: 'var(--text-tertiary)' }}>
+            <div suppressHydrationWarning className="text-[11px]" style={{ color: 'var(--text-tertiary)' }}>
               {ops.dataFreshness.latestActivityAt
                 ? `Latest activity ${formatRelative(ops.dataFreshness.latestActivityAt)}`
                 : 'No Lab activity returned'}
@@ -619,11 +661,95 @@ function HealthSignalCard({ signal }: { signal: AdminLabHealthSignal }) {
         {signal.detail}
       </div>
       {signal.updatedAt ? (
-        <div className="mt-2 font-mono text-[10px]" style={{ color: 'var(--text-tertiary)' }}>
+        <div suppressHydrationWarning className="mt-2 font-mono text-[10px]" style={{ color: 'var(--text-tertiary)' }}>
           {formatRelative(signal.updatedAt)}
         </div>
       ) : null}
     </div>
+  )
+}
+
+function ComputeSpendPanel({ spend }: { spend: AdminLabComputeSpendSummary }) {
+  return (
+    <section
+      className="rounded-xl border"
+      style={{
+        borderColor: 'var(--surface-border)',
+        background: 'var(--surface)',
+      }}
+    >
+      <PanelHeader
+        icon={<CircleDollarSign className="h-4 w-4 text-gold" />}
+        title="Daily compute spend"
+        aside={(
+          <span className="text-[11px]" style={{ color: 'var(--text-tertiary)' }}>
+            UTC · last {spend.days} days
+          </span>
+        )}
+      />
+      {!spend.sourceAvailable ? (
+        <div className="p-6 text-sm" style={{ color: 'var(--text-secondary)' }}>
+          Finalized compute-cost ledgers are not available.
+        </div>
+      ) : (
+        <div className="grid gap-5 p-4 xl:grid-cols-[minmax(0,1fr)_220px]">
+          <div className="min-w-0">
+            <div className="h-[260px] w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={spend.points} margin={{ top: 12, right: 12, bottom: 4, left: 0 }}>
+                  <CartesianGrid vertical={false} stroke="rgba(245, 240, 232, 0.07)" />
+                  <XAxis
+                    dataKey="date"
+                    axisLine={false}
+                    tickLine={false}
+                    minTickGap={28}
+                    tick={{ fill: 'var(--text-tertiary)', fontSize: 10 }}
+                    tickFormatter={formatChartDate}
+                  />
+                  <YAxis
+                    axisLine={false}
+                    tickLine={false}
+                    width={54}
+                    tick={{ fill: 'var(--text-tertiary)', fontSize: 10 }}
+                    tickFormatter={formatCompactUsd}
+                  />
+                  <Tooltip
+                    cursor={{ fill: 'rgba(245, 240, 232, 0.035)' }}
+                    contentStyle={{
+                      border: '1px solid var(--surface-border-strong)',
+                      borderRadius: 8,
+                      background: 'var(--surface-elevated)',
+                      color: 'var(--text-primary)',
+                      fontSize: 12,
+                    }}
+                    labelStyle={{ color: 'var(--text-secondary)', marginBottom: 4 }}
+                    formatter={(value) => [formatUsd(Number(value)), 'Compute spent']}
+                    labelFormatter={(value) => formatChartTooltipDate(String(value))}
+                  />
+                  <Bar
+                    dataKey="spendUsd"
+                    name="Compute spent"
+                    fill="var(--accent-positive)"
+                    fillOpacity={0.72}
+                    maxBarSize={42}
+                    radius={[4, 4, 0, 0]}
+                  />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+            <p className="mt-2 text-[11px] leading-relaxed" style={{ color: 'var(--text-tertiary)' }}>
+              Finalized OpenRouter cost from completed and failed receipt events, assigned to the UTC day the run ended.
+            </p>
+          </div>
+          <div className="grid grid-cols-2 gap-2 self-start xl:grid-cols-1">
+            <MetricBox label={`${spend.days}d spend`} value={formatUsd(spend.totalUsd)} />
+            <MetricBox label="Daily average" value={formatUsd(spend.averageDailyUsd)} />
+            <MetricBox label="Today (UTC)" value={formatUsd(spend.latestDayUsd)} />
+            <MetricBox label="Finalized runs" value={spend.runCount} />
+          </div>
+        </div>
+      )}
+    </section>
   )
 }
 
@@ -857,6 +983,12 @@ function BenchmarkPanel({ benchmark }: { benchmark: AdminLabBenchmarkSummary }) 
 }
 
 function AlertsPanel({ alerts }: { alerts: AdminLabAlertSummary }) {
+  const sourceLabel = alerts.source === 'public_transparency_log'
+    ? 'Public signed logs'
+    : alerts.source === 'ops_telemetry'
+      ? 'Ops telemetry'
+      : 'Unavailable'
+
   return (
     <section className="rounded-xl border" style={{ borderColor: 'var(--surface-border)', background: 'var(--surface)' }}>
       <PanelHeader
@@ -870,13 +1002,37 @@ function AlertsPanel({ alerts }: { alerts: AdminLabAlertSummary }) {
           <MetricBox label="Critical" value={alerts.criticalLast24h} tone={alerts.criticalLast24h > 0 ? 'critical' : 'neutral'} />
           <MetricBox label="Active" value={alerts.activeCount} />
         </div>
+        <MiniMeta label="Source" value={sourceLabel} />
+        {alerts.source === 'public_transparency_log' ? (
+          <div className="grid grid-cols-2 gap-2">
+            <MiniMeta label="Signed events" value={String(alerts.verifiedEventCount)} />
+            <MiniMeta
+              label="Arweave checkpoint"
+              value={alerts.latestCheckpointAt ? formatRelative(alerts.latestCheckpointAt) : 'Missing'}
+              title={alerts.latestCheckpointAt ?? undefined}
+            />
+          </div>
+        ) : null}
+        {alerts.latestCheckpointUrl ? (
+          <a
+            href={alerts.latestCheckpointUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex text-xs underline decoration-white/20 underline-offset-4 transition-colors hover:text-white"
+            style={{ color: 'var(--text-secondary)' }}
+          >
+            Open latest public Arweave checkpoint
+          </a>
+        ) : null}
         {!alerts.sourceAvailable ? (
           <p className="text-xs leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
-            Alert telemetry table is not available yet.
+            Supabase could not read alert telemetry or the signed public <span className="font-mono">transparency_log</span> fallback.
           </p>
         ) : alerts.recent.length === 0 ? (
           <p className="text-xs leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
-            No recent alerts in the telemetry source.
+            {alerts.source === 'public_transparency_log'
+              ? `${alerts.weightSubmissionCount} weight submissions and ${alerts.epochAuditCount} matching epoch audits were checked. No derived issues.`
+              : 'No recent alerts in the telemetry source.'}
           </p>
         ) : (
           <div className="space-y-2">
@@ -890,7 +1046,7 @@ function AlertsPanel({ alerts }: { alerts: AdminLabAlertSummary }) {
                 </div>
                 <div className="mt-1 flex items-center justify-between gap-3 text-[10px]" style={{ color: 'var(--text-tertiary)' }}>
                   <span className="truncate">{alert.source}</span>
-                  <span>{alert.lastSeenAt ? formatRelative(alert.lastSeenAt) : '—'}</span>
+                  <span suppressHydrationWarning>{alert.lastSeenAt ? formatRelative(alert.lastSeenAt) : '—'}</span>
                 </div>
               </div>
             ))}
@@ -902,6 +1058,15 @@ function AlertsPanel({ alerts }: { alerts: AdminLabAlertSummary }) {
 }
 
 function AttestationPanel({ attestation }: { attestation: AdminLabAttestationSummary }) {
+  const observationOnly = attestation.verificationMode === 'observation_only'
+  const observedNodes = attestation.totalNodes - attestation.missingNodes
+  const latestNode = attestation.nodes[0] ?? null
+  const sourceLabel = attestation.source === 'published_weight_bundles'
+    ? 'Published weight bundles'
+    : attestation.source === 'ops_attestation_current'
+      ? 'Attestation comparison'
+      : 'Unavailable'
+
   return (
     <section className="rounded-xl border" style={{ borderColor: 'var(--surface-border)', background: 'var(--surface)' }}>
       <PanelHeader
@@ -912,15 +1077,38 @@ function AttestationPanel({ attestation }: { attestation: AdminLabAttestationSum
       <div className="space-y-4 p-4">
         <div className="grid grid-cols-3 gap-2">
           <MetricBox label="Nodes" value={attestation.totalNodes} />
-          <MetricBox label="Matched" value={attestation.matchedNodes} />
-          <MetricBox label="Mismatch" value={attestation.mismatchedNodes} tone={attestation.mismatchedNodes > 0 ? 'critical' : 'neutral'} />
+          <MetricBox label={observationOnly ? 'Observed' : 'Matched'} value={observationOnly ? observedNodes : attestation.matchedNodes} />
+          <MetricBox
+            label={observationOnly ? 'Missing' : 'Mismatch'}
+            value={observationOnly ? attestation.missingNodes : attestation.mismatchedNodes}
+            tone={(observationOnly ? attestation.missingNodes : attestation.mismatchedNodes) > 0 ? 'critical' : 'neutral'}
+          />
         </div>
+        <MiniMeta label="Source" value={sourceLabel} />
         {attestation.expectedPcr0 ? (
           <MiniMeta label="Expected PCR0" value={compactHash(attestation.expectedPcr0)} title={attestation.expectedPcr0} />
         ) : null}
+        {observationOnly && latestNode?.observedPcr0 ? (
+          <MiniMeta label="Observed PCR0" value={compactHash(latestNode.observedPcr0)} title={latestNode.observedPcr0} />
+        ) : null}
+        {observationOnly && (attestation.latestEpoch !== null || latestNode?.gitSha) ? (
+          <div className="grid grid-cols-2 gap-2">
+            <MiniMeta label="Epoch" value={attestation.latestEpoch === null ? '—' : String(Math.round(attestation.latestEpoch))} />
+            <MiniMeta
+              label="PCR0 commit"
+              value={latestNode?.gitSha ? compactHash(latestNode.gitSha) : '—'}
+              title={latestNode?.gitSha ?? undefined}
+            />
+          </div>
+        ) : null}
+        {observationOnly && attestation.sourceAvailable ? (
+          <p className="text-xs leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
+            This is the validator-published PCR0. Add an expected-PCR0 allowlist to <span className="font-mono">ops_attestation_current</span> to enforce a match.
+          </p>
+        ) : null}
         {!attestation.sourceAvailable ? (
           <p className="text-xs leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
-            Attestation telemetry table is not available yet.
+            Supabase could not read <span className="font-mono">ops_attestation_current</span> or the published weight-bundle PCR0 fallback.
           </p>
         ) : attestation.nodes.length === 0 ? (
           <p className="text-xs leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
@@ -931,14 +1119,19 @@ function AttestationPanel({ attestation }: { attestation: AdminLabAttestationSum
             {attestation.nodes.slice(0, 5).map((node) => (
               <div key={node.id} className="flex items-center justify-between gap-3 border-t pt-2" style={{ borderColor: 'var(--surface-border)' }}>
                 <div className="min-w-0">
-                  <div className="truncate text-xs" style={{ color: 'var(--text-primary)' }}>{node.component} · {node.nodeId}</div>
+                  <div className="truncate text-xs" title={node.nodeId} style={{ color: 'var(--text-primary)' }}>{node.component} · {compactHash(node.nodeId)}</div>
                   <div className="mt-1 truncate font-mono text-[10px]" style={{ color: 'var(--text-tertiary)' }}>
                     {node.observedPcr0 ? compactHash(node.observedPcr0) : 'missing PCR0'}
+                    {node.epoch !== null ? ` · epoch ${Math.round(node.epoch)}` : ''}
                   </div>
                 </div>
                 <StatePill
-                  state={node.matched === false ? 'critical' : node.matched === null ? 'degraded' : 'healthy'}
-                  label={node.matched === false ? 'Mismatch' : node.matched === null ? 'Missing' : 'Match'}
+                  state={observationOnly
+                    ? node.observedPcr0 ? 'healthy' : 'critical'
+                    : node.matched === false ? 'critical' : node.matched === null ? 'degraded' : 'healthy'}
+                  label={observationOnly
+                    ? node.observedPcr0 ? 'Observed' : 'Missing'
+                    : node.matched === false ? 'Mismatch' : node.matched === null ? 'Missing' : 'Match'}
                 />
               </div>
             ))}
@@ -996,7 +1189,7 @@ function MiniMeta({ label, value, title }: { label: string; value: string; title
   return (
     <div className="min-w-0 rounded-lg border px-3 py-2" style={{ borderColor: 'var(--surface-border)', background: 'var(--surface-base)' }}>
       <div className="text-[10px] uppercase tracking-[0.12em]" style={{ color: 'var(--text-tertiary)' }}>{label}</div>
-      <div className="mt-1 truncate font-mono text-[11px]" title={title ?? value} style={{ color: 'var(--text-secondary)' }}>{value}</div>
+      <div suppressHydrationWarning className="mt-1 truncate font-mono text-[11px]" title={title ?? value} style={{ color: 'var(--text-secondary)' }}>{value}</div>
     </div>
   )
 }
@@ -1046,7 +1239,7 @@ function LoopButton({
           </div>
         </div>
         <div className="shrink-0 text-right">
-          <div className="font-mono text-[11px]" style={{ color: 'var(--text-tertiary)' }}>
+          <div suppressHydrationWarning className="font-mono text-[11px]" style={{ color: 'var(--text-tertiary)' }}>
             {formatRelative(loop.lastActivityAt)}
           </div>
           <div className="mt-1 font-mono text-[10px]" style={{ color: 'var(--text-tertiary)' }}>
@@ -1354,6 +1547,42 @@ function formatDurationMs(value: number): string {
   const days = Math.floor(hours / 24)
   const remainingHours = hours % 24
   return remainingHours > 0 ? `${days}d ${remainingHours}h` : `${days}d`
+}
+
+function formatUsd(value: number): string {
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(Number.isFinite(value) ? value : 0)
+}
+
+function formatCompactUsd(value: number): string {
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    notation: 'compact',
+    maximumFractionDigits: 1,
+  }).format(Number.isFinite(Number(value)) ? Number(value) : 0)
+}
+
+function formatChartDate(value: string): string {
+  return new Intl.DateTimeFormat('en-US', {
+    month: 'short',
+    day: 'numeric',
+    timeZone: 'UTC',
+  }).format(new Date(`${value}T00:00:00Z`))
+}
+
+function formatChartTooltipDate(value: string): string {
+  return new Intl.DateTimeFormat('en-US', {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    timeZone: 'UTC',
+  }).format(new Date(`${value}T00:00:00Z`))
 }
 
 function readableTag(value: string): string {

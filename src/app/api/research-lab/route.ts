@@ -28,6 +28,11 @@ import {
   type ResearchLabEmissionAllocationRollup,
   type ResearchLabEmissionAllocationSnapshot,
 } from '@/lib/research-lab-emissions'
+import {
+  microusdToUsd,
+  receiptEventCostMicrousd,
+  roundUsd,
+} from '@/lib/research-lab-compute-spend'
 
 export const dynamic = 'force-dynamic'
 
@@ -2374,24 +2379,6 @@ function aggregateTerminalSpendByHotkey(
   )
 }
 
-function receiptEventCostMicrousd(eventDoc: Record<string, unknown>): number {
-  const ledger = objectRecord(eventDoc.final_cost_ledger)
-  if (!ledger) return 0
-
-  const directMicrousd = nullableCostNumber(ledger.actual_openrouter_cost_microusd)
-  if (directMicrousd !== null) return Math.max(0, Math.round(directMicrousd))
-
-  const openRouterUsd = nullableCostNumber(ledger.actual_openrouter_cost_usd)
-  const totalUsd = nullableCostNumber(ledger.total_usd)
-  return Math.max(0, Math.round((openRouterUsd ?? totalUsd ?? 0) * 1_000_000))
-}
-
-function nullableCostNumber(value: unknown): number | null {
-  if (typeof value === 'string' && value.trim() === '') return null
-  const numeric = Number(value)
-  return Number.isFinite(numeric) ? numeric : null
-}
-
 function uniqueStrings(values: Array<string | null | undefined>): string[] {
   return Array.from(new Set(values.map((value) => stringOr(value)).filter(Boolean))) as string[]
 }
@@ -3159,14 +3146,6 @@ function spendWindowForSchedules(
     epochCount: epochCounts.length > 0 ? Math.max(...epochCounts) : null,
     activeScheduleCount: schedules.length,
   }
-}
-
-function microusdToUsd(value: unknown): number {
-  return Math.max(0, numberOr(value, 0) / 1_000_000)
-}
-
-function roundUsd(value: number): number {
-  return Math.round(value * 1_000_000) / 1_000_000
 }
 
 function roundAlpha(value: number): number {
