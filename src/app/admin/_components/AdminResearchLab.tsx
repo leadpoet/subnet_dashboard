@@ -766,7 +766,7 @@ function OpsHealthStrip({ ops }: { ops: AdminLabOpsSummary }) {
           <StatePill state={ops.state} label={stateLabel(ops.state)} />
         </div>
       </div>
-      <div className="grid gap-px p-1 sm:grid-cols-2 lg:grid-cols-5">
+      <div className="grid gap-px p-1 sm:grid-cols-2 lg:grid-cols-4">
         {ops.healthSignals.map((signal) => (
           <HealthSignalCard key={signal.id} signal={signal} />
         ))}

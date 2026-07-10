@@ -679,7 +679,6 @@ async function fetchAdminLabOps(
   })
   const healthSignals = buildHealthSignals({
     dataFreshness,
-    scoring,
     benchmark,
     alerts,
     attestation,
@@ -3003,20 +3002,11 @@ function buildDataFreshness(loops: AdminLabLoopSummary[]): AdminLabDataFreshness
 
 function buildHealthSignals(input: {
   dataFreshness: AdminLabDataFreshness
-  scoring: AdminLabScoringSummary
   benchmark: AdminLabBenchmarkSummary
   alerts: AdminLabAlertSummary
   attestation: AdminLabAttestationSummary
 }): AdminLabHealthSignal[] {
   return [
-    {
-      id: 'scoring',
-      label: 'Scoring',
-      value: input.scoring.label,
-      state: healthStateForScoring(input.scoring.state),
-      detail: input.scoring.detail,
-      updatedAt: input.scoring.lastScoringAt ?? input.scoring.controlUpdatedAt,
-    },
     {
       id: 'pcr0',
       label: 'PCR0',
@@ -3400,12 +3390,6 @@ function phaseForLoop(loop: AdminLabLoopSummary): string {
   if (isCompletedResearchLabLoopStatus(status)) return 'complete'
   if (isActiveResearchLabLoopStatus(status)) return 'auto research'
   return status || 'unknown'
-}
-
-function healthStateForScoring(state: AdminScoringState): AdminHealthState {
-  if (state === 'active' || state === 'idle') return 'healthy'
-  if (state === 'paused' || state === 'stalled' || state === 'blocked') return 'degraded'
-  return 'unknown'
 }
 
 function worstHealthState(states: AdminHealthState[]): AdminHealthState {

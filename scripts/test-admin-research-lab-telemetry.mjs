@@ -94,6 +94,11 @@ try {
   assert.match(routeSource, /research_lab_gateway_control_current/)
   assert.match(routeSource, /rowFor\('scoring_maintenance'\)/)
   assert.match(routeSource, /rowFor\('autoresearch_maintenance'\)/)
+  const healthSignalsSource = routeSource.slice(
+    routeSource.indexOf('function buildHealthSignals'),
+    routeSource.indexOf('async function fetchOptionalRows'),
+  )
+  assert.doesNotMatch(healthSignalsSource, /label: 'Scoring'/)
 
   const componentSource = await readFile(resolve('src/app/admin/_components/AdminResearchLabTelemetry.tsx'), 'utf8')
   assert.match(componentSource, /Model intent/)
@@ -110,6 +115,7 @@ try {
   assert.match(adminComponentSource, /function WorkflowControlPill/)
   assert.match(adminComponentSource, /label="Scoring" control=\{ops\.controls\.scoring\}/)
   assert.match(adminComponentSource, /label="Loops" control=\{ops\.controls\.loops\}/)
+  assert.match(adminComponentSource, /sm:grid-cols-2 lg:grid-cols-4/)
 
   console.log('admin-research-lab-telemetry: model intent, workflow controls, evidence links, and model alignment tones passed')
 } finally {
