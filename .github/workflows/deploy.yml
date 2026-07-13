@@ -69,12 +69,11 @@ jobs:
             # Boot the candidate on a private port first. A failed build or boot
             # never disturbs the production process listening on port 3000.
             pm2 delete "$CANDIDATE_NAME" >/dev/null 2>&1 || true
-            pm2 start "$RELEASE_DIR/node_modules/next/dist/bin/next" \
+            PORT=3001 NODE_OPTIONS='--max-old-space-size=512' pm2 start npm \
               --name "$CANDIDATE_NAME" \
               --cwd "$RELEASE_DIR" \
-              --interpreter node \
-              --no-autorestart \
-              -- start -p 3001
+              --max-memory-restart 700M \
+              -- start
 
             candidate_healthy=false
             for attempt in $(seq 1 30); do
