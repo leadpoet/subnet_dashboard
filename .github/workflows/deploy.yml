@@ -45,8 +45,8 @@ jobs:
             pkill -f "[r]m -rf .*$RELEASE_ROOT" 2>/dev/null || true
             pm2 delete subnet-dashboard-candidate >/dev/null 2>&1 || true
 
-            # The 8 GB instance cannot safely hold isolated releases. Rename
-            # bulky generated directories in constant time, then delete them in
+            # The deployment host should not retain isolated release trees.
+            # Rename bulky generated directories in constant time, then delete them in
             # the background while reporting free-space progress. Future deploys
             # build in place and no longer recreate this release tree.
             cleanup_paths=()
@@ -111,14 +111,12 @@ jobs:
             export BUILD_TIME="$(date -u +%Y%m%d%H%M%S)"
             NODE_OPTIONS='--max-old-space-size=768' npm run build
 
-            if pm2 describe subnet-dashboard >/dev/null 2>&1; then
-              pm2 startOrReload "$APP_ROOT/ecosystem.config.cjs" --update-env || {
-                pm2 delete subnet-dashboard || true
-                pm2 start "$APP_ROOT/ecosystem.config.cjs" --update-env
-              }
-            else
-              pm2 start "$APP_ROOT/ecosystem.config.cjs" --update-env
-            fi
+            # PM2 does not replace an existing process's script path during
+            # startOrReload. Recreate the process so deployments reliably move
+            # from the legacy `npm start` definition to the committed Next.js
+            # executable configuration.
+            pm2 delete subnet-dashboard >/dev/null 2>&1 || true
+            pm2 start "$APP_ROOT/ecosystem.config.cjs" --update-env
 
             production_healthy=false
             for attempt in $(seq 1 30); do
