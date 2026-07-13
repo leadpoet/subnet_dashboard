@@ -293,7 +293,10 @@ jobs:
             NEXT_DIST_DIR="$CANDIDATE_SLOT" pm2 startOrReload "$APP_ROOT/ecosystem.config.cjs" --update-env
 
             production_healthy=false
-            for attempt in $(seq 1 30); do
+            # Cache warmup (metagraph fetch + dashboard transforms) can hold the
+            # reloaded worker past the old 60s budget; give it 4 minutes before
+            # declaring failure and rolling back.
+            for attempt in $(seq 1 120); do
               if curl --fail --silent --show-error --max-time 10 http://127.0.0.1:3000/api/health/ready > /dev/null; then
                 production_healthy=true
                 break
