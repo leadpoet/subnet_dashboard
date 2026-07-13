@@ -37,19 +37,15 @@ jobs:
             REQUIRED_FREE_KB=1250000
 
             ACTIVE_SLOT="$(cat "$ACTIVE_SLOT_FILE" 2>/dev/null || true)"
-            case "$ACTIVE_SLOT" in
-              .next-blue)
-                CANDIDATE_SLOT=".next-green"
-                ;;
-              .next-green)
-                CANDIDATE_SLOT=".next-blue"
-                ;;
-              *)
-                # Existing servers created before slot deployments use `.next`.
-                ACTIVE_SLOT=".next"
-                CANDIDATE_SLOT=".next-blue"
-                ;;
-            esac
+            if [ "$ACTIVE_SLOT" = ".next-blue" ]; then
+              CANDIDATE_SLOT=".next-green"
+            elif [ "$ACTIVE_SLOT" = ".next-green" ]; then
+              CANDIDATE_SLOT=".next-blue"
+            else
+              # Existing servers created before slot deployments use `.next`.
+              ACTIVE_SLOT=".next"
+              CANDIDATE_SLOT=".next-blue"
+            fi
 
             echo "Starting bounded EC2 disk recovery"
             echo "Active build slot: $ACTIVE_SLOT; candidate build slot: $CANDIDATE_SLOT"
