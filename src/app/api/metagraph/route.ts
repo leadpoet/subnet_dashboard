@@ -41,6 +41,11 @@ export async function GET() {
       axons: {},
       lastUpdates: {},
       currentBlock: null,
+      tempo: null,
+      lastEpochBlock: null,
+      subnetEpochIndex: null,
+      pendingEpochAt: null,
+      lastMechanismStepBlock: null,
       totalNeurons: 0,
       alphaPrice: null,
       error: error instanceof Error ? error.message : 'Failed to fetch metagraph data'

@@ -15,15 +15,12 @@ import {
 } from 'lucide-react'
 import type { MetagraphData } from '@/lib/types'
 import { shortHotkey } from '@/lib/admin-format'
+import { blocksUntilNextSubnetEpoch } from '@/lib/subnet-epoch'
 import { cn } from '@/lib/utils'
 
 const REFRESH_INTERVAL_MS = 30_000
 const ACTIVE_VALIDATOR_MAX_BLOCKS = 360
-const SUBNET_NETUID = 71
-const SUBNET_TEMPO_BLOCKS = 360
-const EPOCH_INTERVAL_BLOCKS = SUBNET_TEMPO_BLOCKS + 1
 const BLOCK_TIME_SECONDS = 12
-const EPOCH_DURATION_MINUTES = 72
 
 type MetagraphPayload = MetagraphData & { cachedAt?: number }
 type SortKey =
@@ -116,11 +113,6 @@ function formatEmission(value: number): string {
   if (!Number.isFinite(value)) return '—'
   if (Math.abs(value) >= 1) return formatAmount(value, 5)
   return value.toFixed(6).replace(/0+$/, '').replace(/\.$/, '') || '0'
-}
-
-function blocksUntilNextEpoch(currentBlock: number): number {
-  const epochPosition = (currentBlock + SUBNET_NETUID + 1) % EPOCH_INTERVAL_BLOCKS
-  return epochPosition === 0 ? 0 : EPOCH_INTERVAL_BLOCKS - epochPosition
 }
 
 function formatEpochMinutes(totalSeconds: number): string {
@@ -297,19 +289,21 @@ export function AdminMetagraph() {
 
   const freshnessAvailable = data?.currentBlock !== null && data?.currentBlock !== undefined
   const activeRows = rows.filter((row) => row.updated !== null && row.updated < ACTIVE_VALIDATOR_MAX_BLOCKS)
-  const estimatedCurrentBlock = data?.currentBlock === null || data?.currentBlock === undefined
-    ? null
-    : data.currentBlock + Math.floor(countdownTick / BLOCK_TIME_SECONDS)
-  const nextEpochBlocks = estimatedCurrentBlock === null ? null : blocksUntilNextEpoch(estimatedCurrentBlock)
+  const nextEpochBlocks = blocksUntilNextSubnetEpoch({
+    currentBlock: data?.currentBlock ?? null,
+    tempo: data?.tempo ?? null,
+    lastEpochBlock: data?.lastEpochBlock ?? null,
+    pendingEpochAt: data?.pendingEpochAt ?? null,
+  })
   const nextEpochSeconds = nextEpochBlocks === null
     ? null
-    : Math.max(0, (nextEpochBlocks * BLOCK_TIME_SECONDS) - (countdownTick % BLOCK_TIME_SECONDS))
-  const blockRemainingPercent = nextEpochBlocks === null
+    : Math.max(0, (nextEpochBlocks * BLOCK_TIME_SECONDS) - countdownTick)
+  const blockRemainingPercent = nextEpochBlocks === null || !data?.tempo
     ? undefined
-    : (nextEpochBlocks / SUBNET_TEMPO_BLOCKS) * 100
-  const timeRemainingPercent = nextEpochSeconds === null
+    : (nextEpochBlocks / data.tempo) * 100
+  const timeRemainingPercent = nextEpochSeconds === null || !data?.tempo
     ? undefined
-    : (nextEpochSeconds / (EPOCH_DURATION_MINUTES * 60)) * 100
+    : (nextEpochSeconds / (data.tempo * BLOCK_TIME_SECONDS)) * 100
 
   const handleSort = (column: SortKey) => {
     if (column === sortKey) {

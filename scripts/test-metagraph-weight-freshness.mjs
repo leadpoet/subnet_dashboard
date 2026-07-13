@@ -43,6 +43,11 @@ function fixedLittleEndian(input, length) {
   })
 }
 
+function storageUnsigned(input, length) {
+  const bytes = fixedLittleEndian(input, length)
+  return `0x${bytes.map((byte) => byte.toString(16).padStart(2, '0')).join('')}`
+}
+
 function identityPayload(name) {
   const encoder = new TextEncoder()
   const fields = [encoder.encode(name), ...Array.from({ length: 6 }, () => new Uint8Array())]
@@ -89,6 +94,7 @@ try {
     resolve('node_modules/typescript/bin/tsc'),
     resolve('src/lib/metagraph.ts'),
     resolve('src/lib/types.ts'),
+    resolve('src/lib/subnet-epoch.ts'),
     '--target',
     'ES2022',
     '--module',
@@ -113,10 +119,28 @@ try {
 
   let blockMode = 'finalized'
   const payload = neuronLitePayload()
+  const epochStorageValues = [
+    storageUnsigned(360, 2),
+    storageUnsigned(1_111_080, 8),
+    storageUnsigned(23_853, 8),
+    storageUnsigned(0, 8),
+    storageUnsigned(1_111_080, 8),
+  ]
   globalThis.fetch = async (_url, init) => {
     const request = JSON.parse(String(init?.body))
 
     if (Array.isArray(request)) {
+      if (request[0]?.id >= 2000) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => request.map((entry, index) => ({
+            jsonrpc: '2.0',
+            id: entry.id,
+            result: epochStorageValues[index],
+          })),
+        }
+      }
       return {
         ok: true,
         status: 200,
@@ -154,6 +178,10 @@ try {
       return { ok: true, status: 200, json: async () => ({ result }) }
     }
 
+    if (request.method === 'chain_getBlockHash') {
+      return { ok: true, status: 200, json: async () => ({ result: '0xbest' }) }
+    }
+
     throw new Error(`Unexpected RPC method: ${request.method}`)
   }
 
@@ -171,16 +199,43 @@ try {
   assert.ok(Math.abs(finalized.dividends[hotkey] - (20_000 / 65_535)) < 1e-10)
   assert.equal(finalized.lastUpdates[hotkey], 987_654, 'SCALE last_update should be retained')
   assert.equal(finalized.currentBlock, 1_111_111, 'finalized block should be preferred')
+  assert.equal(finalized.tempo, 360, 'on-chain tempo should be retained')
+  assert.equal(finalized.lastEpochBlock, 1_111_080, 'last epoch block should be retained')
+  assert.equal(finalized.subnetEpochIndex, 23_853, 'subnet epoch index should be retained')
+  assert.equal(finalized.pendingEpochAt, 0, 'zero should represent no pending manual epoch')
+  assert.equal(finalized.lastMechanismStepBlock, 1_111_080, 'last mechanism step should be retained')
 
   blockMode = 'best'
   const best = await fetchMetagraphFresh()
   assert.equal(best.currentBlock, 1_111_114, 'best head should be used when finalized lookup fails')
   assert.equal(best.lastUpdates[hotkey], 987_654)
+  assert.equal(best.tempo, 360)
 
   blockMode = 'unavailable'
   const withoutBlock = await fetchMetagraphFresh()
   assert.equal(withoutBlock.currentBlock, null, 'block lookup failure should not fail metagraph data')
+  assert.equal(withoutBlock.tempo, null, 'epoch state should be unavailable without a chain snapshot')
   assert.equal(withoutBlock.totalNeurons, 1)
+
+  const { blocksUntilNextSubnetEpoch } = require(join(outDir, 'subnet-epoch.js'))
+  assert.equal(blocksUntilNextSubnetEpoch({
+    currentBlock: 8_610_875,
+    tempo: 360,
+    lastEpochBlock: 8_610_516,
+    pendingEpochAt: 0,
+  }), 1, 'one block should remain immediately before the observed SN71 boundary')
+  assert.equal(blocksUntilNextSubnetEpoch({
+    currentBlock: 8_610_876,
+    tempo: 360,
+    lastEpochBlock: 8_610_876,
+    pendingEpochAt: 0,
+  }), 360, 'the countdown should reset to the on-chain tempo at the new epoch')
+  assert.equal(blocksUntilNextSubnetEpoch({
+    currentBlock: 8_610_876,
+    tempo: 360,
+    lastEpochBlock: 8_610_876,
+    pendingEpochAt: 8_610_900,
+  }), 24, 'a pending manual epoch should move the boundary earlier')
 
   const python = spawnSync('python3', ['--version'], { encoding: 'utf8' })
   if (python.status === 0) {
@@ -235,10 +290,11 @@ class Subtensor:
   assert.match(metagraphUiSource, /aria-expanded=\{detailsExpanded\}/)
   assert.match(metagraphUiSource, /Show validator details/)
   assert.match(metagraphUiSource, /Hide validator details/)
-  assert.match(metagraphUiSource, /const SUBNET_NETUID = 71/)
-  assert.match(metagraphUiSource, /const SUBNET_TEMPO_BLOCKS = 360/)
-  assert.match(metagraphUiSource, /const EPOCH_DURATION_MINUTES = 72/)
-  assert.match(metagraphUiSource, /currentBlock \+ SUBNET_NETUID \+ 1/)
+  assert.match(metagraphUiSource, /blocksUntilNextSubnetEpoch/)
+  assert.match(metagraphUiSource, /lastEpochBlock: data\?\.lastEpochBlock \?\? null/)
+  assert.match(metagraphUiSource, /pendingEpochAt: data\?\.pendingEpochAt \?\? null/)
+  assert.doesNotMatch(metagraphUiSource, /currentBlock \+ SUBNET_NETUID \+ 1/)
+  assert.doesNotMatch(metagraphUiSource, /SUBNET_TEMPO_BLOCKS \+ 1/)
   assert.match(metagraphUiSource, /const BLOCK_TIME_SECONDS = 12/)
   assert.match(metagraphUiSource, /Math\.ceil\(seconds \/ 60\)/)
   assert.match(metagraphUiSource, /`\$\{minutes\}m`/)
@@ -247,7 +303,7 @@ class Subtensor:
   assert.doesNotMatch(metagraphUiSource, /`\$\{formatAmount\(nextEpochBlocks, 0\)\} \/ \$\{SUBNET_TEMPO_BLOCKS\}`/)
   assert.match(metagraphUiSource, /background: 'var\(--accent-positive\)'/)
   assert.match(metagraphUiSource, /role="progressbar"/)
-  assert.match(metagraphUiSource, /nextEpochSeconds \/ \(EPOCH_DURATION_MINUTES \* 60\)/)
+  assert.match(metagraphUiSource, /nextEpochSeconds \/ \(data\.tempo \* BLOCK_TIME_SECONDS\)/)
   assert.match(metagraphUiSource, /label="Blocks Until Next Epoch"/)
   assert.match(metagraphUiSource, /label="Time Until Next Epoch"/)
   assert.doesNotMatch(metagraphUiSource, /label="Average VTrust"/)

@@ -114,6 +114,16 @@ export interface MetagraphData {
   lastUpdates: Record<string, number>
   /** Finalized chain head when available, otherwise the best head or null. */
   currentBlock: number | null
+  /** On-chain subnet tempo in blocks. */
+  tempo: number | null
+  /** On-chain block at which the subnet's latest epoch slot was consumed. */
+  lastEpochBlock: number | null
+  /** Monotonic on-chain subnet epoch counter. */
+  subnetEpochIndex: number | null
+  /** Pending manually triggered epoch block, or zero/null when none is pending. */
+  pendingEpochAt: number | null
+  /** Block at which the subnet mechanism most recently completed. */
+  lastMechanismStepBlock: number | null
   totalNeurons: number
   alphaPrice: number | null
   error: string | null

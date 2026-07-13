@@ -55,6 +55,9 @@ const METAGRAPH_TTL = 30 * 1000
 // Cached data can survive a hot reload, so tolerate snapshots created before
 // weight-freshness telemetry was added.
 function withFreshnessDefaults(data: MetagraphData): MetagraphData {
+  const optionalBlockNumber = (value: unknown): number | null =>
+    typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : null
+
   return {
     ...data,
     active: data.active ?? {},
@@ -66,10 +69,12 @@ function withFreshnessDefaults(data: MetagraphData): MetagraphData {
     dividends: data.dividends ?? {},
     axons: data.axons ?? {},
     lastUpdates: data.lastUpdates ?? {},
-    currentBlock: typeof data.currentBlock === 'number' &&
-      Number.isSafeInteger(data.currentBlock) && data.currentBlock >= 0
-      ? data.currentBlock
-      : null,
+    currentBlock: optionalBlockNumber(data.currentBlock),
+    tempo: optionalBlockNumber(data.tempo),
+    lastEpochBlock: optionalBlockNumber(data.lastEpochBlock),
+    subnetEpochIndex: optionalBlockNumber(data.subnetEpochIndex),
+    pendingEpochAt: optionalBlockNumber(data.pendingEpochAt),
+    lastMechanismStepBlock: optionalBlockNumber(data.lastMechanismStepBlock),
   }
 }
 
@@ -258,6 +263,34 @@ function identityStorageKey(coldkey: string): string {
   return toHex(key)
 }
 
+function netuidStorageKey(storageName: string, netuid: number): string {
+  const netuidBytes = new Uint8Array([netuid & 0xff, (netuid >> 8) & 0xff])
+  const parts = [
+    xxhashAsU8a('SubtensorModule', 128),
+    xxhashAsU8a(storageName, 128),
+    netuidBytes,
+  ]
+  const key = new Uint8Array(parts.reduce((sum, part) => sum + part.length, 0))
+  let offset = 0
+  for (const part of parts) {
+    key.set(part, offset)
+    offset += part.length
+  }
+  return toHex(key)
+}
+
+function decodeStorageUnsigned(value: string | null | undefined): number | null {
+  if (!value) return null
+  const bytes = fromHex(value)
+  if (bytes.length === 0 || bytes.length > 8) return null
+
+  let decoded = BigInt(0)
+  for (let index = 0; index < bytes.length; index++) {
+    decoded |= BigInt(bytes[index]) << BigInt(index * 8)
+  }
+  return decoded <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(decoded) : null
+}
+
 function decodeIdentityName(value: string | null | undefined): string | null {
   if (!value) return null
   try {
@@ -311,6 +344,7 @@ async function fetchValidatorNamesFromRPC(
 }
 
 type RpcResponse<T> = {
+  id?: number | string
   result?: T
   error?: { message?: string }
 }
@@ -345,25 +379,96 @@ async function subtensorRpc<T>(method: string, params: unknown[], id: number): P
   return json.result
 }
 
-async function fetchCurrentBlockFromRPC(): Promise<number | null> {
-  // Prefer finalized state so freshness alerts do not flap during a short reorg.
+interface ChainTelemetry {
+  currentBlock: number | null
+  tempo: number | null
+  lastEpochBlock: number | null
+  subnetEpochIndex: number | null
+  pendingEpochAt: number | null
+  lastMechanismStepBlock: number | null
+}
+
+const EMPTY_CHAIN_TELEMETRY: ChainTelemetry = {
+  currentBlock: null,
+  tempo: null,
+  lastEpochBlock: null,
+  subnetEpochIndex: null,
+  pendingEpochAt: null,
+  lastMechanismStepBlock: null,
+}
+
+async function fetchChainTelemetryFromRPC(): Promise<ChainTelemetry> {
+  let currentBlock: number | null = null
+  let blockHash: string | null = null
+
+  // Prefer one finalized state snapshot so the head and epoch fields cannot
+  // straddle an epoch boundary or flap during a short reorg.
   try {
     const finalizedHead = await subtensorRpc<string>('chain_getFinalizedHead', [], 2)
     const header = await subtensorRpc<{ number?: unknown }>('chain_getHeader', [finalizedHead], 3)
-    const finalizedBlock = parseBlockNumber(header.number)
-    if (finalizedBlock !== null) return finalizedBlock
+    currentBlock = parseBlockNumber(header.number)
+    if (currentBlock !== null) blockHash = finalizedHead
   } catch (error) {
     console.warn('[Metagraph] Finalized block lookup failed, trying best head:', error)
   }
 
-  // Some RPC providers disable finalized-head queries. A best-head block is
-  // still useful telemetry and is preferable to failing the metagraph fetch.
+  if (currentBlock === null) {
+    // Some providers disable finalized-head queries. Use a best-head snapshot
+    // when possible and resolve its hash so storage is read at the same block.
+    try {
+      const header = await subtensorRpc<{ number?: unknown }>('chain_getHeader', [], 4)
+      currentBlock = parseBlockNumber(header.number)
+      if (currentBlock !== null) {
+        try {
+          blockHash = await subtensorRpc<string>('chain_getBlockHash', [currentBlock], 5)
+        } catch (error) {
+          console.warn('[Metagraph] Best-head hash lookup unavailable:', error)
+        }
+      }
+    } catch (error) {
+      console.warn('[Metagraph] Current block lookup unavailable:', error)
+    }
+  }
+
+  if (currentBlock === null) return EMPTY_CHAIN_TELEMETRY
+
+  const storageFields = [
+    { field: 'tempo', storage: 'Tempo' },
+    { field: 'lastEpochBlock', storage: 'LastEpochBlock' },
+    { field: 'subnetEpochIndex', storage: 'SubnetEpochIndex' },
+    { field: 'pendingEpochAt', storage: 'PendingEpochAt' },
+    { field: 'lastMechanismStepBlock', storage: 'LastMechansimStepBlock' },
+  ] as const
+
   try {
-    const header = await subtensorRpc<{ number?: unknown }>('chain_getHeader', [], 4)
-    return parseBlockNumber(header.number)
+    const requests = storageFields.map((entry, index) => ({
+      jsonrpc: '2.0',
+      method: 'state_getStorage',
+      params: blockHash
+        ? [netuidStorageKey(entry.storage, NETUID), blockHash]
+        : [netuidStorageKey(entry.storage, NETUID)],
+      id: 2000 + index,
+    }))
+    const response = await fetch(SUBTENSOR_RPC, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(requests),
+      signal: AbortSignal.timeout(15000),
+    })
+    if (!response.ok) throw new Error(`epoch storage returned HTTP ${response.status}`)
+
+    const entries = await response.json() as Array<RpcResponse<string | null>>
+    if (!Array.isArray(entries)) throw new Error('epoch storage returned a non-array response')
+    const valuesById = new Map(entries.map((entry) => [entry.id, entry.result]))
+    const decoded = Object.fromEntries(storageFields.map((entry, index) => [
+      entry.field,
+      decodeStorageUnsigned(valuesById.get(2000 + index)),
+    ])) as Omit<ChainTelemetry, 'currentBlock'>
+
+    return { currentBlock, ...decoded }
   } catch (error) {
-    console.warn('[Metagraph] Current block lookup unavailable:', error)
-    return null
+    console.warn('[Metagraph] Subnet epoch telemetry unavailable:', error)
+    return { ...EMPTY_CHAIN_TELEMETRY, currentBlock }
   }
 }
 
@@ -372,7 +477,7 @@ async function fetchCurrentBlockFromRPC(): Promise<number | null> {
 async function fetchMetagraphFromRPC(): Promise<MetagraphData> {
   console.log('[Metagraph] Fetching from subtensor RPC...')
   const startTime = Date.now()
-  const currentBlockPromise = fetchCurrentBlockFromRPC()
+  const chainTelemetryPromise = fetchChainTelemetryFromRPC()
 
   const resp = await fetch(SUBTENSOR_RPC, {
     method: 'POST',
@@ -444,8 +549,8 @@ async function fetchMetagraphFromRPC(): Promise<MetagraphData> {
     }
   }
 
-  const [currentBlock, names] = await Promise.all([
-    currentBlockPromise,
+  const [chainTelemetry, names] = await Promise.all([
+    chainTelemetryPromise,
     fetchValidatorNamesFromRPC(validatorKeys),
   ])
 
@@ -469,7 +574,7 @@ async function fetchMetagraphFromRPC(): Promise<MetagraphData> {
     dividends,
     axons,
     lastUpdates,
-    currentBlock,
+    ...chainTelemetry,
     totalNeurons: numNeurons,
     alphaPrice: null, // Not available via RPC, requires Python/bittensor
     error: null
@@ -513,6 +618,14 @@ async function fetchMetagraphFromPython(): Promise<MetagraphData> {
     data.names = await fetchValidatorNamesFromRPC(validators)
   }
 
+  const chainTelemetry = await fetchChainTelemetryFromRPC()
+  data.currentBlock = chainTelemetry.currentBlock ?? data.currentBlock
+  data.tempo = chainTelemetry.tempo
+  data.lastEpochBlock = chainTelemetry.lastEpochBlock
+  data.subnetEpochIndex = chainTelemetry.subnetEpochIndex
+  data.pendingEpochAt = chainTelemetry.pendingEpochAt
+  data.lastMechanismStepBlock = chainTelemetry.lastMechanismStepBlock
+
   console.log(`[Metagraph] Python fetch completed in ${Date.now() - startTime}ms`)
   return data
 }
@@ -550,6 +663,11 @@ async function fetchMetagraphFromBittensor(): Promise<MetagraphData> {
       axons: {},
       lastUpdates: {},
       currentBlock: null,
+      tempo: null,
+      lastEpochBlock: null,
+      subnetEpochIndex: null,
+      pendingEpochAt: null,
+      lastMechanismStepBlock: null,
       totalNeurons: 0,
       alphaPrice: null,
       error: error instanceof Error ? error.message : 'Failed to fetch metagraph data'
