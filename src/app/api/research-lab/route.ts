@@ -37,6 +37,7 @@ import {
   receiptEventCostMicrousd,
   roundUsd,
 } from '@/lib/research-lab-compute-spend'
+import { runSingleFlight, type SingleFlightState } from '@/lib/single-flight'
 
 export const dynamic = 'force-dynamic'
 
@@ -629,8 +630,10 @@ type ReimbursementAwardRow = {
 type ResearchLoopReceiptEventRow = {
   ticket_id: string | null
   receipt_id: string | null
-  event_type: string | null
-  event_doc: Record<string, unknown> | null
+  run_id: string | null
+  cost_microusd: number | string | null
+  openrouter_usd: number | string | null
+  total_usd: number | string | null
   created_at: string | null
 }
 
@@ -669,6 +672,7 @@ type FulfillmentLeaderboardRow = {
 }
 
 let cache: CachedResponse | null = null
+const publicSnapshotFlight: SingleFlightState<ResearchLabPayload> = { current: null }
 
 function getSupabase() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL
@@ -707,42 +711,49 @@ export async function GET(request: Request) {
       return NextResponse.json({ success: true, data: cache.data }, { headers: NO_STORE_HEADERS })
     }
 
-    const supabase = getSupabase()
-    const [benchmark, activePromotedModel, loops, allLoops, labMinerSpend, gatewayScoringStatus] =
-      await Promise.all([
-        fetchLatestBenchmark(supabase),
-        fetchActivePromotedModelScore(supabase),
-        fetchPublicLoops(supabase),
-        fetchPublicLoops(supabase, 5_000, 5_000),
-        fetchLabMinerSpend(supabase),
-        fetchScoringStatusFromGateway(),
-      ])
-    const displayBenchmark = benchmark
-      ? withBenchmarkDisplayScore(benchmark, activePromotedModel)
-      : null
-    const scoringStatus = gatewayScoringStatus ?? buildBenchmarkScoringStatus(displayBenchmark)
-    const topicGroups = groupLoopsByTopic(loops)
-    const labMinerActivity = buildLabMinerActivityRollup(allLoops)
-    const data: ResearchLabPayload = {
-      benchmark: displayBenchmark,
-      loops,
-      activityLoops: allLoops,
-      topicGroups,
-      labMinerSpend,
-      labMinerActivity,
-      stats: {
-        activeLoopCount: allLoops.filter((loop) => isActiveResearchLabLoopStatus(loop.statusKey)).length,
-        opsPendingLoopCount: allLoops.filter((loop) =>
-          isPendingOrBlockingResearchLabLoopStatus(loop.statusKey)
-        ).length,
-        scoredLoopCount: allLoops.filter(hasScoredResearchLabCandidate).length,
-        promisingLoopCount: allLoops.filter(isModelImprovementResearchLabLoop).length,
-        totalBenchmarkIcpCount: displayBenchmark?.itemCount ?? 0,
-      },
-      scoringStatus,
-      fetchedAt: new Date().toISOString(),
-    }
-    cache = { data, ts: Date.now() }
+    const data = await runSingleFlight(publicSnapshotFlight, async () => {
+      // A request may have completed while this caller was waiting to enter
+      // the flight. Reuse that snapshot instead of starting another refresh.
+      if (cache && Date.now() - cache.ts < CACHE_TTL) return cache.data
+
+      const supabase = getSupabase()
+      const [benchmark, activePromotedModel, loops, allLoops, labMinerSpend, gatewayScoringStatus] =
+        await Promise.all([
+          fetchLatestBenchmark(supabase),
+          fetchActivePromotedModelScore(supabase),
+          fetchPublicLoops(supabase),
+          fetchPublicLoops(supabase, 5_000, 5_000),
+          fetchLabMinerSpend(supabase),
+          fetchScoringStatusFromGateway(),
+        ])
+      const displayBenchmark = benchmark
+        ? withBenchmarkDisplayScore(benchmark, activePromotedModel)
+        : null
+      const scoringStatus = gatewayScoringStatus ?? buildBenchmarkScoringStatus(displayBenchmark)
+      const topicGroups = groupLoopsByTopic(loops)
+      const labMinerActivity = buildLabMinerActivityRollup(allLoops)
+      const snapshot: ResearchLabPayload = {
+        benchmark: displayBenchmark,
+        loops,
+        activityLoops: allLoops,
+        topicGroups,
+        labMinerSpend,
+        labMinerActivity,
+        stats: {
+          activeLoopCount: allLoops.filter((loop) => isActiveResearchLabLoopStatus(loop.statusKey)).length,
+          opsPendingLoopCount: allLoops.filter((loop) =>
+            isPendingOrBlockingResearchLabLoopStatus(loop.statusKey)
+          ).length,
+          scoredLoopCount: allLoops.filter(hasScoredResearchLabCandidate).length,
+          promisingLoopCount: allLoops.filter(isModelImprovementResearchLabLoop).length,
+          totalBenchmarkIcpCount: displayBenchmark?.itemCount ?? 0,
+        },
+        scoringStatus,
+        fetchedAt: new Date().toISOString(),
+      }
+      cache = { data: snapshot, ts: Date.now() }
+      return snapshot
+    })
     return NextResponse.json({ success: true, data }, { headers: NO_STORE_HEADERS })
   } catch (error) {
     console.error('[Research Lab API] failed:', error)
@@ -2274,9 +2285,8 @@ async function fetchLabMinerComputeSpend(
     const minerHotkey = ticketId ? ticketHotkeys.get(ticketId) : undefined
     if (!minerHotkey) continue
 
-    const eventDoc = objectRecord(row.event_doc) ?? {}
     const receiptId = stringOr(row.receipt_id)
-    const runId = stringOr(eventDoc.run_id) ?? (receiptId ? receiptRunIds.get(receiptId) : undefined)
+    const runId = stringOr(row.run_id) ?? (receiptId ? receiptRunIds.get(receiptId) : undefined)
     if (!runId) continue
 
     const createdAtMs = timestampOrZero(row.created_at)
@@ -2286,7 +2296,13 @@ async function fetchLabMinerComputeSpend(
       minerHotkey,
       runId,
       createdAtMs,
-      costMicrousd: receiptEventCostMicrousd(eventDoc),
+      costMicrousd: receiptEventCostMicrousd({
+        final_cost_ledger: {
+          actual_openrouter_cost_microusd: row.cost_microusd,
+          actual_openrouter_cost_usd: row.openrouter_usd,
+          total_usd: row.total_usd,
+        },
+      }),
     }
     addLatestTerminalSpend(allTimeLatest, terminalSpend)
     if (createdAtMs >= windowStartedAtMs) addLatestTerminalSpend(last24hLatest, terminalSpend)
@@ -2305,7 +2321,12 @@ async function fetchTerminalReceiptEvents(
   for (let offset = 0; ; offset += LAB_MINER_SPEND_BATCH_SIZE) {
     const { data, error } = await supabase
       .from('research_loop_receipt_events')
-      .select('ticket_id, receipt_id, event_type, event_doc, created_at')
+      .select(
+        'ticket_id, receipt_id, run_id:event_doc->>run_id, ' +
+          'cost_microusd:event_doc->final_cost_ledger->>actual_openrouter_cost_microusd, ' +
+          'openrouter_usd:event_doc->final_cost_ledger->>actual_openrouter_cost_usd, ' +
+          'total_usd:event_doc->final_cost_ledger->>total_usd, created_at'
+      )
       .in('event_type', ['completed', 'failed'])
       .order('created_at', { ascending: false, nullsFirst: false })
       .range(offset, offset + LAB_MINER_SPEND_BATCH_SIZE - 1)
@@ -2315,7 +2336,9 @@ async function fetchTerminalReceiptEvents(
       return []
     }
 
-    const batch = (data ?? []) as ResearchLoopReceiptEventRow[]
+    // PostgREST understands JSON-path aliases, but supabase-js's compile-time
+    // select parser does not model this projection shape.
+    const batch = (data ?? []) as unknown as ResearchLoopReceiptEventRow[]
     rows.push(...batch)
     if (batch.length < LAB_MINER_SPEND_BATCH_SIZE) break
   }

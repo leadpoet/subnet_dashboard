@@ -156,6 +156,12 @@ try {
   assert.match(routeSource, /\.from\('published_weight_bundles'\)/)
   assert.match(routeSource, /\.select\('epoch_id'\)/)
   assert.match(routeSource, /\.eq\('netuid', 71\)/)
+  assert.match(routeSource, /runSingleFlight\(publicSnapshotFlight/)
+  assert.match(routeSource, /run_id:event_doc->>run_id/)
+  assert.match(routeSource, /cost_microusd:event_doc->final_cost_ledger->>actual_openrouter_cost_microusd/)
+  assert.match(routeSource, /openrouter_usd:event_doc->final_cost_ledger->>actual_openrouter_cost_usd/)
+  assert.match(routeSource, /total_usd:event_doc->final_cost_ledger->>total_usd/)
+  assert.doesNotMatch(routeSource, /\.select\('ticket_id, receipt_id, event_type, event_doc, created_at'\)/)
 
   console.log('research-lab-emissions: allocation math and display labels passed')
 } finally {
