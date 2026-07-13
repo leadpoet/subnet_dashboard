@@ -16,6 +16,52 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
+      - name: Stop abandoned legacy EC2 build
+        uses: appleboy/ssh-action@v1.2.0
+        timeout-minutes: 3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ec2-user
+          key: ${{ secrets.EC2_SSH_KEY }}
+          timeout: 45s
+          command_timeout: 2m
+          script: |
+            set -euo pipefail
+
+            APP_ROOT="$HOME/subnet_dashboard"
+            ACTIVE_SLOT_FILE="$HOME/.subnet-dashboard-active-slot"
+            legacy_build_stopped=false
+
+            if pkill -f "$APP_ROOT/node_modules/.bin/[n]ext build" 2>/dev/null; then
+              legacy_build_stopped=true
+            fi
+            if pkill -f "$APP_ROOT/node_modules/next/dist/bin/[n]ext build" 2>/dev/null; then
+              legacy_build_stopped=true
+            fi
+
+            if [ "$legacy_build_stopped" = true ]; then
+              echo "Stopped an abandoned on-instance Next.js build"
+              pm2 delete subnet-dashboard-candidate >/dev/null 2>&1 || true
+              ACTIVE_SLOT="$(cat "$ACTIVE_SLOT_FILE" 2>/dev/null || printf '.next')"
+              NEXT_DIST_DIR="$ACTIVE_SLOT" pm2 startOrReload "$APP_ROOT/ecosystem.config.cjs" --update-env
+
+              production_healthy=false
+              for attempt in $(seq 1 20); do
+                if curl --fail --silent --show-error http://127.0.0.1:3000/icon-64.png > /dev/null; then
+                  production_healthy=true
+                  break
+                fi
+                sleep 2
+              done
+
+              if [ "$production_healthy" != true ]; then
+                echo "Production did not recover after stopping the abandoned build"
+                pm2 status
+                pm2 logs subnet-dashboard --lines 100 --nostream
+                exit 1
+              fi
+            fi
+
       - name: Check out release source
         uses: actions/checkout@v4
 
