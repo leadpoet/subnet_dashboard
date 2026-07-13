@@ -13,6 +13,7 @@ import {
   Database,
   Gauge,
   GitCommitHorizontal,
+  Github,
   Loader2,
   PauseCircle,
   PlayCircle,
@@ -334,6 +335,22 @@ type AdminLabSourcingModelSummary = {
   manifestHash: string | null
   currentPointerUri: string | null
   activatedAt: string | null
+  repositoryUrl: string | null
+}
+
+type AdminLabRepositorySummary = {
+  sourceAvailable: boolean
+  unavailableReason: string | null
+  owner: string
+  name: string
+  branch: string
+  repositoryUrl: string
+  commitSha: string | null
+  commitUrl: string | null
+  committedAt: string | null
+  commitMessage: string | null
+  authorLogin: string | null
+  checkedAt: string
 }
 
 type AdminLabDataFreshness = {
@@ -381,6 +398,7 @@ type AdminLabOpsSummary = {
   alerts: AdminLabAlertSummary
   attestation: AdminLabAttestationSummary
   sourcingModel: AdminLabSourcingModelSummary
+  leadpoetRepository: AdminLabRepositorySummary
   computeSpend: AdminLabComputeSpendSummary
   dailyBenchmark: AdminLabDailyBenchmark
   champions: AdminLabChampionSummary[]
@@ -978,7 +996,10 @@ function OpsHealthStrip({ ops }: { ops: AdminLabOpsSummary }) {
                 : 'No Lab activity returned'}
             </div>
           </div>
-          <SourcingModelPopover model={ops.sourcingModel} />
+          <div className="flex items-center gap-1.5">
+            <SourcingModelPopover model={ops.sourcingModel} />
+            <LeadpoetRepositoryPopover repository={ops.leadpoetRepository} />
+          </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <WorkflowControlPill label="Scoring" control={ops.controls.scoring} />
@@ -1040,6 +1061,7 @@ function SourcingModelPopover({ model }: { model: AdminLabSourcingModelSummary }
   const triggerLabel = model.gitCommitSha
     ? `Active sourcing model commit ${model.gitCommitSha} · ${freshnessLabel}`
     : 'View active sourcing model image details'
+  const activeCommitUrl = githubCommitUrl(model.repositoryUrl, model.gitCommitSha)
 
   return (
     <Popover>
@@ -1100,9 +1122,22 @@ function SourcingModelPopover({ model }: { model: AdminLabSourcingModelSummary }
             <div className="text-[10px] uppercase tracking-[0.12em]" style={{ color: 'var(--text-tertiary)' }}>
               Active commit
             </div>
-            <code className="mt-1.5 block break-all text-xs leading-relaxed" style={{ color: alignmentTone.color }}>
-              {model.gitCommitSha ?? 'Not reported'}
-            </code>
+            {model.gitCommitSha && activeCommitUrl ? (
+              <a
+                href={activeCommitUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="premium-focus mt-1.5 block rounded-sm break-all font-mono text-xs leading-relaxed underline-offset-4 hover:underline"
+                style={{ color: alignmentTone.color }}
+                title="Open commit in a new tab"
+              >
+                {model.gitCommitSha}
+              </a>
+            ) : (
+              <code className="mt-1.5 block text-xs leading-relaxed" style={{ color: alignmentTone.color }}>
+                Not reported
+              </code>
+            )}
             <div className="mt-2 flex items-center gap-2 text-[10px]" style={{ color: alignmentTone.color }}>
               <span
                 className={cn('h-1.5 w-1.5 shrink-0 rounded-full', stateDotClass(freshnessState))}
@@ -1129,7 +1164,12 @@ function SourcingModelPopover({ model }: { model: AdminLabSourcingModelSummary }
           ) : null}
 
           <div className="grid grid-cols-2 gap-2">
-            <SourcingModelDetail label="Latest known commit" value={model.latestKnownCommitSha} compact />
+            <SourcingModelDetail
+              label="Latest known commit"
+              value={model.latestKnownCommitSha}
+              href={githubCommitUrl(model.repositoryUrl, model.latestKnownCommitSha)}
+              compact
+            />
             <SourcingModelDetail
               label="Latest observed"
               value={model.latestKnownCommitAt ? formatDateTime(model.latestKnownCommitAt) : null}
@@ -1161,6 +1201,126 @@ function SourcingModelPopover({ model }: { model: AdminLabSourcingModelSummary }
           <p className="text-[10px] leading-relaxed" style={{ color: 'var(--text-tertiary)' }}>
             Freshness compares the active image SHA with the newest {comparisonBranch} commit reported by model-version sync and successful private-repo push telemetry.
           </p>
+        </div>
+      </PopoverContent>
+    </Popover>
+  )
+}
+
+function LeadpoetRepositoryPopover({
+  repository,
+}: {
+  repository: AdminLabRepositorySummary
+}) {
+  const tone = sourcingModelAlignmentTone(repository.sourceAvailable, false)
+  const commitUrl = githubCommitUrl(repository.repositoryUrl, repository.commitSha)
+  const triggerLabel = repository.commitSha
+    ? `LeadPoet ${repository.branch} commit ${repository.commitSha}`
+    : 'View LeadPoet repository details'
+
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          aria-label={triggerLabel}
+          title={triggerLabel}
+          className="premium-focus inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border transition-colors hover-bg-warm"
+          style={{
+            borderColor: tone.borderColor,
+            background: tone.background,
+            color: tone.color,
+          }}
+        >
+          <Github className="h-3.5 w-3.5" aria-hidden />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent
+        align="start"
+        sideOffset={8}
+        className="w-[min(calc(100vw-2rem),30rem)] rounded-xl p-0 shadow-2xl shadow-black/50"
+        style={{
+          borderColor: 'var(--surface-border)',
+          background: 'var(--surface-base)',
+          color: 'var(--text-primary)',
+        }}
+      >
+        <div className="flex items-start justify-between gap-4 border-b px-4 py-3" style={{ borderColor: 'var(--surface-border)' }}>
+          <div className="flex min-w-0 items-start gap-2.5">
+            <div
+              className="mt-0.5 rounded-md border p-1.5"
+              style={{ borderColor: tone.borderColor, background: tone.background }}
+            >
+              <Github className="h-3.5 w-3.5" style={{ color: tone.color }} aria-hidden />
+            </div>
+            <div className="min-w-0">
+              <div className="text-sm font-medium">LeadPoet repository</div>
+              <div className="mt-0.5 text-[10px]" style={{ color: 'var(--text-tertiary)' }}>
+                Latest commit on {repository.owner}/{repository.name}
+              </div>
+            </div>
+          </div>
+          <StatePill
+            state={repository.sourceAvailable ? 'healthy' : 'unknown'}
+            label={repository.sourceAvailable ? 'Available' : 'Unavailable'}
+          />
+        </div>
+
+        <div className="space-y-3 p-4">
+          <div
+            className="rounded-lg border px-3 py-2.5"
+            style={{ borderColor: tone.borderColor, background: tone.background }}
+          >
+            <div className="text-[10px] uppercase tracking-[0.12em]" style={{ color: 'var(--text-tertiary)' }}>
+              Latest {repository.branch} commit
+            </div>
+            {repository.commitSha && commitUrl ? (
+              <a
+                href={commitUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="premium-focus mt-1.5 block rounded-sm break-all font-mono text-xs leading-relaxed underline-offset-4 hover:underline"
+                style={{ color: tone.color }}
+                title="Open commit in a new tab"
+              >
+                {repository.commitSha}
+              </a>
+            ) : (
+              <code className="mt-1.5 block text-xs leading-relaxed" style={{ color: tone.color }}>
+                Not reported
+              </code>
+            )}
+            <div className="mt-2 flex items-center gap-2 text-[10px]" style={{ color: tone.color }}>
+              <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: tone.color }} aria-hidden />
+              <span>{repository.commitMessage ?? 'Latest commit details are unavailable'}</span>
+            </div>
+          </div>
+
+          {!repository.sourceAvailable ? (
+            <div
+              className="rounded-lg border px-3 py-2 text-[11px] leading-relaxed"
+              style={{ borderColor: 'var(--surface-border)', background: 'var(--surface)', color: 'var(--text-secondary)' }}
+            >
+              LeadPoet repository telemetry is unavailable{repository.unavailableReason ? `: ${repository.unavailableReason}` : '.'}
+            </div>
+          ) : null}
+
+          <div className="grid grid-cols-2 gap-2">
+            <SourcingModelDetail
+              label="Commit"
+              value={repository.commitSha}
+              href={commitUrl}
+              compact
+            />
+            <SourcingModelDetail label="Branch" value={repository.branch} />
+            <SourcingModelDetail
+              label="Committed"
+              value={repository.committedAt ? formatDateTime(repository.committedAt) : null}
+            />
+            <SourcingModelDetail label="Author" value={repository.authorLogin} />
+            <SourcingModelDetail label="Repository" value={`${repository.owner}/${repository.name}`} />
+            <SourcingModelDetail label="Checked" value={formatDateTime(repository.checkedAt)} />
+          </div>
         </div>
       </PopoverContent>
     </Popover>
@@ -1219,10 +1379,12 @@ function SourcingModelAlignmentPill({
 function SourcingModelDetail({
   label,
   value,
+  href = null,
   compact = false,
 }: {
   label: string
   value: string | null
+  href?: string | null
   compact?: boolean
 }) {
   const displayValue = value ? (compact ? compactHash(value) : value) : '—'
@@ -1231,11 +1393,37 @@ function SourcingModelDetail({
       <div className="text-[9px] uppercase tracking-[0.12em]" style={{ color: 'var(--text-tertiary)' }}>
         {label}
       </div>
-      <div className="mt-1 truncate font-mono text-[10px]" title={value ?? undefined} style={{ color: 'var(--text-secondary)' }}>
-        {displayValue}
-      </div>
+      {value && href ? (
+        <a
+          href={href}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="premium-focus mt-1 block truncate rounded-sm font-mono text-[10px] underline-offset-2 hover:underline"
+          title={`${value} · Open in a new tab`}
+          style={{ color: 'var(--text-secondary)' }}
+        >
+          {displayValue}
+        </a>
+      ) : (
+        <div className="mt-1 truncate font-mono text-[10px]" title={value ?? undefined} style={{ color: 'var(--text-secondary)' }}>
+          {displayValue}
+        </div>
+      )}
     </div>
   )
+}
+
+function githubCommitUrl(repositoryUrl: string | null, sha: string | null): string | null {
+  if (!repositoryUrl || !sha || !/^[0-9a-f]{7,64}$/i.test(sha)) return null
+  try {
+    const url = new URL(repositoryUrl)
+    if (url.protocol !== 'https:' || url.hostname !== 'github.com') return null
+    const repositoryPath = url.pathname.replace(/\/+$/, '')
+    if (!/^\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repositoryPath)) return null
+    return `https://github.com${repositoryPath}/commit/${sha}`
+  } catch {
+    return null
+  }
 }
 
 function HealthSignalCard({ signal }: { signal: AdminLabHealthSignal }) {

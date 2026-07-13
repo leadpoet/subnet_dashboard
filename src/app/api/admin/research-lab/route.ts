@@ -62,6 +62,16 @@ const ACTIVE_RUN_LIMIT = 40
 const COMPUTE_SPEND_DAYS = 30
 const COMPUTE_SPEND_BATCH_SIZE = 1_000
 const LEADPOET_NETUID = 71
+const SOURCING_MODEL_REPOSITORY_URL =
+  process.env.SOURCING_MODEL_REPOSITORY_URL?.trim() ||
+  'https://github.com/tasnimuldatascience/Sourcing_model'
+const LEADPOET_REPOSITORY_OWNER = 'leadpoet'
+const LEADPOET_REPOSITORY_NAME = 'leadpoet'
+const LEADPOET_REPOSITORY_BRANCH = 'main'
+const LEADPOET_REPOSITORY_URL =
+  `https://github.com/${LEADPOET_REPOSITORY_OWNER}/${LEADPOET_REPOSITORY_NAME}`
+const LEADPOET_REPOSITORY_API_URL =
+  `https://api.github.com/repos/${LEADPOET_REPOSITORY_OWNER}/${LEADPOET_REPOSITORY_NAME}/commits/${LEADPOET_REPOSITORY_BRANCH}`
 const LEADPOET_GATEWAY_URL =
   process.env.LEADPOET_GATEWAY_URL?.trim() ||
   process.env.FULFILLMENT_GATEWAY_URL?.trim() ||
@@ -434,6 +444,22 @@ export type AdminLabSourcingModelSummary = {
   manifestHash: string | null
   currentPointerUri: string | null
   activatedAt: string | null
+  repositoryUrl: string | null
+}
+
+export type AdminLabRepositorySummary = {
+  sourceAvailable: boolean
+  unavailableReason: string | null
+  owner: string
+  name: string
+  branch: string
+  repositoryUrl: string
+  commitSha: string | null
+  commitUrl: string | null
+  committedAt: string | null
+  commitMessage: string | null
+  authorLogin: string | null
+  checkedAt: string
 }
 
 export type AdminLabDataFreshness = {
@@ -474,6 +500,7 @@ export type AdminLabOpsSummary = {
   evaluatedAlerts: ResearchLabEvaluatedAlert[]
   attestation: AdminLabAttestationSummary
   sourcingModel: AdminLabSourcingModelSummary
+  leadpoetRepository: AdminLabRepositorySummary
   computeSpend: AdminLabComputeSpendSummary
   dailyBenchmark: AdminLabDailyBenchmark
   champions: AdminLabChampionSummary[]
@@ -992,6 +1019,7 @@ async function fetchAdminLabOps(
     baseAlerts,
     attestation,
     sourcingModel,
+    leadpoetRepository,
     computeSpend,
     dailyBenchmark,
     champions,
@@ -1003,6 +1031,7 @@ async function fetchAdminLabOps(
     fetchAlertSummary(supabase),
     fetchAttestationSummary(supabase),
     fetchSourcingModelSummary(supabase),
+    fetchLeadpoetRepositorySummary(),
     fetchComputeSpendSummary(supabase),
     fetchDailyBenchmarkTelemetry(supabase, icpMetadata),
     fetchChampionTelemetry(supabase, icpMetadata),
@@ -1051,6 +1080,7 @@ async function fetchAdminLabOps(
     evaluatedAlerts,
     attestation,
     sourcingModel,
+    leadpoetRepository,
     computeSpend,
     dailyBenchmark,
     champions,
@@ -4065,6 +4095,73 @@ async function fetchSourcingModelSummary(
       stringOr(manifestWaitStatus?.manifest_uri) ??
       null,
     activatedAt,
+    repositoryUrl: SOURCING_MODEL_REPOSITORY_URL,
+  }
+}
+
+async function fetchLeadpoetRepositorySummary(): Promise<AdminLabRepositorySummary> {
+  const checkedAt = new Date().toISOString()
+  try {
+    const headers: Record<string, string> = {
+      Accept: 'application/vnd.github+json',
+      'User-Agent': 'leadpoet-dashboard',
+      'X-GitHub-Api-Version': '2022-11-28',
+    }
+    const githubToken = process.env.GITHUB_TOKEN?.trim()
+    if (githubToken) headers.Authorization = `Bearer ${githubToken}`
+
+    const response = await fetch(LEADPOET_REPOSITORY_API_URL, {
+      headers,
+      next: { revalidate: 300 },
+      signal: AbortSignal.timeout(5_000),
+    })
+    if (!response.ok) {
+      throw new Error(`GitHub returned ${response.status}`)
+    }
+
+    const payload = await response.json() as Record<string, unknown>
+    const commit = objectRecord(payload.commit)
+    const committer = objectRecord(commit?.committer)
+    const author = objectRecord(payload.author)
+    const commitSha = stringOr(payload.sha) ?? null
+    const reportedCommitUrl = stringOr(payload.html_url)
+    const commitUrl = reportedCommitUrl?.startsWith(`${LEADPOET_REPOSITORY_URL}/commit/`)
+      ? reportedCommitUrl
+      : commitSha
+        ? `${LEADPOET_REPOSITORY_URL}/commit/${encodeURIComponent(commitSha)}`
+        : null
+
+    return {
+      sourceAvailable: Boolean(commitSha),
+      unavailableReason: commitSha ? null : 'GitHub did not return a commit SHA',
+      owner: LEADPOET_REPOSITORY_OWNER,
+      name: LEADPOET_REPOSITORY_NAME,
+      branch: LEADPOET_REPOSITORY_BRANCH,
+      repositoryUrl: LEADPOET_REPOSITORY_URL,
+      commitSha,
+      commitUrl,
+      committedAt: isoStringOr(committer?.date) ?? null,
+      commitMessage: stringOr(commit?.message)?.split('\n')[0] ?? null,
+      authorLogin: stringOr(author?.login) ?? stringOr(committer?.name) ?? null,
+      checkedAt,
+    }
+  } catch (error) {
+    const unavailableReason = error instanceof Error ? error.message : 'GitHub lookup failed'
+    console.warn('[admin:research-lab] LeadPoet repository unavailable', unavailableReason)
+    return {
+      sourceAvailable: false,
+      unavailableReason,
+      owner: LEADPOET_REPOSITORY_OWNER,
+      name: LEADPOET_REPOSITORY_NAME,
+      branch: LEADPOET_REPOSITORY_BRANCH,
+      repositoryUrl: LEADPOET_REPOSITORY_URL,
+      commitSha: null,
+      commitUrl: null,
+      committedAt: null,
+      commitMessage: null,
+      authorLogin: null,
+      checkedAt,
+    }
   }
 }
 
@@ -4097,6 +4194,7 @@ function emptySourcingModelSummary(
     manifestHash: null,
     currentPointerUri: null,
     activatedAt: null,
+    repositoryUrl: SOURCING_MODEL_REPOSITORY_URL,
   }
 }
 
