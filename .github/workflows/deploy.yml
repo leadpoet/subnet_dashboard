@@ -25,7 +25,6 @@ jobs:
           key: ${{ secrets.EC2_SSH_KEY }}
           timeout: 45s
           command_timeout: 12m
-          script_stop: true
           script: |
             set -euo pipefail
 
