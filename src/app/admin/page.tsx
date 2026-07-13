@@ -9,11 +9,13 @@ import {
   AdminResearchLab,
   type AdminResearchLabPayload,
 } from './_components/AdminResearchLab'
+import { AdminResearchLabEconomics } from './_components/AdminResearchLabEconomics'
+import type { ResearchLabEconomicsPayload } from '@/lib/research-lab-economics'
 import { cn } from '@/lib/utils'
 
 export const dynamic = 'force-dynamic'
 
-type AdminView = 'lab' | 'fulfillment'
+type AdminView = 'lab' | 'economics' | 'fulfillment'
 type FulfillmentTab = 'requests' | 'submitted-leads'
 
 async function fetchChains(): Promise<ChainSummary[]> {
@@ -70,9 +72,27 @@ async function fetchResearchLab(): Promise<AdminResearchLabPayload> {
   return (await res.json()) as AdminResearchLabPayload
 }
 
+async function fetchResearchLabEconomics(): Promise<ResearchLabEconomicsPayload> {
+  const h = await headers()
+  const host = h.get('x-forwarded-host') ?? h.get('host')
+  const proto = h.get('x-forwarded-proto') ?? 'https'
+  const base = host ? `${proto}://${host}` : ''
+  const auth = h.get('authorization')
+  const res = await fetch(`${base}/api/admin/research-lab/economics`, {
+    cache: 'no-store',
+    headers: auth ? { authorization: auth } : undefined,
+  })
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}))
+    throw new Error(body.error || `Economics API returned ${res.status}`)
+  }
+  return (await res.json()) as ResearchLabEconomicsPayload
+}
+
 function AdminViewTabs({ active }: { active: AdminView }) {
   const tabs: Array<{ key: AdminView; label: string; href: string }> = [
-    { key: 'lab', label: 'Lab', href: '/admin' },
+    { key: 'lab', label: 'Lab activity', href: '/admin' },
+    { key: 'economics', label: 'Economics & Rewards', href: '/admin?view=economics' },
     { key: 'fulfillment', label: 'Fulfillment', href: '/admin?view=fulfillment' },
   ]
 
@@ -104,6 +124,7 @@ function AdminViewTabs({ active }: { active: AdminView }) {
 
 function getAdminView(value: string | string[] | undefined): AdminView {
   const view = Array.isArray(value) ? value[0] : value
+  if (view === 'economics') return 'economics'
   if (view === 'fulfillment') return 'fulfillment'
   return 'lab'
 }
@@ -153,11 +174,14 @@ export default async function AdminLandingPage({
   const fulfillmentTab = getFulfillmentTab(params.tab)
   let chains: ChainSummary[] = []
   let labPayload: AdminResearchLabPayload | null = null
+  let economicsPayload: ResearchLabEconomicsPayload | null = null
   let submittedLeadsPayload: AdminSubmittedLeadsPayload | null = null
   let error: string | null = null
   try {
     if (activeView === 'lab') {
       labPayload = await fetchResearchLab()
+    } else if (activeView === 'economics') {
+      economicsPayload = await fetchResearchLabEconomics()
     } else if (activeView === 'fulfillment' && fulfillmentTab === 'submitted-leads') {
       submittedLeadsPayload = await fetchSubmittedLeads()
     } else if (activeView === 'fulfillment') {
@@ -169,6 +193,8 @@ export default async function AdminLandingPage({
         ? e.message
         : activeView === 'lab'
           ? 'Unknown error loading Lab activity'
+          : activeView === 'economics'
+            ? 'Unknown error loading Research Lab economics'
           : 'Unknown error loading requests'
   }
 
@@ -177,6 +203,8 @@ export default async function AdminLandingPage({
       <AdminViewTabs active={activeView} />
       {activeView === 'lab' ? (
         <AdminResearchLab payload={labPayload} error={error} />
+      ) : activeView === 'economics' ? (
+        <AdminResearchLabEconomics payload={economicsPayload} error={error} />
       ) : fulfillmentTab === 'submitted-leads' ? (
         <>
           <FulfillmentTabs active={fulfillmentTab} />
