@@ -29,6 +29,23 @@ jobs:
             SHARED_STATIC="$RELEASE_ROOT/shared-next-static"
             CANDIDATE_NAME="subnet-dashboard-candidate"
 
+            # Failed builds can leave large release directories behind before
+            # the normal end-of-deploy retention step runs. Reclaim that space
+            # up front while preserving the release currently serving traffic.
+            mkdir -p "$RELEASE_ROOT" "$SHARED_STATIC"
+            CURRENT_RELEASE="$(readlink -f "$RELEASE_ROOT/current" 2>/dev/null || true)"
+            while IFS= read -r -d '' stale_release; do
+              if [ "$stale_release" != "$CURRENT_RELEASE" ]; then
+                rm -rf "$stale_release"
+              fi
+            done < <(find "$RELEASE_ROOT" -mindepth 1 -maxdepth 1 -type d -name 'release-*' -print0)
+
+            # These caches are not needed by the running Next.js process and
+            # can consume most of a small EC2 root volume after repeated builds.
+            rm -rf "$APP_ROOT/.next/cache"
+            npm cache clean --force >/dev/null 2>&1 || true
+            df -h "$HOME"
+
             cd "$APP_ROOT"
             git fetch origin main
             git checkout main
@@ -37,7 +54,7 @@ jobs:
             RELEASE_DIR="$RELEASE_ROOT/release-${DEPLOY_SHA}-$(date -u +%Y%m%d%H%M%S)"
 
             echo "Preparing commit: ${DEPLOY_SHA:0:7}"
-            mkdir -p "$RELEASE_DIR" "$SHARED_STATIC"
+            mkdir -p "$RELEASE_DIR"
             git archive "$DEPLOY_SHA" | tar -x -C "$RELEASE_DIR"
 
             # Production secrets live outside Git. Make the same files available
