@@ -34,8 +34,19 @@ import {
   YAxis,
 } from 'recharts'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { cn } from '@/lib/utils'
 import { formatDateTime, formatRelative, shortHotkey } from '@/lib/admin-format'
+import {
+  filterResearchLabActivityLoops,
+  researchLabStatusFilterOptionsWithCounts,
+} from '@/lib/research-lab-status'
 import {
   DailyBenchmarkTelemetry,
   RunTelemetry,
@@ -504,6 +515,7 @@ export function AdminResearchLab({
   const loops = useMemo(() => livePayload?.loops ?? [], [livePayload?.loops])
   const ops = livePayload?.ops ?? null
   const [query, setQuery] = useState('')
+  const [statusFilter, setStatusFilter] = useState('all')
   const [selectedTicketId, setSelectedTicketId] = useState<string | null>(loops[0]?.ticketId ?? null)
   const [selectedRunId, setSelectedRunId] = useState<string | null>(loops[0]?.runId ?? null)
   const [detailBySelection, setDetailBySelection] = useState<Record<string, LabTimelinePayload | null>>({})
@@ -657,7 +669,7 @@ export function AdminResearchLab({
     setSelectedRunId(loops[0].runId)
   }, [loops, selectedTicketId])
 
-  const filteredLoops = useMemo(() => {
+  const searchMatchedLoops = useMemo(() => {
     const q = query.trim().toLowerCase()
     if (!q) return loops
     return loops.filter((loop) =>
@@ -677,6 +689,29 @@ export function AdminResearchLab({
       ].some((value) => value.toLowerCase().includes(q)),
     )
   }, [loops, query])
+
+  const statusOptions = useMemo(
+    () => researchLabStatusFilterOptionsWithCounts(searchMatchedLoops),
+    [searchMatchedLoops],
+  )
+
+  const filteredLoops = useMemo(
+    () => filterResearchLabActivityLoops(searchMatchedLoops, { status: statusFilter }),
+    [searchMatchedLoops, statusFilter],
+  )
+
+  useEffect(() => {
+    if (statusFilter === 'all') return
+    if (statusOptions.some((option) => option.value === statusFilter)) return
+    setStatusFilter('all')
+  }, [statusFilter, statusOptions])
+
+  useEffect(() => {
+    if (filteredLoops.length === 0) return
+    if (filteredLoops.some((loop) => loop.ticketId === selectedTicketId)) return
+    setSelectedTicketId(filteredLoops[0].ticketId)
+    setSelectedRunId(filteredLoops[0].runId)
+  }, [filteredLoops, selectedTicketId])
 
   const loadMoreLoops = async () => {
     if (!livePayload?.hasMoreLoops || loadingMoreLoops) return
@@ -896,23 +931,45 @@ export function AdminResearchLab({
         className="grid min-h-[640px] w-full min-w-0 scroll-mt-24 gap-4 xl:grid-cols-[420px_minmax(0,1fr)]"
       >
         <div className="min-w-0 space-y-3">
-          <div className="relative">
-            <Search
-              className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2"
-              style={{ color: 'var(--text-tertiary)' }}
-            />
-            <input
-              type="text"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search ticket, run, hotkey, topic..."
-              className="premium-focus w-full rounded-lg border px-9 py-2 text-sm placeholder:text-white/30 bg-transparent"
-              style={{
-                borderColor: 'var(--surface-border)',
-                background: 'var(--surface)',
-                color: 'var(--text-primary)',
-              }}
-            />
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <div className="relative min-w-0 flex-1">
+              <Search
+                className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2"
+                style={{ color: 'var(--text-tertiary)' }}
+              />
+              <input
+                type="text"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search ticket, run, hotkey, topic..."
+                className="premium-focus w-full rounded-lg border px-9 py-2 text-sm placeholder:text-white/30 bg-transparent"
+                style={{
+                  borderColor: 'var(--surface-border)',
+                  background: 'var(--surface)',
+                  color: 'var(--text-primary)',
+                }}
+              />
+            </div>
+
+            <Select value={statusFilter} onValueChange={setStatusFilter}>
+              <SelectTrigger
+                className="h-10 w-full border-[var(--surface-border)] bg-[var(--surface)] font-mono text-xs text-[var(--text-secondary)] shadow-none sm:w-[210px]"
+                aria-label="Filter Lab loops by status"
+              >
+                <SelectValue placeholder="All statuses" />
+              </SelectTrigger>
+              <SelectContent className="border-[var(--surface-border)] bg-[var(--surface-base)] text-[var(--text-primary)]">
+                {statusOptions.map((option) => (
+                  <SelectItem
+                    key={option.value}
+                    value={option.value}
+                    className="font-mono text-xs text-[var(--text-secondary)] focus:bg-white/[0.06] focus:text-[var(--text-primary)]"
+                  >
+                    {option.label} ({option.count ?? 0})
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
 
           <div
@@ -929,7 +986,7 @@ export function AdminResearchLab({
               </div>
             ) : filteredLoops.length === 0 ? (
               <div className="p-8 text-center text-sm" style={{ color: 'var(--text-secondary)' }}>
-                No Lab loops match the current search.
+                No Lab loops match the current filters.
               </div>
             ) : (
               <div className="space-y-px p-1">
