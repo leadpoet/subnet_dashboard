@@ -53,6 +53,7 @@ import {
 } from './AdminResearchLabTelemetry'
 import { AdminMetagraph } from './AdminMetagraph'
 import type {
+  AdminLabBenchmarkRunSummary,
   AdminLabChampionSummary,
   AdminLabDailyBenchmark,
   AdminLabRunDetail,
@@ -412,6 +413,7 @@ type AdminLabOpsSummary = {
   leadpoetRepository: AdminLabRepositorySummary
   computeSpend: AdminLabComputeSpendSummary
   dailyBenchmark: AdminLabDailyBenchmark
+  benchmarkRuns: AdminLabBenchmarkRunSummary[]
   champions: AdminLabChampionSummary[]
 }
 
@@ -901,7 +903,11 @@ export function AdminResearchLab({
 
           <AdminMetagraph />
 
-          <DailyBenchmarkTelemetry benchmark={ops.dailyBenchmark} champions={ops.champions} />
+          <DailyBenchmarkTelemetry
+            benchmark={ops.dailyBenchmark}
+            benchmarkRuns={ops.benchmarkRuns}
+            champions={ops.champions}
+          />
 
           <ComputeSpendPanel spend={ops.computeSpend} />
 
@@ -3119,6 +3125,7 @@ function mergeAdminResearchLabRefresh(
     ops: {
       ...current.ops,
       ...refresh.ops,
+      benchmarkRuns: current.ops.benchmarkRuns,
       champions: current.ops.champions,
     },
     stats: refresh.stats,

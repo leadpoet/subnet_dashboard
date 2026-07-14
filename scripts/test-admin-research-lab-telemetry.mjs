@@ -88,7 +88,7 @@ try {
   assert.equal(
     routeSource.match(/\.select\(COMPANY_TELEMETRY_SELECT\)/g)?.length,
     3,
-    'all three company telemetry queries should retain model intent fields',
+    'all three company telemetry queries should preserve model intent fields',
   )
   assert.match(routeSource, /normalizeAdminLabCompanyIntent\(row\)/)
   assert.match(routeSource, /research_lab_gateway_control_current/)
@@ -102,7 +102,8 @@ try {
   assert.match(routeSource, /request\.nextUrl\.searchParams\.get\('runId'\)/)
   assert.match(routeSource, /candidateQuery = candidateQuery\.eq\('run_id', runId\)/)
   assert.match(routeSource, /bundleQuery = bundleQuery\.eq\('run_id', runId\)/)
-  assert.match(routeSource, /companyQuery = companyQuery\.eq\('run_id', runId\)/)
+  assert.match(routeSource, /fetchRunCompanyTelemetry\(supabase, loop\.ticketId, runId\)/)
+  assert.match(routeSource, /if \(runId\) query = query\.eq\('run_id', runId\)/)
   assert.match(routeSource, /dispatchQuery = dispatchQuery\.eq\('run_id', runId\)/)
   assert.match(routeSource, /timeline\.runs\.some\(\(run\) => run\.runId === requestedRunId\)/)
   assert.match(routeSource, /fetchAlertOperationsSummary/)
@@ -174,6 +175,7 @@ try {
   assert.match(adminComponentSource, /\/api\/admin\/research-lab\?mode=refresh/)
   assert.match(adminComponentSource, /function mergeAdminResearchLabRefresh/)
   assert.match(adminComponentSource, /champions: current\.ops\.champions/)
+  assert.match(adminComponentSource, /benchmarkRuns: current\.ops\.benchmarkRuns/)
   assert.match(adminComponentSource, /function WorkflowControlPill/)
   assert.match(adminComponentSource, /label="Scoring" control=\{ops\.controls\.scoring\}/)
   assert.match(adminComponentSource, /label="Loops" control=\{ops\.controls\.loops\}/)

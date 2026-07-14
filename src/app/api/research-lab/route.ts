@@ -38,6 +38,13 @@ import {
   roundUsd,
 } from '@/lib/research-lab-compute-spend'
 import { runSingleFlight, type SingleFlightState } from '@/lib/single-flight'
+import {
+  normalizeResearchLabScoringExecution,
+  sanitizeResearchLabPublicBenchmarkTelemetry,
+  type ResearchLabPublicBenchmarkTelemetry,
+  type ResearchLabScoringRunRow,
+  type ResearchLabScoringTelemetryRow,
+} from '@/lib/research-lab-scoring-telemetry'
 
 export const dynamic = 'force-dynamic'
 
@@ -53,6 +60,7 @@ const LOOP_LIMIT = 50
 const LOOP_FETCH_LIMIT = LOOP_LIMIT + 100
 const LAB_MINER_SPEND_BATCH_SIZE = 1_000
 const SUPABASE_IN_FILTER_BATCH_SIZE = 100
+const SCORING_TELEMETRY_PAGE_SIZE = 1_000
 const LAB_MINER_SPEND_WINDOW_MS = 24 * 60 * 60 * 1000
 const FULFILLMENT_LEADERBOARD_WINDOW_MS = 140 * 360 * 12 * 1000
 const FULFILLMENT_LEADERBOARD_SIZE = 3
@@ -459,26 +467,8 @@ type ResearchLabPayload = {
     promisingLoopCount: number
     totalBenchmarkIcpCount: number
   }
-  scoringStatus: BenchmarkScoringStatus | null
+  benchmarkTelemetry: ResearchLabPublicBenchmarkTelemetry
   fetchedAt: string
-}
-
-// Signals whether the current UTC day's baseline benchmark is still being
-// scored (i.e. the day has rolled over but today's report hasn't published
-// yet). Drives the "SCORING TODAY'S BENCHMARK" hero state.
-type BenchmarkScoringStatus = {
-  scoring: boolean
-  utcDate: string
-  benchmarkDateInProgress: string | null
-  // Progress is only known via the gateway scoring-status endpoint; null when
-  // derived from the fallback (latest.benchmark_date < todayUTC) alone.
-  icpsDone: number | null
-  icpsTotal: number | null
-  lastPublished: {
-    benchmarkDate: string
-    aggregateScore: number
-    publishedAt: string | null
-  } | null
 }
 
 type LabMinerSpendRollup = {
@@ -717,19 +707,18 @@ export async function GET(request: Request) {
       if (cache && Date.now() - cache.ts < CACHE_TTL) return cache.data
 
       const supabase = getSupabase()
-      const [benchmark, activePromotedModel, loops, allLoops, labMinerSpend, gatewayScoringStatus] =
+      const [benchmark, activePromotedModel, loops, allLoops, labMinerSpend] =
         await Promise.all([
           fetchLatestBenchmark(supabase),
           fetchActivePromotedModelScore(supabase),
           fetchPublicLoops(supabase),
           fetchPublicLoops(supabase, 5_000, 5_000),
           fetchLabMinerSpend(supabase),
-          fetchScoringStatusFromGateway(),
         ])
       const displayBenchmark = benchmark
         ? withBenchmarkDisplayScore(benchmark, activePromotedModel)
         : null
-      const scoringStatus = gatewayScoringStatus ?? buildBenchmarkScoringStatus(displayBenchmark)
+      const benchmarkTelemetry = await fetchPublicBenchmarkTelemetry(supabase, displayBenchmark)
       const topicGroups = groupLoopsByTopic(loops)
       const labMinerActivity = buildLabMinerActivityRollup(allLoops)
       const snapshot: ResearchLabPayload = {
@@ -748,7 +737,7 @@ export async function GET(request: Request) {
           promisingLoopCount: allLoops.filter(isModelImprovementResearchLabLoop).length,
           totalBenchmarkIcpCount: displayBenchmark?.itemCount ?? 0,
         },
-        scoringStatus,
+        benchmarkTelemetry,
         fetchedAt: new Date().toISOString(),
       }
       cache = { data: snapshot, ts: Date.now() }
@@ -1503,109 +1492,146 @@ async function fetchLatestBenchmark(supabase: ReturnType<typeof getSupabase>): P
   }
 }
 
-// Current date in UTC as YYYY-MM-DD. All benchmark dates are UTC.
-function currentUtcDate(): string {
-  return new Date().toISOString().slice(0, 10)
-}
-
-// Fallback derivation (no gateway endpoint): today's benchmark is "scoring" when
-// the newest published report predates the current UTC day. Progress (X/20) is
-// not available here, so it is left null. This is intentionally driven by the
-// pipeline's own publish state (a missing report for today), not by a bare
-// clock check — a stalled run stays honestly "scoring" rather than claiming
-// fake progress.
-function buildBenchmarkScoringStatus(
+async function fetchPublicBenchmarkTelemetry(
+  supabase: ReturnType<typeof getSupabase>,
   benchmark: NormalizedBenchmark | null,
-): BenchmarkScoringStatus {
-  const utcDate = currentUtcDate()
-  if (!benchmark) {
-    return {
-      scoring: false,
-      utcDate,
-      benchmarkDateInProgress: null,
-      icpsDone: null,
-      icpsTotal: null,
-      lastPublished: null,
+): Promise<ResearchLabPublicBenchmarkTelemetry> {
+  const publicationStatus = benchmark ? 'published' : 'unavailable'
+  const canonicalPublishedScore = benchmark?.aggregateScore ?? null
+  // These views are deliberately revoked from anon/authenticated. If the
+  // server-side service key is missing, return an honest aggregate fallback
+  // instead of attempting a public-client read or inferring zero progress.
+  if (!process.env.SUPABASE_SECRET_KEY) {
+    return sanitizeResearchLabPublicBenchmarkTelemetry({
+      publicationStatus,
+      canonicalPublishedScore,
+      execution: null,
+    })
+  }
+
+  const { data: latestData, error: latestError } = await supabase
+    .from('research_lab_scoring_run_current')
+    .select('scoring_run_id, scoring_id, run_type, run_attempt, source_run_id, candidate_id, expected_icp_count, scheduler_type, worker_ref, current_run_status, current_status_at, current_retryable, current_failure_category, current_telemetry_degraded, started_at, last_heartbeat_at, finished_at, observed_runtime_seconds, created_at')
+    .eq('run_type', 'private_baseline_rebenchmark')
+    .order('created_at', { ascending: false, nullsFirst: false })
+    .limit(1)
+  if (latestError) {
+    console.warn('[Research Lab API] public benchmark execution unavailable:', latestError.message)
+    return sanitizeResearchLabPublicBenchmarkTelemetry({
+      publicationStatus,
+      canonicalPublishedScore,
+      execution: null,
+    })
+  }
+
+  const latestRun = ((latestData ?? [])[0] ?? null) as ResearchLabScoringRunRow | null
+  let runRows: ResearchLabScoringRunRow[] = []
+  let telemetryRows: ResearchLabScoringTelemetryRow[] = []
+  if (latestRun?.scoring_id) {
+    const { data: attemptData, error: attemptError } = await supabase
+      .from('research_lab_scoring_run_current')
+      .select('scoring_run_id, scoring_id, run_type, run_attempt, source_run_id, candidate_id, expected_icp_count, scheduler_type, worker_ref, current_run_status, current_status_at, current_retryable, current_failure_category, current_telemetry_degraded, started_at, last_heartbeat_at, finished_at, observed_runtime_seconds, created_at')
+      .eq('scoring_id', String(latestRun.scoring_id))
+      .order('run_attempt', { ascending: false })
+      .limit(100)
+    if (attemptError) {
+      console.warn('[Research Lab API] public benchmark attempts unavailable:', attemptError.message)
+      runRows = [latestRun]
+    } else {
+      runRows = (attemptData ?? []) as ResearchLabScoringRunRow[]
+    }
+    const runIds = uniqueStrings(runRows.map((row) => stringOr(row.scoring_run_id)))
+    telemetryRows = await fetchPublicScoringTelemetryForRunIds(supabase, runIds)
+  }
+
+  let execution = normalizeResearchLabScoringExecution(runRows, telemetryRows)
+  if (!latestRun && benchmark) {
+    const { data: reportData, error: reportError } = await supabase
+      .from('research_lab_public_benchmark_report_current')
+      .select('benchmark_bundle_id, benchmark_date, current_status_at, created_at')
+      .eq('current_report_status', 'published')
+      .order('benchmark_date', { ascending: false })
+      .order('created_at', { ascending: false })
+      .limit(1)
+    const report = reportError ? null : ((reportData ?? [])[0] ?? null) as Record<string, unknown> | null
+    const bundleId = stringOr(report?.benchmark_bundle_id)
+    if (bundleId) {
+      const scoringId = `legacy:baseline:${bundleId}`
+      const legacyRows = await fetchPublicLegacyBenchmarkTelemetry(supabase, scoringId)
+      if (legacyRows.length > 0) {
+        execution = normalizeResearchLabScoringExecution([{
+          scoring_id: scoringId,
+          expected_icp_count: firstFiniteNumber(legacyRows.map((row) => row.expected_units)),
+          current_telemetry_degraded: true,
+          finished_at: report?.current_status_at ?? report?.created_at,
+        }], legacyRows)
+      }
     }
   }
-  const benchmarkDate = String(benchmark.benchmarkDate || '')
-  const scoring = benchmarkDate.slice(0, 10) < utcDate
-  return {
-    scoring,
-    utcDate,
-    benchmarkDateInProgress: scoring ? utcDate : null,
-    icpsDone: null,
-    icpsTotal: null,
-    lastPublished: {
-      benchmarkDate,
-      aggregateScore: benchmark.aggregateScore,
-      publishedAt: benchmark.currentStatusAt,
-    },
-  }
+
+  return sanitizeResearchLabPublicBenchmarkTelemetry({
+    publicationStatus,
+    canonicalPublishedScore,
+    execution,
+  })
 }
 
-// Preferred source: the gateway's scoring-status endpoint, which knows about an
-// in-progress baseline run and its ICP progress. Guarded behind an env var so it
-// activates only once the gateway team ships it; any failure falls back to the
-// derivation above. `scoring` here already means "run in progress AND no report
-// for utc_date yet", so we trust it verbatim.
-async function fetchScoringStatusFromGateway(): Promise<BenchmarkScoringStatus | null> {
-  const base = process.env.RESEARCH_LAB_GATEWAY_URL?.trim()
-  if (!base) return null
-  const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), 2_500)
-  try {
-    const res = await fetch(
-      `${base.replace(/\/+$/, '')}/research-lab/benchmarks/public/scoring-status`,
-      { cache: 'no-store', signal: controller.signal },
+async function fetchPublicScoringTelemetryForRunIds(
+  supabase: ReturnType<typeof getSupabase>,
+  runIds: string[],
+): Promise<ResearchLabScoringTelemetryRow[]> {
+  const rows: ResearchLabScoringTelemetryRow[] = []
+  for (const batch of chunked(runIds, SUPABASE_IN_FILTER_BATCH_SIZE)) {
+    if (batch.length === 0) continue
+    const pageRows = await fetchPublicTelemetryPages(
+      (from, to) => supabase
+        .from('research_lab_private_benchmark_dashboard_telemetry')
+        .select('telemetry_mode, scoring_id, scoring_run_id, icp_execution_id, icp_ref, model_role, phase, execution_kind, retry_round, status, sourced_company_count, scored_company_count, cumulative_spend_usd, cap_usd, failure_category, retryable, telemetry_degraded, started_at, last_heartbeat_at, finished_at, observed_runtime_seconds, checkpoint_ref, expected_units')
+        .in('scoring_run_id', batch)
+        .order('scoring_run_id', { ascending: true })
+        .order('icp_ordinal', { ascending: true })
+        .order('icp_execution_id', { ascending: true })
+        .range(from, to),
     )
-    if (!res.ok) return null
-    const json = (await res.json()) as GatewayScoringStatusResponse
-    return normalizeGatewayScoringStatus(json)
-  } catch (error) {
-    console.error('[Research Lab API] scoring-status gateway fetch failed:', error)
-    return null
-  } finally {
-    clearTimeout(timeout)
+    if (!pageRows) return []
+    rows.push(...pageRows)
   }
+  return rows
 }
 
-type GatewayScoringStatusResponse = {
-  utc_date?: string
-  scoring?: boolean
-  benchmark_date_in_progress?: string | null
-  icps_done?: number | string | null
-  icps_total?: number | string | null
-  last_published?: {
-    benchmark_date?: string
-    aggregate_score?: number | string | null
-    published_at?: string | null
-  } | null
+async function fetchPublicLegacyBenchmarkTelemetry(
+  supabase: ReturnType<typeof getSupabase>,
+  scoringId: string,
+): Promise<ResearchLabScoringTelemetryRow[]> {
+  return await fetchPublicTelemetryPages(
+    (from, to) => supabase
+      .from('research_lab_private_benchmark_dashboard_telemetry')
+      .select('telemetry_mode, scoring_id, scoring_run_id, icp_execution_id, icp_ref, model_role, phase, execution_kind, retry_round, status, sourced_company_count, scored_company_count, cumulative_spend_usd, cap_usd, failure_category, retryable, telemetry_degraded, started_at, last_heartbeat_at, finished_at, observed_runtime_seconds, checkpoint_ref, expected_units')
+      .eq('scoring_id', scoringId)
+      .order('icp_ordinal', { ascending: true })
+      .order('icp_ref', { ascending: true })
+      .range(from, to),
+  ) ?? []
 }
 
-function normalizeGatewayScoringStatus(
-  json: GatewayScoringStatusResponse,
-): BenchmarkScoringStatus | null {
-  if (!json || typeof json !== 'object') return null
-  const utcDate = String(json.utc_date || currentUtcDate())
-  const last = json.last_published
-  const lastPublished = last && last.benchmark_date
-    ? {
-        benchmarkDate: String(last.benchmark_date),
-        aggregateScore: numberOr(last.aggregate_score, 0),
-        publishedAt: last.published_at ? String(last.published_at) : null,
-      }
-    : null
-  return {
-    scoring: Boolean(json.scoring),
-    utcDate,
-    benchmarkDateInProgress: json.benchmark_date_in_progress
-      ? String(json.benchmark_date_in_progress)
-      : null,
-    icpsDone: nullableNumber(json.icps_done),
-    icpsTotal: nullableNumber(json.icps_total),
-    lastPublished,
+async function fetchPublicTelemetryPages(
+  fetchPage: (from: number, to: number) => PromiseLike<unknown>,
+): Promise<ResearchLabScoringTelemetryRow[] | null> {
+  const rows: ResearchLabScoringTelemetryRow[] = []
+  for (let from = 0; ; from += SCORING_TELEMETRY_PAGE_SIZE) {
+    const result = await fetchPage(from, from + SCORING_TELEMETRY_PAGE_SIZE - 1) as {
+      data: unknown[] | null
+      error: { message?: string } | null
+    }
+    if (result.error) {
+      console.warn('[Research Lab API] sanitized benchmark telemetry unavailable:', result.error.message)
+      return null
+    }
+    const page = (result.data ?? []) as ResearchLabScoringTelemetryRow[]
+    rows.push(...page)
+    if (page.length < SCORING_TELEMETRY_PAGE_SIZE) break
   }
+  return rows
 }
 
 async function fetchActivePromotedModelScore(
@@ -3350,6 +3376,14 @@ function warningStrings(value: unknown): string[] {
 
 function stringOr(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value.trim() : undefined
+}
+
+function firstFiniteNumber(values: unknown[]): number | null {
+  for (const value of values) {
+    const number = nullableNumber(value)
+    if (number !== null) return number
+  }
+  return null
 }
 
 function objectRecord(value: unknown): Record<string, unknown> | undefined {

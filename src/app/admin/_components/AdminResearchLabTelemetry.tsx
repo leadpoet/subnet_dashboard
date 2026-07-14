@@ -13,6 +13,7 @@ import {
 import { cn } from '@/lib/utils'
 import { formatDateTime, formatRelative, shortHotkey } from '@/lib/admin-format'
 import type {
+  AdminLabBenchmarkRunSummary,
   AdminLabChampionSummary,
   AdminLabCompanyDetail,
   AdminLabDailyBenchmark,
@@ -24,9 +25,11 @@ import type {
 
 export function DailyBenchmarkTelemetry({
   benchmark,
+  benchmarkRuns,
   champions,
 }: {
   benchmark: AdminLabDailyBenchmark
+  benchmarkRuns: AdminLabBenchmarkRunSummary[]
   champions: AdminLabChampionSummary[]
 }) {
   return (
@@ -42,32 +45,50 @@ export function DailyBenchmarkTelemetry({
         <p className="text-xs leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
           {benchmark.detail}
         </p>
-        <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4 xl:grid-cols-8">
-          <TelemetryMetric label="ICPs left" value={benchmark.icpsRemaining} />
-          <TelemetryMetric label="Processed" value={`${benchmark.icpsProcessed}/${benchmark.icpsTotal || '—'}`} />
-          <TelemetryMetric label="Score so far" value={formatScore(benchmark.provisionalScore)} />
-          <TelemetryMetric label="Avg processed" value={formatScore(benchmark.completedAverageScore)} />
-          <TelemetryMetric label="Spend" value={formatUsd(benchmark.spendUsd)} />
+        <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-5 xl:grid-cols-10">
+          <TelemetryMetric label="Published score" value={formatScore(benchmark.publishedScore)} />
+          <TelemetryMetric label="Resolved" value={formatProgress(benchmark.icpsProcessed, benchmark.icpsTotal)} />
+          <TelemetryMetric label="Completed" value={formatNullableCount(benchmark.completedIcpCount)} />
+          <TelemetryMetric label="Skipped" value={formatNullableCount(benchmark.skippedIcpCount)} />
+          <TelemetryMetric label="Failed" value={formatNullableCount(benchmark.failedIcpCount)} critical={(benchmark.failedIcpCount ?? 0) > 0} />
+          <TelemetryMetric label="Cancelled" value={formatNullableCount(benchmark.cancelledIcpCount)} critical={(benchmark.cancelledIcpCount ?? 0) > 0} />
+          <TelemetryMetric label="Spend" value={benchmark.spendUsd === null ? '—' : formatUsd(benchmark.spendUsd)} />
           <TelemetryMetric label="Budget" value={benchmark.budgetUsd === null ? '—' : formatUsd(benchmark.budgetUsd)} />
           <TelemetryMetric label="Companies" value={benchmark.companyCount} />
-          <TelemetryMetric label="Errors" value={benchmark.errorCount} critical={benchmark.errorCount > 0} />
+          <TelemetryMetric label="Provider calls" value={benchmark.providerEventCount} />
         </div>
 
         <div className="mt-4">
           <div className="flex items-center justify-between gap-3 text-[10px] uppercase tracking-[0.12em]" style={{ color: 'var(--text-tertiary)' }}>
             <span>ICP progress</span>
-            <span className="tabular-nums">{benchmark.progressPercent}%</span>
+            <span className="tabular-nums">{benchmark.progressPercent === null ? '—' : `${benchmark.progressPercent}%`}</span>
           </div>
           <div className="mt-2 h-2 overflow-hidden rounded-full" style={{ background: 'rgba(255,255,255,0.07)' }}>
             <div
               className="h-full rounded-full transition-[width] duration-500"
-              style={{ width: `${benchmark.progressPercent}%`, background: 'var(--accent-positive)' }}
+              style={{ width: `${benchmark.progressPercent ?? 0}%`, background: 'var(--accent-positive)' }}
             />
           </div>
           <div className="mt-2 flex flex-wrap gap-x-5 gap-y-1 font-mono text-[10px]" style={{ color: 'var(--text-tertiary)' }}>
             <span>Started {formatDateTime(benchmark.startedAt)}</span>
             <span suppressHydrationWarning>Updated {benchmark.lastActivityAt ? formatRelative(benchmark.lastActivityAt) : '—'}</span>
+            <span>Runtime {formatDurationSeconds(benchmark.durationSeconds)}</span>
             {benchmark.workerRef ? <span>Worker {benchmark.workerRef}</span> : null}
+          </div>
+          <div className="mt-2 flex flex-wrap gap-2 text-[10px]">
+            <TelemetryState state={benchmark.publicationStatus === 'published' ? 'completed' : 'unknown'} label={`Publication ${benchmark.publicationStatus}`} />
+            <TelemetryState state={benchmark.state} label={`Execution ${benchmark.executionStatus ?? 'unavailable'}`} />
+            <TelemetryState
+              state={benchmark.telemetryDegraded ? 'unknown' : 'completed'}
+              label={`${benchmark.telemetryMode} telemetry${benchmark.telemetryDegraded ? ' · degraded' : ''}`}
+            />
+            <TelemetryState state={benchmark.correlation === 'unlinked' ? 'unknown' : 'completed'} label={`Link ${benchmark.correlation}`} />
+          </div>
+          <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+            <IdDatum label="Scoring run" value={benchmark.scoringRunId ?? '—'} />
+            <IdDatum label="Published bundle" value={benchmark.publishedBenchmarkBundleId ?? '—'} />
+            <IdDatum label="Execution bundle" value={benchmark.executionBenchmarkBundleId ?? '—'} />
+            <IdDatum label="Public report" value={benchmark.reportId ?? '—'} />
           </div>
         </div>
 
@@ -99,15 +120,94 @@ export function DailyBenchmarkTelemetry({
             </div>
           </details>
         ) : (
-          <EmptyTelemetry message="Waiting for the first per-ICP provider event." />
+          <EmptyTelemetry message="Authoritative per-ICP execution telemetry is unavailable; provider/company enrichment is not treated as progress." />
         )}
-        <HistoricalBenchmarkRuns champions={champions} />
+        <HistoricalBenchmarkRuns runs={benchmarkRuns} />
+        <ChampionHistory champions={champions} />
       </div>
     </section>
   )
 }
 
-function HistoricalBenchmarkRuns({ champions }: { champions: AdminLabChampionSummary[] }) {
+function HistoricalBenchmarkRuns({ runs }: { runs: AdminLabBenchmarkRunSummary[] }) {
+  return (
+    <details
+      className="group/runs mt-3 overflow-hidden rounded-lg border"
+      style={{ borderColor: 'var(--surface-border)', background: 'var(--surface-base)' }}
+    >
+      <summary className="cursor-pointer list-none px-4 py-3 marker:hidden hover-bg-warm">
+        <div className="flex items-center justify-between gap-4">
+          <div className="flex min-w-0 items-center gap-3">
+            <Gauge className="h-4 w-4 shrink-0 text-gold" />
+            <div className="min-w-0">
+              <div className="text-xs font-medium" style={{ color: 'var(--text-primary)' }}>
+                Historical benchmark runs
+              </div>
+              <div className="mt-1 text-[10px]" style={{ color: 'var(--text-tertiary)' }}>
+                {runs.length} execution{runs.length === 1 ? '' : 's'} from research_lab_scoring_run_current
+              </div>
+            </div>
+          </div>
+          <div className="flex shrink-0 items-center gap-2 text-[10px] font-medium uppercase tracking-[0.1em]" style={{ color: 'var(--text-secondary)' }}>
+            <span className="group-open/runs:hidden">Show runs</span>
+            <span className="hidden group-open/runs:inline">Hide runs</span>
+            <ChevronDown className="h-4 w-4 transition-transform group-open/runs:rotate-180" />
+          </div>
+        </div>
+      </summary>
+      <div className="border-t" style={{ borderColor: 'var(--surface-border)' }}>
+        {runs.length === 0 ? (
+          <EmptyTelemetry message="No benchmark execution telemetry is available." />
+        ) : (
+          <div className="space-y-2 p-3">
+            {runs.map((run) => (
+              <div
+                key={run.scoringRunId}
+                className="rounded-lg border p-4"
+                style={{ borderColor: 'var(--surface-border)', background: 'var(--surface)' }}
+              >
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-mono text-xs text-gold">{run.benchmarkDate ?? 'Undated benchmark'}</span>
+                      <TelemetryState state={stateForExecution(run.executionStatus, run.telemetryDegraded)} label={run.executionStatus ?? 'unavailable'} />
+                      <TelemetryState state={run.publicationStatus === 'published' ? 'completed' : 'unknown'} label={`publication ${run.publicationStatus}`} />
+                    </div>
+                    <div className="mt-1 font-mono text-[10px]" style={{ color: 'var(--text-tertiary)' }}>
+                      Attempt {run.runAttempt} · {run.correlation} · {compactId(run.scoringRunId)}
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-3 gap-5 text-right">
+                    <SummaryDatum label="Published" value={formatScore(run.canonicalPublishedScore)} />
+                    <SummaryDatum label="Resolved" value={formatProgress(run.resolvedUnits, run.expectedUnits)} />
+                    <SummaryDatum label="Spend" value={run.spendUsd === null ? '—' : formatUsd(run.spendUsd)} />
+                  </div>
+                </div>
+                <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4 xl:grid-cols-8">
+                  <TelemetryMetric label="Completed" value={formatNullableCount(run.completedUnits)} />
+                  <TelemetryMetric label="Skipped" value={formatNullableCount(run.skippedUnits)} />
+                  <TelemetryMetric label="Failed" value={formatNullableCount(run.failedUnits)} critical={(run.failedUnits ?? 0) > 0} />
+                  <TelemetryMetric label="Cancelled" value={formatNullableCount(run.cancelledUnits)} critical={(run.cancelledUnits ?? 0) > 0} />
+                  <TelemetryMetric label="Progress" value={run.progressPercent === null ? '—' : `${run.progressPercent}%`} />
+                  <TelemetryMetric label="Cap" value={run.capUsd === null ? '—' : formatUsd(run.capUsd)} />
+                  <TelemetryMetric label="Runtime" value={formatDurationSeconds(run.durationSeconds)} />
+                  <TelemetryMetric label="Telemetry" value={`${run.telemetryMode}${run.telemetryDegraded ? ' · degraded' : ''}`} />
+                </div>
+                {run.failureCategory ? (
+                  <p className="mt-3 text-[11px] text-burgundy">
+                    {run.executionStatus}: {run.failureCategory}{run.retryable === null ? '' : ` · ${run.retryable ? 'retryable' : 'not retryable'}`}
+                  </p>
+                ) : null}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </details>
+  )
+}
+
+function ChampionHistory({ champions }: { champions: AdminLabChampionSummary[] }) {
   return (
     <details
       className="group/history mt-3 overflow-hidden rounded-lg border"
@@ -119,23 +219,23 @@ function HistoricalBenchmarkRuns({ champions }: { champions: AdminLabChampionSum
             <Trophy className="h-4 w-4 shrink-0 text-gold" />
             <div className="min-w-0">
               <div className="text-xs font-medium" style={{ color: 'var(--text-primary)' }}>
-                Historical benchmark runs
+                Champion history
               </div>
               <div className="mt-1 text-[10px]" style={{ color: 'var(--text-tertiary)' }}>
-                {champions.length} run{champions.length === 1 ? '' : 's'} · score, budget, ICPs, surfaced companies, and errors
+                {champions.length} champion reward{champions.length === 1 ? '' : 's'} · promotion scores, rewards, and reimbursements remain separate from benchmark executions
               </div>
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-2 text-[10px] font-medium uppercase tracking-[0.1em]" style={{ color: 'var(--text-secondary)' }}>
-            <span className="group-open/history:hidden">Show runs</span>
-            <span className="hidden group-open/history:inline">Hide runs</span>
+            <span className="group-open/history:hidden">Show champions</span>
+            <span className="hidden group-open/history:inline">Hide champions</span>
             <ChevronDown className="h-4 w-4 transition-transform group-open/history:rotate-180" />
           </div>
         </div>
       </summary>
       <div className="border-t" style={{ borderColor: 'var(--surface-border)' }}>
         {champions.length === 0 ? (
-          <EmptyTelemetry message="No historical benchmark runs are available." />
+          <EmptyTelemetry message="No champion history is available." />
         ) : (
           <div className="space-y-2 p-3">
             {champions.map((champion) => (
@@ -195,6 +295,9 @@ function HistoricalBenchmarkRuns({ champions }: { champions: AdminLabChampionSum
 
 export function RunTelemetry({ detail }: { detail: AdminLabRunDetail }) {
   const runLevelErrors = detail.errors.filter((error) => !error.candidateId)
+  const resolvedUnits = sumKnown(detail.scoringExecutions.map((execution) => execution.resolvedUnits))
+  const expectedUnits = sumKnown(detail.scoringExecutions.map((execution) => execution.expectedUnits))
+  const skippedUnits = sumKnown(detail.scoringExecutions.map((execution) => execution.skippedUnits))
   return (
     <div className="mb-5 space-y-4">
       <section className="overflow-hidden rounded-lg border" style={{ borderColor: 'var(--surface-border)', background: 'var(--surface-base)' }}>
@@ -206,8 +309,10 @@ export function RunTelemetry({ detail }: { detail: AdminLabRunDetail }) {
           aside={`Refreshed ${formatDateTime(detail.fetchedAt)}`}
         />
         <div className="p-4">
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 xl:grid-cols-8">
             <TelemetryMetric label="Candidates" value={detail.candidates.length} />
+            <TelemetryMetric label="Resolved" value={formatProgress(resolvedUnits, expectedUnits)} />
+            <TelemetryMetric label="Skipped" value={formatNullableCount(skippedUnits)} />
             <TelemetryMetric label="Spend" value={formatUsd(detail.totalSpendUsd)} />
             <TelemetryMetric label="Budget seen" value={detail.totalBudgetUsd === null ? '—' : formatUsd(detail.totalBudgetUsd)} />
             <TelemetryMetric label="Companies" value={detail.companyCount} />
@@ -258,6 +363,7 @@ export function RunTelemetry({ detail }: { detail: AdminLabRunDetail }) {
                     {candidate.scoreBundleId ? <div className="mt-2"><IdDatum label="Score bundle" value={candidate.scoreBundleId} /></div> : null}
                     <div className="mt-4 space-y-3">
                       <CandidateEvaluationDiagnostics diagnostics={candidate.diagnostics} />
+                      <ScoringExecutionTelemetry execution={candidate.execution} />
                       <CandidateArtifactProvenance artifact={candidate.artifact} />
                     </div>
                     <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
@@ -277,6 +383,73 @@ export function RunTelemetry({ detail }: { detail: AdminLabRunDetail }) {
 
 type CandidateDiagnostics = AdminLabRunDetail['candidates'][number]['diagnostics']
 type CandidateArtifact = AdminLabRunDetail['candidates'][number]['artifact']
+type CandidateExecution = AdminLabRunDetail['candidates'][number]['execution']
+
+function ScoringExecutionTelemetry({ execution }: { execution: CandidateExecution }) {
+  return (
+    <section className="min-w-0 overflow-hidden rounded-lg border" style={{ borderColor: 'var(--surface-border)', background: 'var(--surface-base)' }}>
+      <div className="border-b px-3 py-3 sm:px-4" style={{ borderColor: 'var(--surface-border)' }}>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h3 className="text-xs font-medium" style={{ color: 'var(--text-primary)' }}>V2 scoring execution</h3>
+            <p className="mt-0.5 text-[10px]" style={{ color: 'var(--text-tertiary)' }}>
+              Canonical execution progress; score-bundle metrics below remain authoritative for final evaluation.
+            </p>
+          </div>
+          {execution ? (
+            <TelemetryState
+              state={stateForExecution(execution.executionStatus, execution.telemetryDegraded)}
+              label={execution.executionStatus ?? 'unavailable'}
+            />
+          ) : null}
+        </div>
+      </div>
+      {!execution ? (
+        <InlineTelemetryEmpty message="V2 telemetry is missing. Legacy score-bundle/provider evidence is shown elsewhere and is not treated as live progress." />
+      ) : (
+        <div className="space-y-3 p-3 sm:p-4">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 xl:grid-cols-8">
+            <TelemetryMetric label="Resolved" value={formatProgress(execution.resolvedUnits, execution.expectedUnits)} />
+            <TelemetryMetric label="Completed" value={formatNullableCount(execution.completedUnits)} />
+            <TelemetryMetric label="Skipped" value={formatNullableCount(execution.skippedUnits)} />
+            <TelemetryMetric label="Failed" value={formatNullableCount(execution.failedUnits)} critical={(execution.failedUnits ?? 0) > 0} />
+            <TelemetryMetric label="Cancelled" value={formatNullableCount(execution.cancelledUnits)} critical={(execution.cancelledUnits ?? 0) > 0} />
+            <TelemetryMetric label="Retries" value={execution.maxRetryRound} />
+            <TelemetryMetric label="Checkpoint reuse" value={execution.checkpointReuseCount} />
+            <TelemetryMetric label="Progress" value={execution.progressPercent === null ? '—' : `${execution.progressPercent}%`} />
+          </div>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 xl:grid-cols-8">
+            <TelemetryMetric label="Phase" value={execution.phase ?? '—'} />
+            <TelemetryMetric label="Model role" value={execution.modelRole ?? '—'} />
+            <TelemetryMetric label="Sourced" value={formatNullableCount(execution.sourcedCompanyCount)} />
+            <TelemetryMetric label="Scored" value={formatNullableCount(execution.scoredCompanyCount)} />
+            <TelemetryMetric label="Spend" value={execution.spendUsd === null ? '—' : formatUsd(execution.spendUsd)} />
+            <TelemetryMetric label="Cap" value={execution.capUsd === null ? '—' : formatUsd(execution.capUsd)} />
+            <TelemetryMetric label="Runtime" value={formatDurationSeconds(execution.durationSeconds)} />
+            <TelemetryMetric label="Telemetry" value={`${execution.telemetryMode}${execution.telemetryDegraded ? ' · degraded' : ''}`} />
+          </div>
+          <div className="flex flex-wrap gap-x-5 gap-y-1 font-mono text-[10px]" style={{ color: 'var(--text-tertiary)' }}>
+            <span>Started {formatDateTime(execution.startedAt)}</span>
+            <span>Heartbeat {formatDateTime(execution.lastHeartbeatAt)}</span>
+            <span>Finished {formatDateTime(execution.completedAt)}</span>
+            <span>Worker {execution.workerRef ?? '—'}</span>
+            <span>Scheduler {execution.schedulerType ?? '—'}</span>
+          </div>
+          {execution.failureCategory ? (
+            <p className="text-[11px] text-burgundy">
+              {execution.failureCategory} · {execution.retryable === null ? 'retryability unknown' : execution.retryable ? 'retryable' : 'not retryable'}
+            </p>
+          ) : null}
+          <div className="grid gap-2 sm:grid-cols-3">
+            <IdDatum label="Scoring" value={execution.scoringId ?? '—'} />
+            <IdDatum label="Scoring run" value={execution.scoringRunId ?? '—'} />
+            <IdDatum label="Source run" value={execution.sourceRunId ?? '—'} />
+          </div>
+        </div>
+      )}
+    </section>
+  )
+}
 
 function CandidateEvaluationDiagnostics({ diagnostics }: { diagnostics: CandidateDiagnostics }) {
   return (
@@ -1270,6 +1443,14 @@ function stateForCandidate(status: string): AdminLabTelemetryState {
   return 'unknown'
 }
 
+function stateForExecution(
+  status: string | null,
+  telemetryDegraded: boolean,
+): AdminLabTelemetryState {
+  if (telemetryDegraded && status === 'completed') return 'unknown'
+  return stateForCandidate(status ?? '')
+}
+
 function stateForDiagnostic(status: string): AdminLabTelemetryState {
   const value = status.toLowerCase()
   if (
@@ -1307,6 +1488,35 @@ function formatUsd(value: number): string {
 
 function formatScore(value: number | null | undefined, digits = 2): string {
   return value === null || value === undefined || !Number.isFinite(value) ? '—' : value.toFixed(digits)
+}
+
+function formatNullableCount(value: number | null | undefined): string {
+  return value === null || value === undefined ? '—' : value.toLocaleString()
+}
+
+function formatProgress(
+  resolved: number | null | undefined,
+  expected: number | null | undefined,
+): string {
+  return resolved === null || resolved === undefined || expected === null || expected === undefined
+    ? '—'
+    : `${resolved}/${expected}`
+}
+
+function formatDurationSeconds(value: number | null | undefined): string {
+  if (value === null || value === undefined || !Number.isFinite(value)) return '—'
+  const seconds = Math.max(0, Math.round(value))
+  if (seconds < 60) return `${seconds}s`
+  const minutes = Math.floor(seconds / 60)
+  const remainder = seconds % 60
+  if (minutes < 60) return `${minutes}m ${remainder}s`
+  const hours = Math.floor(minutes / 60)
+  return `${hours}h ${minutes % 60}m`
+}
+
+function sumKnown(values: Array<number | null>): number | null {
+  const known = values.filter((value): value is number => value !== null)
+  return known.length > 0 ? known.reduce((sum, value) => sum + value, 0) : null
 }
 
 function formatSigned(value: number | null | undefined, digits = 2): string {

@@ -1,3 +1,8 @@
+import type {
+  ResearchLabBenchmarkCorrelation,
+  ResearchLabScoringExecutionSummary,
+} from './research-lab-scoring-telemetry'
+
 export type AdminLabTelemetryState =
   | 'active'
   | 'completed'
@@ -755,6 +760,16 @@ export type AdminLabDailyBenchmark = {
   state: AdminLabTelemetryState
   stateLabel: string
   detail: string
+  publicationStatus: string
+  executionStatus: string | null
+  correlation: ResearchLabBenchmarkCorrelation
+  telemetryMode: ResearchLabScoringExecutionSummary['telemetryMode']
+  telemetryDegraded: boolean
+  scoringId: string | null
+  scoringRunId: string | null
+  publishedBenchmarkBundleId: string | null
+  executionBenchmarkBundleId: string | null
+  reportId: string | null
   benchmarkDate: string | null
   attempt: number | null
   rollingWindowHash: string | null
@@ -762,19 +777,53 @@ export type AdminLabDailyBenchmark = {
   startedAt: string | null
   lastActivityAt: string | null
   completedAt: string | null
-  icpsTotal: number
-  icpsProcessed: number
-  icpsRemaining: number
-  progressPercent: number
-  provisionalScore: number | null
-  completedAverageScore: number | null
-  spendUsd: number
+  durationSeconds: number | null
+  icpsTotal: number | null
+  icpsProcessed: number | null
+  icpsRemaining: number | null
+  completedIcpCount: number | null
+  skippedIcpCount: number | null
+  failedIcpCount: number | null
+  cancelledIcpCount: number | null
+  progressPercent: number | null
+  publishedScore: number | null
+  spendUsd: number | null
   budgetUsd: number | null
   providerEventCount: number
   companyCount: number
   errorCount: number
   icps: AdminLabIcpDetail[]
   errors: AdminLabErrorDetail[]
+}
+
+export type AdminLabBenchmarkRunSummary = {
+  scoringId: string
+  scoringRunId: string
+  benchmarkDate: string | null
+  runAttempt: number
+  publicationStatus: string
+  executionStatus: string | null
+  correlation: ResearchLabBenchmarkCorrelation
+  benchmarkBundleId: string | null
+  reportId: string | null
+  canonicalPublishedScore: number | null
+  expectedUnits: number | null
+  resolvedUnits: number | null
+  completedUnits: number | null
+  skippedUnits: number | null
+  failedUnits: number | null
+  cancelledUnits: number | null
+  progressPercent: number | null
+  spendUsd: number | null
+  capUsd: number | null
+  failureCategory: string | null
+  retryable: boolean | null
+  telemetryMode: ResearchLabScoringExecutionSummary['telemetryMode']
+  telemetryDegraded: boolean
+  workerRef: string | null
+  startedAt: string | null
+  completedAt: string | null
+  durationSeconds: number | null
 }
 
 export type AdminLabChampionSummary = {
@@ -820,6 +869,7 @@ export type AdminLabCandidateRunDetail = {
   providerEventCount: number
   companyCount: number
   errorCount: number
+  execution: ResearchLabScoringExecutionSummary | null
   diagnostics: AdminLabScoreBundleDiagnostics
   artifact: AdminLabCandidateArtifactDetail
   icps: AdminLabIcpDetail[]
@@ -863,6 +913,7 @@ export type AdminLabRunDetail = {
   providerEventCount: number
   companyCount: number
   errorCount: number
+  scoringExecutions: ResearchLabScoringExecutionSummary[]
   candidates: AdminLabCandidateRunDetail[]
   errors: AdminLabErrorDetail[]
   fetchedAt: string

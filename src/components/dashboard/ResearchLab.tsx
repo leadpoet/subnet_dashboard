@@ -40,21 +40,23 @@ type ResearchLabData = {
     promisingLoopCount: number
     totalBenchmarkIcpCount: number
   }
-  scoringStatus?: BenchmarkScoringStatus | null
+  benchmarkTelemetry: PublicBenchmarkTelemetry
   fetchedAt: string
 }
 
-type BenchmarkScoringStatus = {
-  scoring: boolean
-  utcDate: string
-  benchmarkDateInProgress: string | null
-  icpsDone: number | null
-  icpsTotal: number | null
-  lastPublished: {
-    benchmarkDate: string
-    aggregateScore: number
-    publishedAt: string | null
-  } | null
+type PublicBenchmarkTelemetry = {
+  publicationStatus: string
+  executionStatus: string | null
+  expectedUnits: number | null
+  resolvedUnits: number | null
+  completedUnits: number | null
+  skippedUnits: number | null
+  failedUnits: number | null
+  progressPercent: number | null
+  startedAt: string | null
+  completedAt: string | null
+  durationSeconds: number | null
+  canonicalPublishedScore: number | null
 }
 
 type LabMinerSpendRollup = {
@@ -486,7 +488,7 @@ export function ResearchLab({
         </div>
       </header>
 
-      <Hero benchmark={benchmark} scoringStatus={data?.scoringStatus ?? null} />
+      <Hero benchmark={benchmark} telemetry={data?.benchmarkTelemetry ?? emptyPublicBenchmarkTelemetry()} />
 
       <KpiRail stats={stats} />
 
@@ -538,10 +540,10 @@ function ResearchLabLoading() {
  * ============================================================ */
 function Hero({
   benchmark,
-  scoringStatus,
+  telemetry,
 }: {
   benchmark: BenchmarkReport | null
-  scoringStatus?: BenchmarkScoringStatus | null
+  telemetry: PublicBenchmarkTelemetry
 }) {
   if (!benchmark) {
     return (
@@ -558,23 +560,13 @@ function Hero({
     )
   }
 
-  const displayScore = benchmark.displayScore
-  const score = numberOr(displayScore?.score, numberOr(benchmark.aggregateScore, 0))
+  const score = numberOr(telemetry.canonicalPublishedScore, numberOr(benchmark.aggregateScore, 0))
   const tone = scoreTone(score)
-  const isPromotedModel = displayScore?.source === 'latest_promoted_model'
-  const scoreDate = displayScore?.statusAt || benchmark.currentStatusAt || benchmark.benchmarkDate
-
-  // Only pre-empt the daily-rebenchmark number while today's baseline is still
-  // scoring. A promoted "Current model" score is fresh and stands on its own, so
-  // it is never masked by the scoring state.
-  if (scoringStatus?.scoring && !isPromotedModel) {
-    return <ScoringHero status={scoringStatus} />
-  }
 
   return (
     <section className="pt-12 pb-14">
       <div className="mb-5 font-mono text-[10.5px] uppercase tracking-[0.16em] text-[var(--muted-2)]">
-        {isPromotedModel ? 'Current model' : 'Daily rebenchmark'}
+        Daily rebenchmark
       </div>
       <div className="flex items-end gap-5">
         <div
@@ -589,68 +581,44 @@ function Hero({
       </div>
 
       <p className="mt-7 max-w-[560px] text-[14px] leading-[1.7] text-[var(--muted)]">
-        {isPromotedModel
-          ? "The latest model score for Leadpoet's sales agent. The next daily rebenchmark will become the displayed score once it publishes."
-          : "The current daily rebenchmark score for Leadpoet's sales agent. Each loop tests whether a miner's change improves the current model."}
+        The canonical published benchmark score for Leadpoet&apos;s sales agent. Current execution progress is shown separately and never replaces this published score.
       </p>
 
       <div className="mt-6 font-mono text-[11px] text-[var(--muted-2)]">
-        {isPromotedModel ? (
-          <>
-            Model Improvement {formatDate(scoreDate)}
-          </>
-        ) : (
-          <>Published {formatDate(benchmark.benchmarkDate)}</>
-        )}
+        Published {formatDate(benchmark.benchmarkDate)}
       </div>
+      <BenchmarkExecutionSummary telemetry={telemetry} />
     </section>
   )
 }
 
 /* ============================================================
- * Scoring state — shown after 00:00 UTC while today's baseline
- * benchmark is still being scored and hasn't published yet.
- * Keeps the prior published number visible, clearly labeled.
+ * Latest execution — always secondary to the canonical published score.
  * ============================================================ */
-function ScoringHero({ status }: { status: BenchmarkScoringStatus }) {
-  const total = numberOr(status.icpsTotal, 0)
-  const done = Math.max(0, numberOr(status.icpsDone, 0))
-  const hasProgress = status.icpsTotal != null && total > 0
-  const last = status.lastPublished
-  const dayLabel = formatDayShort(status.benchmarkDateInProgress || status.utcDate)
-
+function BenchmarkExecutionSummary({ telemetry }: { telemetry: PublicBenchmarkTelemetry }) {
+  const hasProgress = telemetry.expectedUnits !== null && telemetry.resolvedUnits !== null
   return (
-    <section className="pt-12 pb-14">
-      <div className="flex items-end gap-5">
-        <div className="font-display font-medium leading-[0.9] tracking-[-0.03em] text-[clamp(40px,7vw,72px)] text-[var(--platinum)]">
-          {hasProgress ? (
-            <>
-              <CountUp value={done} />
-              <span className="text-[var(--faint)]">/{total}</span>
-              <span className="ml-3.5 align-baseline font-display text-[20px] tracking-normal text-[var(--faint)] md:text-[24px]">
-                ICPs
-              </span>
-            </>
-          ) : (
-            <span>In&nbsp;progress</span>
-          )}
-        </div>
+    <div className="mt-7 max-w-[620px] border-l border-[var(--line-3)] pl-4">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-[10px] uppercase tracking-[0.12em] text-[var(--muted-2)]">
+        <span>Publication {telemetry.publicationStatus}</span>
+        <span>Latest execution {telemetry.executionStatus ?? 'unavailable'}</span>
       </div>
-
-      <p className="mt-7 max-w-[560px] text-[14px] leading-[1.7] text-[var(--muted)]">
+      <p className="mt-2 text-[12px] leading-[1.65] text-[var(--muted)]">
         {hasProgress
-          ? `Today's baseline is scoring across all ${total} ideal customer profiles. The new benchmark for ${dayLabel} publishes once every ICP finishes.`
-          : `Today's baseline benchmark is being scored. The new number for ${dayLabel} publishes once scoring finishes.`}
+          ? `${telemetry.resolvedUnits}/${telemetry.expectedUnits} resolved · ${telemetry.completedUnits ?? 0} completed · ${telemetry.skippedUnits ?? 0} skipped · ${telemetry.failedUnits ?? 0} failed`
+          : 'Execution progress is unavailable; the published score above remains authoritative.'}
       </p>
-
-      {last && (
-        <div className="mt-6 font-mono text-[11px] text-[var(--muted-2)]">
-          Last published:{' '}
-          <span className="text-[var(--muted)]">{last.aggregateScore.toFixed(1)}</span> /100 ·{' '}
-          {formatDayShort(last.benchmarkDate)}
+      {telemetry.progressPercent !== null ? (
+        <div className="mt-3 h-1 overflow-hidden rounded-full bg-[var(--line-1)]">
+          <div className="h-full rounded-full bg-[var(--platinum)]" style={{ width: `${Math.min(100, telemetry.progressPercent)}%` }} />
         </div>
-      )}
-    </section>
+      ) : null}
+      <div className="mt-2 font-mono text-[10px] text-[var(--muted-2)]">
+        {telemetry.startedAt ? `Started ${formatDate(telemetry.startedAt)}` : 'Start unavailable'}
+        {' · '}
+        {telemetry.durationSeconds === null ? 'Runtime unavailable' : `Runtime ${formatRuntime(telemetry.durationSeconds)}`}
+      </div>
+    </div>
   )
 }
 
@@ -3124,11 +3092,29 @@ function formatDate(value: string): string {
   return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' })
 }
 
-// Short UTC day label (e.g. "Jul 6") for the scoring-state "Last published" line.
-function formatDayShort(value: string): string {
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return value
-  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })
+function formatRuntime(value: number): string {
+  const seconds = Math.max(0, Math.round(value))
+  if (seconds < 60) return `${seconds}s`
+  const minutes = Math.floor(seconds / 60)
+  if (minutes < 60) return `${minutes}m ${seconds % 60}s`
+  return `${Math.floor(minutes / 60)}h ${minutes % 60}m`
+}
+
+function emptyPublicBenchmarkTelemetry(): PublicBenchmarkTelemetry {
+  return {
+    publicationStatus: 'unavailable',
+    executionStatus: null,
+    expectedUnits: null,
+    resolvedUnits: null,
+    completedUnits: null,
+    skippedUnits: null,
+    failedUnits: null,
+    progressPercent: null,
+    startedAt: null,
+    completedAt: null,
+    durationSeconds: null,
+    canonicalPublishedScore: null,
+  }
 }
 
 function formatRelative(value: string): string {

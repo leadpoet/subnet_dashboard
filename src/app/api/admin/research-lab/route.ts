@@ -41,6 +41,7 @@ import {
   parseAdminLabScoreBundleDiagnostics,
   type AdminLabCandidateArtifactDetail,
   type AdminLabCandidateRunDetail,
+  type AdminLabBenchmarkRunSummary,
   type AdminLabChampionSummary,
   type AdminLabCompanyDetail,
   type AdminLabDailyBenchmark,
@@ -53,6 +54,16 @@ import {
   type AdminLabTelemetryState,
   type AdminLabWorkflowControlSummary,
 } from '@/lib/admin-research-lab-telemetry'
+import {
+  canonicalizeResearchLabTelemetryRows,
+  correlateResearchLabBenchmarkRun,
+  groupResearchLabScoringRuns,
+  normalizeResearchLabScoringExecution,
+  type ResearchLabBenchmarkBundleRow,
+  type ResearchLabScoringExecutionSummary,
+  type ResearchLabScoringRunRow,
+  type ResearchLabScoringTelemetryRow,
+} from '@/lib/research-lab-scoring-telemetry'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -91,9 +102,9 @@ const STALE_SCORING_MS = 15 * 60 * 1000
 const FRESH_DATA_MS = 15 * 60 * 1000
 const DEGRADED_DATA_MS = 60 * 60 * 1000
 const SUPABASE_IN_FILTER_BATCH_SIZE = 100
-const LIVE_TELEMETRY_LIMIT = 10_000
+const TELEMETRY_PAGE_SIZE = 1_000
+const BENCHMARK_HISTORY_LIMIT = 20
 const CHAMPION_LIMIT = 10
-const LIVE_ICP_ACTIVITY_COHORT_MS = 15 * 1000
 const COMPANY_TELEMETRY_SELECT = [
   'label_id',
   'candidate_id',
@@ -121,7 +132,6 @@ const COMPANY_TELEMETRY_SELECT = [
   'created_at',
 ].join(',')
 const LIVE_BENCHMARK_STALE_MS = 15 * 60 * 1000
-const LEADS_PER_ICP_NORMALIZER = 5
 const ALERT_MONITOR_ID = 'research-lab-alerts:v1'
 const DEFAULT_ALERT_MONITOR_INTERVAL_MS = 60_000
 const ADMIN_LAB_OVERVIEW_CACHE_MS = 45_000
@@ -506,6 +516,7 @@ export type AdminLabOpsSummary = {
   leadpoetRepository: AdminLabRepositorySummary
   computeSpend: AdminLabComputeSpendSummary
   dailyBenchmark: AdminLabDailyBenchmark
+  benchmarkRuns: AdminLabBenchmarkRunSummary[]
   champions: AdminLabChampionSummary[]
 }
 
@@ -551,7 +562,7 @@ export type AdminLabLoopRefresh = Pick<
 export type AdminResearchLabRefreshPayload = {
   recentLoops: AdminLabLoopSummary[]
   loopStates: AdminLabLoopRefresh[]
-  ops: Omit<AdminLabOpsSummary, 'champions' | 'evaluatedAlerts'>
+  ops: Omit<AdminLabOpsSummary, 'champions' | 'benchmarkRuns' | 'evaluatedAlerts'>
   stats: AdminResearchLabPayload['stats']
   fetchedAt: string
 }
@@ -658,6 +669,7 @@ function buildAdminLabRefreshPayload(
 ): AdminResearchLabRefreshPayload {
   const ops = { ...overview.ops } as Partial<AdminLabOpsSummary>
   delete ops.champions
+  delete ops.benchmarkRuns
   delete ops.evaluatedAlerts
   return {
     recentLoops: overview.loops.slice(0, ADMIN_LAB_REFRESH_RECENT_LOOP_LIMIT),
@@ -704,7 +716,7 @@ async function getCachedAdminLabOverview(
           const refreshedAt = Date.now()
           adminLabOverviewCache = {
             payload,
-            freshUntil: refreshedAt + ADMIN_LAB_OVERVIEW_CACHE_MS,
+            freshUntil: refreshedAt + adminLabOverviewFreshMs(payload),
             staleUntil: refreshedAt + ADMIN_LAB_OVERVIEW_STALE_MS,
           }
         })
@@ -726,7 +738,7 @@ async function getCachedAdminLabOverview(
     const payload = await adminLabOverviewInFlight
     adminLabOverviewCache = {
       payload,
-      freshUntil: Date.now() + ADMIN_LAB_OVERVIEW_CACHE_MS,
+      freshUntil: Date.now() + adminLabOverviewFreshMs(payload),
       staleUntil: Date.now() + ADMIN_LAB_OVERVIEW_STALE_MS,
     }
     return { payload, status: 'miss' }
@@ -779,6 +791,12 @@ async function getCachedAdminLabTimeline(
   } finally {
     adminLabTimelineInFlight.delete(key)
   }
+}
+
+function adminLabOverviewFreshMs(payload: AdminResearchLabPayload): number {
+  return payload.ops.dailyBenchmark.state === 'active'
+    ? Math.min(10_000, ADMIN_LAB_OVERVIEW_CACHE_MS)
+    : ADMIN_LAB_OVERVIEW_CACHE_MS
 }
 
 function pruneAdminLabTimelineCache(): void {
@@ -1123,7 +1141,7 @@ async function fetchAdminLabOps(
     sourcingModel,
     leadpoetRepository,
     computeSpend,
-    dailyBenchmark,
+    benchmarkTelemetry,
     champions,
     metagraph,
   ] = await Promise.all([
@@ -1135,12 +1153,13 @@ async function fetchAdminLabOps(
     fetchSourcingModelSummary(supabase),
     fetchLeadpoetRepositorySummary(),
     fetchComputeSpendSummary(supabase),
-    fetchDailyBenchmarkTelemetry(supabase, icpMetadata),
+    fetchBenchmarkTelemetryOverview(supabase, icpMetadata),
     fetchChampionTelemetry(supabase, icpMetadata),
     fetchMetagraph(),
   ])
 
   const dataFreshness = buildDataFreshness(loops)
+  const { dailyBenchmark, benchmarkRuns } = benchmarkTelemetry
   const activeRuns = buildActiveRuns(loops, scoreMetrics.byTicket)
   const pipeline = buildPipelineStages(loops)
   const scoring = buildScoringSummary({
@@ -1185,6 +1204,7 @@ async function fetchAdminLabOps(
     leadpoetRepository,
     computeSpend,
     dailyBenchmark,
+    benchmarkRuns,
     champions,
   }
 }
@@ -1425,6 +1445,9 @@ type IcpMetadataSnapshot = {
 }
 
 type ProviderCostTelemetryRow = {
+  scoring_id?: string | null
+  scoring_run_id?: string | null
+  icp_execution_id?: string | null
   candidate_id?: string | null
   benchmark_date?: string | null
   run_scope?: string | null
@@ -1623,195 +1646,616 @@ function normalizeIcpIntentSignals(
   return normalized.length > 0 ? normalized : fallback
 }
 
-async function fetchDailyBenchmarkTelemetry(
+type BenchmarkReportLinkRow = {
+  report_id?: string | null
+  benchmark_bundle_id?: string | null
+  benchmark_date?: string | null
+  aggregate_score?: number | string | null
+  current_report_status?: string | null
+  current_status_at?: string | null
+  created_at?: string | null
+}
+
+type BenchmarkTelemetryOverview = {
+  dailyBenchmark: AdminLabDailyBenchmark
+  benchmarkRuns: AdminLabBenchmarkRunSummary[]
+}
+
+async function fetchBenchmarkTelemetryOverview(
   supabase: ReturnType<typeof getAdminSupabase>,
   metadataPromise: Promise<IcpMetadataSnapshot>,
-): Promise<AdminLabDailyBenchmark> {
-  const { data: dispatchData, error: dispatchError } = await supabase
-    .from('research_lab_scoring_dispatch_events')
-    .select('dispatch_event_id, dispatch_status, dispatch_type, event_doc, benchmark_bundle_id, rolling_window_hash, worker_ref, created_at')
-    .eq('dispatch_type', 'private_baseline_rebenchmark')
-    .order('created_at', { ascending: false, nullsFirst: false })
-    .limit(50)
-
-  if (dispatchError) {
-    console.warn('[admin:research-lab] daily benchmark dispatch unavailable', dispatchError.message)
-    return emptyDailyBenchmark('Daily benchmark dispatch telemetry is unavailable.')
-  }
-
-  const dispatches = (dispatchData ?? []) as Array<Record<string, unknown>>
-  const start = dispatches.find((row) => {
-    const doc = objectRecord(row.event_doc)
-    return (stringOr(row.dispatch_status) ?? '').toLowerCase() === 'assigned' && Boolean(stringOr(doc?.benchmark_date))
-  }) ?? dispatches.find((row) => Boolean(stringOr(objectRecord(row.event_doc)?.benchmark_date)))
-  if (!start) return emptyDailyBenchmark('No daily benchmark dispatch has been recorded yet.')
-
-  const startDoc = objectRecord(start.event_doc) ?? {}
-  const benchmarkDate = stringOr(startDoc.benchmark_date) ?? new Date().toISOString().slice(0, 10)
-  const attempt = Math.max(0, Math.round(numberOr(startDoc.benchmark_attempt, 0)))
-  const icpsTotal = Math.max(0, Math.round(numberOr(startDoc.selected_icp_count, 0)))
-  const startedAt = isoStringOr(start.created_at) ?? null
-  const contextPrefix = `daily-${benchmarkDate}-a${attempt}-%`
-
-  const [costResult, companyResult, bundleResult, metadata] = await Promise.all([
+): Promise<BenchmarkTelemetryOverview> {
+  const [runResult, bundleResult, reportResult, metadata] = await Promise.all([
     supabase
-      .from('research_lab_provider_cost_events')
-      .select('candidate_id, benchmark_date, run_scope, run_type, runner_role, provider, endpoint, request_fingerprint, status_code, cost_usd, spent_after_usd, cap_usd, cap_state, icp_ref, icp_hash, created_at, event_doc')
-      .eq('benchmark_date', benchmarkDate)
+      .from('research_lab_scoring_run_current')
+      .select('scoring_run_id, scoring_id, run_type, run_attempt, source_run_id, ticket_id, candidate_id, benchmark_id, benchmark_date, rolling_window_hash, reference_artifact_hash, expected_icp_count, scheduler_type, worker_ref, current_run_status, current_status_at, current_retryable, current_failure_category, current_telemetry_degraded, benchmark_bundle_id, assigned_at, started_at, last_heartbeat_at, finished_at, observed_runtime_seconds, created_at')
       .eq('run_type', 'private_baseline_rebenchmark')
-      .gte('created_at', startedAt ?? '1970-01-01T00:00:00Z')
-      .order('created_at', { ascending: true, nullsFirst: false })
-      .limit(LIVE_TELEMETRY_LIMIT),
-    supabase
-      .from('research_lab_company_label_examples')
-      .select(COMPANY_TELEMETRY_SELECT)
-      .like('context_ref', contextPrefix)
-      .order('created_at', { ascending: true, nullsFirst: false })
-      .limit(LIVE_TELEMETRY_LIMIT),
+      .order('created_at', { ascending: false, nullsFirst: false })
+      .limit(BENCHMARK_HISTORY_LIMIT * 10),
     supabase
       .from('research_lab_private_model_benchmark_current')
-      .select('benchmark_bundle_id, benchmark_date, aggregate_score, benchmark_quality, current_benchmark_status, current_event_type, current_status_at, rolling_window_hash, score_summary_doc, created_at')
-      .eq('benchmark_date', benchmarkDate)
-      .order('current_status_at', { ascending: false, nullsFirst: false })
-      .limit(5),
+      .select('benchmark_bundle_id, benchmark_date, private_model_artifact_hash, rolling_window_hash, aggregate_score, current_benchmark_status, current_event_type, current_status_at, created_at')
+      .order('benchmark_date', { ascending: false, nullsFirst: false })
+      .order('created_at', { ascending: false, nullsFirst: false })
+      .limit(BENCHMARK_HISTORY_LIMIT * 5),
+    supabase
+      .from('research_lab_public_benchmark_report_current')
+      .select('report_id, benchmark_bundle_id, benchmark_date, aggregate_score, current_report_status, current_status_at, created_at')
+      .eq('current_report_status', 'published')
+      .order('benchmark_date', { ascending: false, nullsFirst: false })
+      .order('created_at', { ascending: false, nullsFirst: false })
+      .limit(BENCHMARK_HISTORY_LIMIT * 5),
     metadataPromise,
   ])
 
-  const costs = costResult.error ? [] : (costResult.data ?? []) as ProviderCostTelemetryRow[]
-  const companies = companyResult.error ? [] : (companyResult.data ?? []) as CompanyTelemetryRow[]
-  const completedBundle = bundleResult.error
-    ? undefined
-    : ((bundleResult.data ?? []) as Array<Record<string, unknown>>).find((row) =>
-        ['completed', 'published'].includes((stringOr(row.current_benchmark_status) ?? stringOr(row.current_event_type) ?? '').toLowerCase()),
-      )
-  if (costResult.error) console.warn('[admin:research-lab] daily provider cost telemetry unavailable', costResult.error.message)
-  if (companyResult.error) console.warn('[admin:research-lab] daily company telemetry unavailable', companyResult.error.message)
-  if (bundleResult.error) console.warn('[admin:research-lab] daily completed bundle lookup unavailable', bundleResult.error.message)
-
-  const costByIcp = rollupCostsByIcp(costs)
-  const companiesByIcp = groupCompaniesByIcp(companies)
-  const observedRefs = uniqueStrings([
-    ...metadata.latestRefs,
-    ...costs.map((row) => stringOr(row.icp_ref) ?? null),
-    ...companies.map((row) => stringOr(row.icp_ref) ?? null),
-  ])
-  const targetRefs = icpsTotal > 0 ? observedRefs.slice(0, Math.max(icpsTotal, observedRefs.length)) : observedRefs
-  const processedRefs = new Set(costs.map((row) => stringOr(row.icp_ref)).filter(Boolean) as string[])
-  const scoreByIcp = new Map<string, number>()
-  for (const [icpRef, rows] of companiesByIcp) {
-    scoreByIcp.set(icpRef, roundTelemetry(rows.reduce((sum, row) => sum + (row.finalScore ?? 0), 0) / LEADS_PER_ICP_NORMALIZER))
+  if (runResult.error) {
+    console.warn('[admin:research-lab] V2 benchmark runs unavailable', runResult.error.message)
+  }
+  if (bundleResult.error) {
+    console.warn('[admin:research-lab] benchmark bundles unavailable', bundleResult.error.message)
+  }
+  if (reportResult.error) {
+    console.warn('[admin:research-lab] benchmark reports unavailable', reportResult.error.message)
   }
 
-  const icps: AdminLabIcpDetail[] = targetRefs.map((icpRef) => {
-    const meta = metadata.byRef.get(icpRef)
-    const cost = costByIcp.get(icpRef) ?? emptyCostRollup()
-    const companyRows = companiesByIcp.get(icpRef) ?? []
-    const processed = processedRefs.has(icpRef)
-    const companyActivity = companyRows.map((company) => company.capturedAt).filter(Boolean) as string[]
-    const runtimeStartedAt = earliestIso(cost.firstActivityAt, ...companyActivity) ?? null
-    const runtimeLastActivityAt = latestIso(cost.lastActivityAt, ...companyActivity) ?? null
-    const runtimeMs = runtimeStartedAt && runtimeLastActivityAt
-      ? Math.max(0, timestampOrZero(runtimeLastActivityAt) - timestampOrZero(runtimeStartedAt))
-      : null
+  const runRows = runResult.error ? [] : (runResult.data ?? []) as ResearchLabScoringRunRow[]
+  const runGroups = groupResearchLabScoringRuns(runRows).slice(0, BENCHMARK_HISTORY_LIMIT)
+  const runIds = uniqueStrings(runGroups.flatMap((group) =>
+    group.map((row) => stringOr(row.scoring_run_id) ?? null),
+  ))
+  let bundles = bundleResult.error
+    ? []
+    : (bundleResult.data ?? []) as ResearchLabBenchmarkBundleRow[]
+  let reports = reportResult.error
+    ? []
+    : (reportResult.data ?? []) as BenchmarkReportLinkRow[]
+  const [telemetryRows, bundleLinks] = await Promise.all([
+    fetchBenchmarkTelemetryForRunIds(supabase, runIds),
+    fetchBenchmarkBundleLinks(supabase, runIds),
+  ])
+
+  const missingBundleIds = uniqueStrings([...bundleLinks.values()])
+    .filter((bundleId) => !bundles.some((row) => stringOr(row.benchmark_bundle_id) === bundleId))
+  if (missingBundleIds.length > 0) {
+    bundles = [...bundles, ...await fetchBenchmarkBundlesByIds(supabase, missingBundleIds)]
+  }
+  const reportBundleIds = uniqueStrings([
+    ...bundles.map((row) => stringOr(row.benchmark_bundle_id) ?? null),
+    ...bundleLinks.values(),
+  ])
+  const missingReportBundleIds = reportBundleIds.filter((bundleId) =>
+    !reports.some((row) => stringOr(row.benchmark_bundle_id) === bundleId),
+  )
+  if (missingReportBundleIds.length > 0) {
+    reports = [...reports, ...await fetchBenchmarkReportsByBundleIds(supabase, missingReportBundleIds)]
+  }
+
+  const benchmarkRuns = buildHistoricalBenchmarkRuns(
+    runGroups,
+    telemetryRows,
+    bundles,
+    reports,
+    bundleLinks,
+  )
+  const latestPublishedReport = [...reports]
+    .filter((row) => (stringOr(row.current_report_status) ?? '').toLowerCase() === 'published')
+    .sort((a, b) => timestampOrZero(b.created_at) - timestampOrZero(a.created_at))[0] ?? null
+  const latestRunGroup = runGroups[0] ?? []
+  let latestExecution = normalizeResearchLabScoringExecution(latestRunGroup, telemetryRows)
+  let selectedTelemetryRows = telemetryRowsForExecution(telemetryRows, latestExecution)
+
+  if (!latestExecution && latestPublishedReport?.benchmark_bundle_id) {
+    const legacyScoringId = `legacy:baseline:${latestPublishedReport.benchmark_bundle_id}`
+    const legacyRows = await fetchBenchmarkTelemetryByScoringId(supabase, legacyScoringId)
+    if (legacyRows.length > 0) {
+      const expectedUnits = firstFiniteNumber(legacyRows.map((row) => row.expected_units))
+      latestExecution = normalizeResearchLabScoringExecution([{
+        scoring_id: legacyScoringId,
+        run_type: 'private_baseline_rebenchmark',
+        benchmark_date: latestPublishedReport.benchmark_date,
+        expected_icp_count: expectedUnits,
+        current_telemetry_degraded: true,
+        finished_at: latestPublishedReport.current_status_at ?? latestPublishedReport.created_at,
+      }], legacyRows)
+      selectedTelemetryRows = canonicalizeResearchLabTelemetryRows(legacyRows)
+    }
+  }
+
+  const dailyBenchmark = await buildDailyBenchmarkTelemetry({
+    supabase,
+    metadata,
+    runGroup: latestRunGroup,
+    execution: latestExecution,
+    telemetryRows: selectedTelemetryRows,
+    bundles,
+    reports,
+    bundleLinks,
+    latestPublishedReport,
+  })
+  return { dailyBenchmark, benchmarkRuns }
+}
+
+async function fetchBenchmarkTelemetryForRunIds(
+  supabase: ReturnType<typeof getAdminSupabase>,
+  runIds: string[],
+): Promise<ResearchLabScoringTelemetryRow[]> {
+  const rows: ResearchLabScoringTelemetryRow[] = []
+  for (const runIdBatch of chunked(runIds, SUPABASE_IN_FILTER_BATCH_SIZE)) {
+    if (runIdBatch.length === 0) continue
+    try {
+      rows.push(...await fetchPagedTelemetryRows<ResearchLabScoringTelemetryRow>(
+        'benchmark V2 ICP telemetry',
+        (from, to) => supabase
+          .from('research_lab_private_benchmark_dashboard_telemetry')
+          .select('telemetry_mode, scoring_id, scoring_run_id, icp_execution_id, icp_ref, model_role, phase, execution_kind, retry_round, status, score, sourced_company_count, scored_company_count, cumulative_spend_usd, cap_usd, failure_category, retryable, telemetry_degraded, started_at, last_heartbeat_at, finished_at, observed_runtime_seconds, checkpoint_ref, expected_units')
+          .in('scoring_run_id', runIdBatch)
+          .order('scoring_run_id', { ascending: true })
+          .order('icp_ordinal', { ascending: true })
+          .order('icp_execution_id', { ascending: true })
+          .range(from, to),
+      ))
+    } catch (error) {
+      console.warn('[admin:research-lab] benchmark V2 ICP telemetry unavailable', error)
+      return []
+    }
+  }
+  return rows
+}
+
+async function fetchBenchmarkTelemetryByScoringId(
+  supabase: ReturnType<typeof getAdminSupabase>,
+  scoringId: string,
+): Promise<ResearchLabScoringTelemetryRow[]> {
+  try {
+    return await fetchPagedTelemetryRows<ResearchLabScoringTelemetryRow>(
+      'legacy benchmark ICP telemetry',
+      (from, to) => supabase
+        .from('research_lab_private_benchmark_dashboard_telemetry')
+        .select('telemetry_mode, scoring_id, scoring_run_id, icp_execution_id, icp_ref, model_role, phase, execution_kind, retry_round, status, score, sourced_company_count, scored_company_count, cumulative_spend_usd, cap_usd, failure_category, retryable, telemetry_degraded, started_at, last_heartbeat_at, finished_at, observed_runtime_seconds, checkpoint_ref, expected_units')
+        .eq('scoring_id', scoringId)
+        .order('icp_ordinal', { ascending: true })
+        .order('icp_ref', { ascending: true })
+        .range(from, to),
+    )
+  } catch (error) {
+    console.warn('[admin:research-lab] legacy benchmark telemetry unavailable', error)
+    return []
+  }
+}
+
+function buildHistoricalBenchmarkRuns(
+  runGroups: ResearchLabScoringRunRow[][],
+  telemetryRows: ResearchLabScoringTelemetryRow[],
+  bundles: ResearchLabBenchmarkBundleRow[],
+  reports: BenchmarkReportLinkRow[],
+  bundleLinks: ReadonlyMap<string, string>,
+): AdminLabBenchmarkRunSummary[] {
+  return runGroups.flatMap((runGroup) => {
+    const latestRun = [...runGroup].sort(compareScoringRunRowsNewestFirst)[0]
+    const execution = normalizeResearchLabScoringExecution(runGroup, telemetryRows)
+    const scoringId = stringOr(latestRun?.scoring_id)
+    const scoringRunId = stringOr(latestRun?.scoring_run_id)
+    if (!latestRun || !execution || !scoringId || !scoringRunId) return []
+    const linked = correlateResearchLabBenchmarkRun(runGroup, bundles, bundleLinks)
+    const benchmarkBundleId = stringOr(linked.bundle?.benchmark_bundle_id) ?? null
+    const report = benchmarkBundleId
+      ? reports.find((row) => stringOr(row.benchmark_bundle_id) === benchmarkBundleId)
+      : undefined
+    const publicationStatus = stringOr(report?.current_report_status)
+      ?? stringOr(linked.bundle?.current_benchmark_status)
+      ?? stringOr(linked.bundle?.current_event_type)
+      ?? 'unavailable'
+    return [{
+      scoringId,
+      scoringRunId,
+      benchmarkDate: stringOr(latestRun.benchmark_date) ?? null,
+      runAttempt: Math.max(0, Math.round(numberOr(latestRun.run_attempt, 0))),
+      publicationStatus,
+      executionStatus: execution.executionStatus,
+      correlation: linked.correlation,
+      benchmarkBundleId,
+      reportId: stringOr(report?.report_id) ?? null,
+      canonicalPublishedScore:
+        (stringOr(report?.current_report_status) ?? '').toLowerCase() === 'published'
+          ? finiteNumberOrNull(report?.aggregate_score)
+          : null,
+      expectedUnits: execution.expectedUnits,
+      resolvedUnits: execution.resolvedUnits,
+      completedUnits: execution.completedUnits,
+      skippedUnits: execution.skippedUnits,
+      failedUnits: execution.failedUnits,
+      cancelledUnits: execution.cancelledUnits,
+      progressPercent: execution.progressPercent,
+      spendUsd: execution.spendUsd,
+      capUsd: execution.capUsd,
+      failureCategory: execution.failureCategory,
+      retryable: execution.retryable,
+      telemetryMode: execution.telemetryMode,
+      telemetryDegraded: execution.telemetryDegraded,
+      workerRef: execution.workerRef,
+      startedAt: execution.startedAt,
+      completedAt: execution.completedAt,
+      durationSeconds: execution.durationSeconds,
+    }]
+  })
+}
+
+async function buildDailyBenchmarkTelemetry(input: {
+  supabase: ReturnType<typeof getAdminSupabase>
+  metadata: IcpMetadataSnapshot
+  runGroup: ResearchLabScoringRunRow[]
+  execution: ResearchLabScoringExecutionSummary | null
+  telemetryRows: ResearchLabScoringTelemetryRow[]
+  bundles: ResearchLabBenchmarkBundleRow[]
+  reports: BenchmarkReportLinkRow[]
+  bundleLinks: ReadonlyMap<string, string>
+  latestPublishedReport: BenchmarkReportLinkRow | null
+}): Promise<AdminLabDailyBenchmark> {
+  const latestRun = [...input.runGroup].sort(compareScoringRunRowsNewestFirst)[0]
+  const execution = input.execution
+  const latestPublishedReport = input.latestPublishedReport
+  const linked = latestRun
+    ? correlateResearchLabBenchmarkRun(input.runGroup, input.bundles, input.bundleLinks)
+    : { correlation: 'unlinked' as const, bundle: null }
+  if (!execution && !latestPublishedReport) {
+    return emptyDailyBenchmark('No V2 benchmark execution or canonical publication is available yet.')
+  }
+
+  const publishedBundleId = stringOr(latestPublishedReport?.benchmark_bundle_id) ?? null
+  const publishedBundle = publishedBundleId
+    ? input.bundles.find((row) => stringOr(row.benchmark_bundle_id) === publishedBundleId)
+    : undefined
+  const publicationStatus = stringOr(latestPublishedReport?.current_report_status)
+    ?? stringOr(publishedBundle?.current_benchmark_status)
+    ?? stringOr(publishedBundle?.current_event_type)
+    ?? 'unavailable'
+  const benchmarkDate = stringOr(latestRun?.benchmark_date)
+    ?? stringOr(latestPublishedReport?.benchmark_date)
+    ?? null
+  const attempt = latestRun
+    ? Math.max(0, Math.round(numberOr(latestRun.run_attempt, 0)))
+    : null
+  const [providerRows, companyRows] = await Promise.all([
+    execution?.relatedScoringRunIds.length
+      ? fetchBenchmarkProviderEnrichment(input.supabase, execution.relatedScoringRunIds)
+      : Promise.resolve([]),
+    benchmarkDate && attempt !== null
+      ? fetchBenchmarkCompanyEnrichment(input.supabase, benchmarkDate, attempt)
+      : Promise.resolve([]),
+  ])
+  const providerByIcp = rollupCostsByIcp(providerRows)
+  const companiesByIcp = groupCompaniesByIcp(companyRows)
+  const canonicalRows = canonicalizeResearchLabTelemetryRows(input.telemetryRows)
+  const icps = canonicalRows.map((row, index): AdminLabIcpDetail => {
+    const icpRef = stringOr(row.icp_ref) ?? `telemetry-unit-${index + 1}`
+    const metadata = input.metadata.byRef.get(icpRef)
+    const provider = providerByIcp.get(icpRef) ?? emptyCostRollup()
+    const companies = companiesByIcp.get(icpRef) ?? []
+    const status = (stringOr(row.status) ?? 'unknown').toLowerCase()
+    const runtimeStartedAt = isoStringOr(row.started_at) ?? null
+    const runtimeEndedAt = isoStringOr(row.finished_at) ?? null
+    const runtimeSeconds = finiteNumberOrNull(row.observed_runtime_seconds)
     return {
       icpRef,
-      icpHash: meta?.icpHash ?? costs.find((row) => row.icp_ref === icpRef)?.icp_hash ?? null,
-      label: icpLabel(meta, icpRef),
-      industry: meta?.industry ?? null,
-      subIndustry: meta?.subIndustry ?? null,
-      status: processed ? (cost.errorCount > 0 ? 'completed_with_errors' : 'completed') : 'pending',
-      score: processed ? scoreByIcp.get(icpRef) ?? 0 : null,
+      icpHash: null,
+      label: icpLabel(metadata, icpRef),
+      industry: metadata?.industry ?? null,
+      subIndustry: metadata?.subIndustry ?? null,
+      status,
+      score: finiteNumberOrNull(row.score),
       baseScore: null,
       delta: null,
-      spendUsd: cost.spendUsd,
-      budgetUsd: cost.budgetUsd,
-      providerEventCount: cost.eventCount,
-      errorCount: cost.errorCount,
+      spendUsd: finiteNumberOrNull(row.cumulative_spend_usd) ?? 0,
+      budgetUsd: finiteNumberOrNull(row.cap_usd),
+      providerEventCount: provider.eventCount,
+      errorCount: provider.errorCount + (['failed', 'cancelled'].includes(status) ? 1 : 0),
       runtimeStartedAt,
-      runtimeEndedAt: runtimeLastActivityAt,
-      lastActivityAt: runtimeLastActivityAt,
-      runtimeMs,
-      isInProgress: false,
-      failureReason: processed && companyRows.length === 0 && cost.errorCount > 0 ? 'No surfaced companies; provider errors recorded.' : null,
-      hardFailure: processed && companyRows.length === 0 && cost.errorCount > 0,
+      runtimeEndedAt,
+      lastActivityAt:
+        isoStringOr(row.finished_at)
+        ?? isoStringOr(row.last_heartbeat_at)
+        ?? runtimeStartedAt,
+      runtimeMs: runtimeSeconds === null ? null : Math.max(0, Math.round(runtimeSeconds * 1_000)),
+      isInProgress: ['held', 'queued', 'started', 'heartbeat', 'sourcing_completed', 'scoring_started'].includes(status),
+      failureReason: stringOr(row.failure_category) ?? null,
+      hardFailure: ['failed', 'cancelled'].includes(status),
       funnel: null,
-      intentSignals: meta?.intentSignals ?? [],
-      companyScoreCount: companyRows.length,
-      companies: companyRows,
+      intentSignals: metadata?.intentSignals ?? [],
+      companyScoreCount:
+        finiteNumberOrNull(row.scored_company_count)
+        ?? companies.length,
+      companies,
     }
   })
-
-  const icpsProcessed = Math.min(icpsTotal || processedRefs.size, processedRefs.size)
-  const effectiveTotal = Math.max(icpsTotal, icps.length, icpsProcessed)
-  const scoreTotal = icps.reduce((sum, icp) => sum + (icp.score ?? 0), 0)
-  const lastActivityAt = latestIso(
-    ...costs.map((row) => isoStringOr(row.created_at)),
-    ...companies.map((row) => isoStringOr(row.created_at)),
-    isoStringOr(completedBundle?.current_status_at),
-  ) ?? startedAt
-  const latestRelatedDispatch = dispatches.find((row) => {
-    const doc = objectRecord(row.event_doc) ?? {}
-    return stringOr(doc.benchmark_date) === benchmarkDate && Math.round(numberOr(doc.benchmark_attempt, 0)) === attempt
-  }) ?? start
-  const dispatchStatus = (stringOr(latestRelatedDispatch.dispatch_status) ?? stringOr(start.dispatch_status) ?? 'assigned').toLowerCase()
-  const completionAt = isoStringOr(completedBundle?.current_status_at) ?? isoStringOr(completedBundle?.created_at) ?? null
-  const isCompleted = Boolean(completedBundle && timestampOrZero(completionAt) >= timestampOrZero(startedAt))
-  let state: AdminLabTelemetryState = 'active'
-  if (isCompleted) state = 'completed'
-  else if (dispatchStatus === 'failed') state = 'failed'
-  else if (lastActivityAt && Date.now() - timestampOrZero(lastActivityAt) > LIVE_BENCHMARK_STALE_MS) state = 'stalled'
-
-  const latestIcpActivityAt = latestIso(...icps.map((icp) => icp.lastActivityAt)) ?? null
-  for (const icp of icps) {
-    const atWorkfront = Boolean(
-      latestIcpActivityAt &&
-      icp.lastActivityAt &&
-      timestampOrZero(latestIcpActivityAt) - timestampOrZero(icp.lastActivityAt) <= LIVE_ICP_ACTIVITY_COHORT_MS,
-    )
-    icp.isInProgress = state === 'active' && Boolean(icp.runtimeStartedAt) && atWorkfront
-    if (icp.isInProgress) {
-      icp.status = 'in_progress'
-      icp.runtimeEndedAt = null
-      icp.runtimeMs = icp.runtimeStartedAt
-        ? Math.max(0, Date.now() - timestampOrZero(icp.runtimeStartedAt))
-        : null
-    }
-  }
-
-  const stateLabel = state === 'completed' ? 'Completed' : state === 'failed' ? 'Failed' : state === 'stalled' ? 'Stalled' : 'Running'
-  const errors = buildProviderErrors(costs)
-  const spendUsd = roundTelemetry(costs.reduce((sum, row) => sum + numberOr(row.cost_usd, 0), 0))
-  const observedCap = firstFiniteNumber(costs.map((row) => row.cap_usd))
-  const budgetUsd = observedCap === null || effectiveTotal <= 0 ? null : roundTelemetry(observedCap * effectiveTotal)
-  const bundleScore = finiteNumberOrNull(completedBundle?.aggregate_score)
+  const stateInfo = benchmarkExecutionState(execution, publicationStatus)
+  const expectedUnits = execution?.expectedUnits ?? null
+  const resolvedUnits = execution?.resolvedUnits ?? null
+  const errors = buildProviderErrors(providerRows)
+  const lastActivityAt = execution?.completedAt
+    ?? execution?.lastHeartbeatAt
+    ?? isoStringOr(latestRun?.current_status_at)
+    ?? null
+  const executionBundleId = stringOr(linked.bundle?.benchmark_bundle_id) ?? null
+  const publicationCorrelation = publishedBundleId && executionBundleId === publishedBundleId
+    ? linked.correlation
+    : 'unlinked'
 
   return {
-    state,
-    stateLabel,
-    detail: isCompleted
-      ? 'The latest daily baseline bundle completed. Per-ICP cost and company telemetry remains available below.'
-      : `${icpsProcessed} of ${effectiveTotal || 'unknown'} ICPs have emitted provider telemetry. Score so far treats unfinished ICPs as zero; avg processed excludes them.`,
+    state: stateInfo.state,
+    stateLabel: stateInfo.label,
+    detail: benchmarkTelemetryDetail({
+      publicationStatus,
+      publishedScore: finiteNumberOrNull(latestPublishedReport?.aggregate_score),
+      execution,
+      correlation: publicationCorrelation,
+    }),
+    publicationStatus,
+    executionStatus: execution?.executionStatus ?? null,
+    correlation: publicationCorrelation,
+    telemetryMode: execution?.telemetryMode ?? 'missing',
+    telemetryDegraded: execution?.telemetryDegraded ?? true,
+    scoringId: execution?.scoringId ?? null,
+    scoringRunId: execution?.scoringRunId ?? null,
+    publishedBenchmarkBundleId: publishedBundleId,
+    executionBenchmarkBundleId: executionBundleId,
+    reportId: stringOr(latestPublishedReport?.report_id) ?? null,
     benchmarkDate,
     attempt,
-    rollingWindowHash: stringOr(start.rolling_window_hash) ?? metadata.latestRollingWindowHash,
-    workerRef: stringOr(start.worker_ref) ?? null,
-    startedAt,
+    rollingWindowHash:
+      stringOr(latestRun?.rolling_window_hash)
+      ?? stringOr(publishedBundle?.rolling_window_hash)
+      ?? null,
+    workerRef: execution?.workerRef ?? null,
+    startedAt: execution?.startedAt ?? null,
     lastActivityAt,
-    completedAt: completionAt,
-    icpsTotal: effectiveTotal,
-    icpsProcessed,
-    icpsRemaining: Math.max(0, effectiveTotal - icpsProcessed),
-    progressPercent: effectiveTotal > 0 ? Math.min(100, Math.round((icpsProcessed / effectiveTotal) * 100)) : 0,
-    provisionalScore: bundleScore ?? (effectiveTotal > 0 ? roundTelemetry(scoreTotal / effectiveTotal) : null),
-    completedAverageScore: icpsProcessed > 0 ? roundTelemetry(scoreTotal / icpsProcessed) : null,
-    spendUsd,
-    budgetUsd,
-    providerEventCount: costs.length,
-    companyCount: companies.length,
-    errorCount: errors.reduce((sum, item) => sum + item.count, 0),
+    completedAt: execution?.completedAt ?? null,
+    durationSeconds: execution?.durationSeconds ?? null,
+    icpsTotal: expectedUnits,
+    icpsProcessed: resolvedUnits,
+    icpsRemaining:
+      expectedUnits === null || resolvedUnits === null
+        ? null
+        : Math.max(0, expectedUnits - resolvedUnits),
+    completedIcpCount: execution?.completedUnits ?? null,
+    skippedIcpCount: execution?.skippedUnits ?? null,
+    failedIcpCount: execution?.failedUnits ?? null,
+    cancelledIcpCount: execution?.cancelledUnits ?? null,
+    progressPercent: execution?.progressPercent ?? null,
+    publishedScore: finiteNumberOrNull(latestPublishedReport?.aggregate_score),
+    spendUsd: execution?.spendUsd ?? null,
+    budgetUsd: execution?.capUsd ?? null,
+    providerEventCount: providerRows.length,
+    companyCount: companyRows.length,
+    errorCount: errors.reduce((sum, item) => sum + item.count, 0)
+      + (execution?.failedUnits ?? 0)
+      + (execution?.cancelledUnits ?? 0),
     icps,
     errors,
   }
+}
+
+function benchmarkExecutionState(
+  execution: ResearchLabScoringExecutionSummary | null,
+  publicationStatus: string,
+): { state: AdminLabTelemetryState; label: string } {
+  const status = (execution?.executionStatus ?? '').toLowerCase()
+  const terminalProgressIncomplete = status === 'completed'
+    && execution?.expectedUnits !== null
+    && execution?.resolvedUnits !== null
+    && execution?.expectedUnits !== undefined
+    && execution?.resolvedUnits !== undefined
+    && execution.resolvedUnits < execution.expectedUnits
+  if (terminalProgressIncomplete || (execution && execution.telemetryMode === 'missing')) {
+    return { state: 'unknown', label: 'Telemetry degraded' }
+  }
+  if (status === 'completed') return { state: 'completed', label: 'Execution completed' }
+  if (status === 'failed') return { state: 'failed', label: 'Execution failed' }
+  if (status === 'cancelled') return { state: 'failed', label: 'Execution cancelled' }
+  if (['assigned', 'started', 'heartbeat', 'paused', 'resumed', 'restarted'].includes(status)) {
+    const heartbeat = execution?.lastHeartbeatAt ?? execution?.startedAt
+    if (heartbeat && Date.now() - timestampOrZero(heartbeat) > LIVE_BENCHMARK_STALE_MS) {
+      return { state: 'stalled', label: 'Execution stalled' }
+    }
+    return { state: 'active', label: status === 'paused' ? 'Execution paused' : 'Execution running' }
+  }
+  if (publicationStatus.toLowerCase() === 'published') {
+    return { state: 'completed', label: 'Published · execution unavailable' }
+  }
+  return { state: 'idle', label: 'Execution unavailable' }
+}
+
+function benchmarkTelemetryDetail(input: {
+  publicationStatus: string
+  publishedScore: number | null
+  execution: ResearchLabScoringExecutionSummary | null
+  correlation: ReturnType<typeof correlateResearchLabBenchmarkRun>['correlation']
+}): string {
+  const parts: string[] = []
+  const execution = input.execution
+  if (input.publicationStatus.toLowerCase() === 'published' && input.publishedScore !== null) {
+    parts.push(`Published ${input.publishedScore.toFixed(2)}`)
+  } else {
+    parts.push(`Publication ${input.publicationStatus}`)
+  }
+  if (execution && execution.resolvedUnits !== null && execution.expectedUnits !== null) {
+    parts[0] += ` · ${execution.resolvedUnits}/${execution.expectedUnits} resolved`
+  }
+  if (execution?.executionStatus) {
+    const failure = execution.failureCategory ? `: ${execution.failureCategory}` : ''
+    parts.push(`Latest execution ${execution.executionStatus}${failure}`)
+  } else {
+    parts.push('Execution telemetry unavailable')
+  }
+  if (input.correlation === 'unlinked' && execution) {
+    parts.push('Execution is unlinked to the displayed publication; no timestamp-only match was inferred')
+  }
+  if (execution?.telemetryDegraded) {
+    parts.push(`${execution.telemetryMode} telemetry is degraded`)
+  }
+  return `${parts.join('. ')}.`
+}
+
+function telemetryRowsForExecution(
+  rows: ResearchLabScoringTelemetryRow[],
+  execution: ResearchLabScoringExecutionSummary | null,
+): ResearchLabScoringTelemetryRow[] {
+  if (!execution?.scoringId) return []
+  const runIds = new Set(execution.relatedScoringRunIds)
+  return canonicalizeResearchLabTelemetryRows(rows.filter((row) =>
+    stringOr(row.scoring_id) === execution.scoringId
+    && (
+      runIds.size === 0
+      || Boolean(stringOr(row.scoring_run_id) && runIds.has(stringOr(row.scoring_run_id) as string))
+    ),
+  ))
+}
+
+async function fetchBenchmarkBundleLinks(
+  supabase: ReturnType<typeof getAdminSupabase>,
+  runIds: string[],
+): Promise<Map<string, string>> {
+  const links = new Map<string, string>()
+  for (const runIdBatch of chunked(runIds, SUPABASE_IN_FILTER_BATCH_SIZE)) {
+    if (runIdBatch.length === 0) continue
+    let rows: Array<Record<string, unknown>> = []
+    try {
+      rows = await fetchPagedTelemetryRows<Record<string, unknown>>(
+        'benchmark bundle link events',
+        (from, to) => supabase
+          .from('research_lab_scoring_run_events')
+          .select('scoring_run_id, benchmark_bundle_id, occurred_at, event_id')
+          .in('scoring_run_id', runIdBatch)
+          .not('benchmark_bundle_id', 'is', null)
+          .order('scoring_run_id', { ascending: true })
+          .order('occurred_at', { ascending: false })
+          .order('event_id', { ascending: false })
+          .range(from, to),
+      )
+    } catch (error) {
+      console.warn('[admin:research-lab] benchmark bundle link events unavailable', error)
+      continue
+    }
+    for (const row of rows) {
+      const runId = stringOr(row.scoring_run_id)
+      const bundleId = stringOr(row.benchmark_bundle_id)
+      if (runId && bundleId && !links.has(runId)) links.set(runId, bundleId)
+    }
+  }
+  return links
+}
+
+async function fetchBenchmarkBundlesByIds(
+  supabase: ReturnType<typeof getAdminSupabase>,
+  bundleIds: string[],
+): Promise<ResearchLabBenchmarkBundleRow[]> {
+  const rows: ResearchLabBenchmarkBundleRow[] = []
+  for (const batch of chunked(bundleIds, SUPABASE_IN_FILTER_BATCH_SIZE)) {
+    const { data, error } = await supabase
+      .from('research_lab_private_model_benchmark_current')
+      .select('benchmark_bundle_id, benchmark_date, private_model_artifact_hash, rolling_window_hash, aggregate_score, current_benchmark_status, current_event_type, current_status_at, created_at')
+      .in('benchmark_bundle_id', batch)
+    if (error) {
+      console.warn('[admin:research-lab] exact benchmark bundle lookup unavailable', error.message)
+      continue
+    }
+    rows.push(...((data ?? []) as ResearchLabBenchmarkBundleRow[]))
+  }
+  return rows
+}
+
+async function fetchBenchmarkReportsByBundleIds(
+  supabase: ReturnType<typeof getAdminSupabase>,
+  bundleIds: string[],
+): Promise<BenchmarkReportLinkRow[]> {
+  const rows: BenchmarkReportLinkRow[] = []
+  for (const batch of chunked(bundleIds, SUPABASE_IN_FILTER_BATCH_SIZE)) {
+    const { data, error } = await supabase
+      .from('research_lab_public_benchmark_report_current')
+      .select('report_id, benchmark_bundle_id, benchmark_date, aggregate_score, current_report_status, current_status_at, created_at')
+      .in('benchmark_bundle_id', batch)
+      .eq('current_report_status', 'published')
+    if (error) {
+      console.warn('[admin:research-lab] exact benchmark report lookup unavailable', error.message)
+      continue
+    }
+    rows.push(...((data ?? []) as BenchmarkReportLinkRow[]))
+  }
+  return rows
+}
+
+async function fetchBenchmarkProviderEnrichment(
+  supabase: ReturnType<typeof getAdminSupabase>,
+  runIds: string[],
+): Promise<ProviderCostTelemetryRow[]> {
+  const rows: ProviderCostTelemetryRow[] = []
+  for (const batch of chunked(runIds, SUPABASE_IN_FILTER_BATCH_SIZE)) {
+    try {
+      rows.push(...await fetchPagedTelemetryRows<ProviderCostTelemetryRow>(
+        'benchmark provider enrichment',
+        (from, to) => supabase
+          .from('research_lab_provider_cost_events')
+          .select('scoring_id, scoring_run_id, icp_execution_id, candidate_id, benchmark_date, run_scope, run_type, runner_role, provider, endpoint, request_fingerprint, status_code, cost_usd, spent_after_usd, cap_usd, cap_state, icp_ref, icp_hash, created_at, event_doc')
+          .in('scoring_run_id', batch)
+          .order('created_at', { ascending: true, nullsFirst: false })
+          .order('request_fingerprint', { ascending: true })
+          .range(from, to),
+      ))
+    } catch (error) {
+      console.warn('[admin:research-lab] benchmark provider enrichment unavailable', error)
+    }
+  }
+  return rows
+}
+
+async function fetchBenchmarkCompanyEnrichment(
+  supabase: ReturnType<typeof getAdminSupabase>,
+  benchmarkDate: string,
+  attempt: number,
+): Promise<CompanyTelemetryRow[]> {
+  const contextPrefix = `daily-${benchmarkDate}-a${attempt}-%`
+  try {
+    return await fetchPagedTelemetryRows<CompanyTelemetryRow>(
+      'benchmark company enrichment',
+      (from, to) => supabase
+        .from('research_lab_company_label_examples')
+        .select(COMPANY_TELEMETRY_SELECT)
+        .like('context_ref', contextPrefix)
+        .order('created_at', { ascending: true, nullsFirst: false })
+        .order('label_id', { ascending: true })
+        .range(from, to),
+    )
+  } catch (error) {
+    console.warn('[admin:research-lab] benchmark company enrichment unavailable', error)
+    return []
+  }
+}
+
+async function fetchPagedTelemetryRows<T>(
+  label: string,
+  fetchPage: (from: number, to: number) => PromiseLike<unknown>,
+): Promise<T[]> {
+  const rows: T[] = []
+  for (let from = 0; ; from += TELEMETRY_PAGE_SIZE) {
+    const result = await fetchPage(from, from + TELEMETRY_PAGE_SIZE - 1) as {
+      data: unknown[] | null
+      error: { message?: string } | null
+    }
+    if (result.error) throw new Error(`${label} failure — ${result.error.message ?? 'unknown error'}`)
+    const page = (result.data ?? []) as T[]
+    rows.push(...page)
+    if (page.length < TELEMETRY_PAGE_SIZE) break
+  }
+  return rows
+}
+
+function compareScoringRunRowsNewestFirst(
+  a: ResearchLabScoringRunRow,
+  b: ResearchLabScoringRunRow,
+): number {
+  const attemptDiff = numberOr(b.run_attempt, 0) - numberOr(a.run_attempt, 0)
+  if (attemptDiff !== 0) return attemptDiff
+  return timestampOrZero(b.current_status_at ?? b.created_at)
+    - timestampOrZero(a.current_status_at ?? a.created_at)
 }
 
 function emptyDailyBenchmark(detail: string): AdminLabDailyBenchmark {
@@ -1819,6 +2263,16 @@ function emptyDailyBenchmark(detail: string): AdminLabDailyBenchmark {
     state: 'idle',
     stateLabel: 'Idle',
     detail,
+    publicationStatus: 'unavailable',
+    executionStatus: null,
+    correlation: 'unlinked',
+    telemetryMode: 'missing',
+    telemetryDegraded: true,
+    scoringId: null,
+    scoringRunId: null,
+    publishedBenchmarkBundleId: null,
+    executionBenchmarkBundleId: null,
+    reportId: null,
     benchmarkDate: null,
     attempt: null,
     rollingWindowHash: null,
@@ -1826,13 +2280,17 @@ function emptyDailyBenchmark(detail: string): AdminLabDailyBenchmark {
     startedAt: null,
     lastActivityAt: null,
     completedAt: null,
-    icpsTotal: 0,
-    icpsProcessed: 0,
-    icpsRemaining: 0,
-    progressPercent: 0,
-    provisionalScore: null,
-    completedAverageScore: null,
-    spendUsd: 0,
+    durationSeconds: null,
+    icpsTotal: null,
+    icpsProcessed: null,
+    icpsRemaining: null,
+    completedIcpCount: null,
+    skippedIcpCount: null,
+    failedIcpCount: null,
+    cancelledIcpCount: null,
+    progressPercent: null,
+    publishedScore: null,
+    spendUsd: null,
     budgetUsd: null,
     providerEventCount: 0,
     companyCount: 0,
@@ -1861,32 +2319,40 @@ async function fetchChampionTelemetry(
   const candidateIds = uniqueStrings(rewards.map((row) => stringOr(row.candidate_id) ?? null))
   if (bundleIds.length === 0) return []
 
-  const [bundleResult, companyResult, costResult, metadata] = await Promise.all([
+  const [bundleResult, companies, costs, metadata] = await Promise.all([
     supabase
       .from('research_evaluation_score_bundle_current')
       .select('score_bundle_id, ticket_id, run_id, candidate_artifact_hash, score_bundle_doc, current_event_status, current_reason, current_status_at, created_at')
       .in('score_bundle_id', bundleIds)
       .limit(CHAMPION_LIMIT * 2),
     candidateIds.length > 0
-      ? supabase
-          .from('research_lab_company_label_examples')
-          .select(COMPANY_TELEMETRY_SELECT)
-          .in('candidate_id', candidateIds)
-          .limit(LIVE_TELEMETRY_LIMIT)
-      : Promise.resolve({ data: [], error: null }),
+      ? fetchPagedTelemetryRows<CompanyTelemetryRow>(
+          'champion company telemetry',
+          (from, to) => supabase
+            .from('research_lab_company_label_examples')
+            .select(COMPANY_TELEMETRY_SELECT)
+            .in('candidate_id', candidateIds)
+            .order('created_at', { ascending: true, nullsFirst: false })
+            .order('label_id', { ascending: true })
+            .range(from, to),
+        )
+      : Promise.resolve([]),
     candidateIds.length > 0
-      ? supabase
-          .from('research_lab_provider_cost_events')
-          .select('candidate_id, provider, endpoint, request_fingerprint, status_code, cost_usd, spent_after_usd, cap_usd, cap_state, icp_ref, icp_hash, created_at, event_doc')
-          .in('candidate_id', candidateIds)
-          .limit(LIVE_TELEMETRY_LIMIT)
-      : Promise.resolve({ data: [], error: null }),
+      ? fetchPagedTelemetryRows<ProviderCostTelemetryRow>(
+          'champion provider telemetry',
+          (from, to) => supabase
+            .from('research_lab_provider_cost_events')
+            .select('candidate_id, provider, endpoint, request_fingerprint, status_code, cost_usd, spent_after_usd, cap_usd, cap_state, icp_ref, icp_hash, created_at, event_doc')
+            .in('candidate_id', candidateIds)
+            .order('created_at', { ascending: true, nullsFirst: false })
+            .order('request_fingerprint', { ascending: true })
+            .range(from, to),
+        )
+      : Promise.resolve([]),
     metadataPromise,
   ])
 
   const bundles = (bundleResult.data ?? []) as Array<Record<string, unknown>>
-  const companies = (companyResult.data ?? []) as CompanyTelemetryRow[]
-  const costs = (costResult.data ?? []) as ProviderCostTelemetryRow[]
   const bundleById = new Map(bundles.map((row) => [stringOr(row.score_bundle_id) ?? '', row]))
 
   return rewards.map((reward) => {
@@ -2023,12 +2489,6 @@ async function fetchAdminLabRunDetail(
     .eq('ticket_id', loop.ticketId)
     .order('created_at', { ascending: false, nullsFirst: false })
     .limit(200)
-  let companyQuery = supabase
-    .from('research_lab_company_label_examples')
-    .select(COMPANY_TELEMETRY_SELECT)
-    .eq('ticket_id', loop.ticketId)
-    .order('created_at', { ascending: false, nullsFirst: false })
-    .limit(LIVE_TELEMETRY_LIMIT)
   let dispatchQuery = supabase
     .from('research_lab_scoring_dispatch_events')
     .select('dispatch_event_id, dispatch_status, dispatch_type, candidate_id, run_id, score_bundle_id, worker_ref, event_doc, created_at')
@@ -2042,14 +2502,13 @@ async function fetchAdminLabRunDetail(
   if (runId) {
     candidateQuery = candidateQuery.eq('run_id', runId)
     bundleQuery = bundleQuery.eq('run_id', runId)
-    companyQuery = companyQuery.eq('run_id', runId)
     dispatchQuery = dispatchQuery.eq('run_id', runId)
   }
 
-  const [candidateResult, bundleResult, companyResult, dispatchResult, metadata] = await Promise.all([
+  const [candidateResult, bundleResult, companyRows, dispatchResult, metadata] = await Promise.all([
     candidateQuery,
     bundleQuery,
-    companyQuery,
+    fetchRunCompanyTelemetry(supabase, loop.ticketId, runId),
     dispatchQuery,
     fetchIcpMetadata(supabase),
   ])
@@ -2057,7 +2516,6 @@ async function fetchAdminLabRunDetail(
   const sourceErrors = [
     ['candidates', candidateResult.error],
     ['score bundles', bundleResult.error],
-    ['company telemetry', companyResult.error],
     ['dispatch events', dispatchResult.error],
   ] as const
   const unavailableSources = sourceErrors
@@ -2069,21 +2527,27 @@ async function fetchAdminLabRunDetail(
 
   const candidateRows = (candidateResult.data ?? []) as Array<Record<string, unknown>>
   const bundleRows = (bundleResult.data ?? []) as Array<Record<string, unknown>>
-  const companyRows = (companyResult.data ?? []) as CompanyTelemetryRow[]
   const dispatchRows = (dispatchResult.data ?? []) as Array<Record<string, unknown>>
   const candidateIds = uniqueStrings(candidateRows.map((row) => stringOr(row.candidate_id) ?? null))
   const costRows: ProviderCostTelemetryRow[] = []
   for (const batch of chunked(candidateIds, SUPABASE_IN_FILTER_BATCH_SIZE)) {
-    const { data, error } = await supabase
-      .from('research_lab_provider_cost_events')
-      .select('candidate_id, provider, endpoint, request_fingerprint, status_code, cost_usd, spent_after_usd, cap_usd, cap_state, icp_ref, icp_hash, created_at, event_doc')
-      .in('candidate_id', batch)
-      .limit(LIVE_TELEMETRY_LIMIT)
-    if (error) {
-      throw new Error(`Run provider telemetry failure — ${error.message}`)
-    }
-    costRows.push(...((data ?? []) as ProviderCostTelemetryRow[]))
+    costRows.push(...await fetchPagedTelemetryRows<ProviderCostTelemetryRow>(
+      'run provider telemetry',
+      (from, to) => supabase
+        .from('research_lab_provider_cost_events')
+        .select('scoring_id, scoring_run_id, icp_execution_id, candidate_id, provider, endpoint, request_fingerprint, status_code, cost_usd, spent_after_usd, cap_usd, cap_state, icp_ref, icp_hash, created_at, event_doc')
+        .in('candidate_id', batch)
+        .order('created_at', { ascending: true, nullsFirst: false })
+        .order('request_fingerprint', { ascending: true })
+        .range(from, to),
+    ))
   }
+
+  const scoringTelemetry = await fetchCandidateScoringTelemetry(
+    supabase,
+    runId,
+    candidateIds,
+  )
 
   const bundleById = new Map(bundleRows.map((row) => [stringOr(row.score_bundle_id) ?? '', row]))
   const candidates: AdminLabCandidateRunDetail[] = candidateRows.map((candidate) => {
@@ -2097,6 +2561,7 @@ async function fetchAdminLabRunDetail(
     const score = buildScoreBundleIcpDetails(bundle, companies, costs, metadata)
     const aggregates = objectRecord(objectRecord(bundle?.score_bundle_doc)?.aggregates) ?? {}
     const diagnostics = parseAdminLabScoreBundleDiagnostics(bundle?.score_bundle_doc)
+    const execution = scoringTelemetry.byCandidate.get(candidateId) ?? null
     const errors = [
       ...buildProviderErrors(costs, candidateId),
       ...buildDispatchErrors(dispatchRows.filter((row) => stringOr(row.candidate_id) === candidateId)),
@@ -2115,11 +2580,13 @@ async function fetchAdminLabRunDetail(
       baseScore: finiteNumberOrNull(aggregates.base_score),
       meanDelta: finiteNumberOrNull(aggregates.mean_delta),
       deltaLcb: finiteNumberOrNull(aggregates.delta_lcb),
-      spendUsd: roundTelemetry(costs.reduce((sum, row) => sum + numberOr(row.cost_usd, 0), 0)),
-      budgetUsd: totalBudget(score.icps),
+      spendUsd: execution?.spendUsd
+        ?? roundTelemetry(costs.reduce((sum, row) => sum + numberOr(row.cost_usd, 0), 0)),
+      budgetUsd: execution?.capUsd ?? totalBudget(score.icps),
       providerEventCount: costs.length,
       companyCount: companies.length || score.icps.reduce((sum, icp) => sum + icp.companyScoreCount, 0),
       errorCount: errors.reduce((sum, item) => sum + item.count, 0),
+      execution,
       diagnostics,
       artifact: parseCandidateArtifactDetail(candidate),
       icps: score.icps,
@@ -2140,15 +2607,193 @@ async function fetchAdminLabRunDetail(
     runId,
     state: telemetryStateForRun(loop, runId, candidateRows, bundleRows, dispatchRows),
     phase: phaseForRun(loop, runId, candidateRows, bundleRows, dispatchRows),
-    totalSpendUsd: roundTelemetry(costRows.reduce((sum, row) => sum + numberOr(row.cost_usd, 0), 0)),
+    totalSpendUsd: scoringTelemetry.summaries.some((summary) => summary.spendUsd !== null)
+      ? roundTelemetry(scoringTelemetry.summaries.reduce((sum, summary) => sum + (summary.spendUsd ?? 0), 0))
+      : roundTelemetry(costRows.reduce((sum, row) => sum + numberOr(row.cost_usd, 0), 0)),
     totalBudgetUsd,
     providerEventCount: costRows.length,
     companyCount: companyRows.length,
     errorCount: runErrors.reduce((sum, item) => sum + item.count, 0),
+    scoringExecutions: scoringTelemetry.summaries,
     candidates,
     errors: runErrors,
     fetchedAt: new Date().toISOString(),
   }
+}
+
+async function fetchRunCompanyTelemetry(
+  supabase: ReturnType<typeof getAdminSupabase>,
+  ticketId: string,
+  runId: string | null,
+): Promise<CompanyTelemetryRow[]> {
+  return fetchPagedTelemetryRows<CompanyTelemetryRow>(
+    'run company telemetry',
+    (from, to) => {
+      let query = supabase
+        .from('research_lab_company_label_examples')
+        .select(COMPANY_TELEMETRY_SELECT)
+        .eq('ticket_id', ticketId)
+      if (runId) query = query.eq('run_id', runId)
+      return query
+        .order('created_at', { ascending: false, nullsFirst: false })
+        .order('label_id', { ascending: false })
+        .range(from, to)
+    },
+  )
+}
+
+async function fetchCandidateScoringTelemetry(
+  supabase: ReturnType<typeof getAdminSupabase>,
+  sourceRunId: string | null,
+  candidateIds: string[],
+): Promise<{
+  byCandidate: Map<string, ResearchLabScoringExecutionSummary>
+  summaries: ResearchLabScoringExecutionSummary[]
+}> {
+  if (candidateIds.length === 0) return { byCandidate: new Map(), summaries: [] }
+  const runRows: ResearchLabScoringRunRow[] = []
+  const runRowById = new Map<string, ResearchLabScoringRunRow>()
+  const addRunRows = (rows: ResearchLabScoringRunRow[]) => {
+    for (const row of rows) {
+      const runId = stringOr(row.scoring_run_id)
+      if (runId) runRowById.set(runId, row)
+    }
+  }
+  if (sourceRunId && isUuid(sourceRunId)) {
+    const { data, error } = await supabase
+      .from('research_lab_scoring_run_current')
+      .select('scoring_run_id, scoring_id, run_type, run_attempt, source_run_id, ticket_id, candidate_id, expected_icp_count, scheduler_type, worker_ref, current_run_status, current_status_at, current_retryable, current_failure_category, current_telemetry_degraded, started_at, last_heartbeat_at, finished_at, observed_runtime_seconds, created_at')
+      .eq('run_type', 'candidate_scoring')
+      .eq('source_run_id', sourceRunId)
+      .order('created_at', { ascending: false, nullsFirst: false })
+      .limit(500)
+    if (error) console.warn('[admin:research-lab] candidate scoring runs by source unavailable', error.message)
+    else addRunRows((data ?? []) as ResearchLabScoringRunRow[])
+  }
+  for (const batch of chunked(candidateIds, SUPABASE_IN_FILTER_BATCH_SIZE)) {
+    const { data, error } = await supabase
+      .from('research_lab_scoring_run_current')
+      .select('scoring_run_id, scoring_id, run_type, run_attempt, source_run_id, ticket_id, candidate_id, expected_icp_count, scheduler_type, worker_ref, current_run_status, current_status_at, current_retryable, current_failure_category, current_telemetry_degraded, started_at, last_heartbeat_at, finished_at, observed_runtime_seconds, created_at')
+      .eq('run_type', 'candidate_scoring')
+      .in('candidate_id', batch)
+      .order('created_at', { ascending: false, nullsFirst: false })
+      .limit(500)
+    if (error) {
+      console.warn('[admin:research-lab] candidate scoring runs by candidate unavailable', error.message)
+      continue
+    }
+    addRunRows((data ?? []) as ResearchLabScoringRunRow[])
+  }
+  const candidateIdSet = new Set(candidateIds)
+  runRows.push(...[...runRowById.values()].filter((row) => {
+    const candidateId = stringOr(row.candidate_id)
+    const matchesCandidate = Boolean(candidateId && candidateIdSet.has(candidateId))
+    const matchesSource = !sourceRunId || stringOr(row.source_run_id) === sourceRunId
+    return matchesCandidate && matchesSource
+  }))
+  const scoringRunIds = uniqueStrings(runRows.map((row) => stringOr(row.scoring_run_id) ?? null))
+  const telemetryRows = await fetchCandidateTelemetryForRunIds(supabase, scoringRunIds)
+  const groupedRuns = groupResearchLabScoringRuns(runRows)
+  const byCandidate = new Map<string, ResearchLabScoringExecutionSummary>()
+  for (const group of groupedRuns) {
+    const summary = normalizeResearchLabScoringExecution(group, telemetryRows)
+    if (!summary?.candidateId || byCandidate.has(summary.candidateId)) continue
+    byCandidate.set(summary.candidateId, summary)
+  }
+
+  const candidatesMissingTelemetry = candidateIds.filter((candidateId) => !byCandidate.has(candidateId))
+  const legacyRows = await fetchLegacyCandidateTelemetry(
+    supabase,
+    sourceRunId,
+    candidatesMissingTelemetry,
+  )
+  const legacyByScoringId = new Map<string, ResearchLabScoringTelemetryRow[]>()
+  for (const row of legacyRows) {
+    const scoringId = stringOr(row.scoring_id)
+    if (!scoringId) continue
+    const group = legacyByScoringId.get(scoringId) ?? []
+    group.push(row)
+    legacyByScoringId.set(scoringId, group)
+  }
+  for (const [scoringId, rows] of legacyByScoringId) {
+    const candidateId = stringOr(rows[0]?.candidate_id)
+    if (!candidateId || byCandidate.has(candidateId)) continue
+    const expectedUnits = firstFiniteNumber(rows.map((row) => row.expected_units))
+    const summary = normalizeResearchLabScoringExecution([{
+      scoring_id: scoringId,
+      source_run_id: sourceRunId,
+      candidate_id: candidateId,
+      expected_icp_count: expectedUnits,
+      current_telemetry_degraded: true,
+    }], rows)
+    if (summary) byCandidate.set(candidateId, summary)
+  }
+  return { byCandidate, summaries: [...byCandidate.values()] }
+}
+
+async function fetchCandidateTelemetryForRunIds(
+  supabase: ReturnType<typeof getAdminSupabase>,
+  runIds: string[],
+): Promise<ResearchLabScoringTelemetryRow[]> {
+  const rows: ResearchLabScoringTelemetryRow[] = []
+  for (const batch of chunked(runIds, SUPABASE_IN_FILTER_BATCH_SIZE)) {
+    if (batch.length === 0) continue
+    try {
+      rows.push(...await fetchPagedTelemetryRows<ResearchLabScoringTelemetryRow>(
+        'candidate V2 ICP telemetry',
+        (from, to) => supabase
+          .from('research_lab_scoring_dashboard_telemetry')
+          .select('telemetry_mode, scoring_id, scoring_run_id, source_run_id, candidate_id, icp_execution_id, icp_ref, model_role, phase, execution_kind, retry_round, status, score, sourced_company_count, scored_company_count, cumulative_spend_usd, cap_usd, failure_category, retryable, telemetry_degraded, started_at, last_heartbeat_at, finished_at, observed_runtime_seconds, checkpoint_ref, expected_units')
+          .in('scoring_run_id', batch)
+          .order('scoring_run_id', { ascending: true })
+          .order('icp_ordinal', { ascending: true })
+          .order('icp_execution_id', { ascending: true })
+          .range(from, to),
+      ))
+    } catch (error) {
+      console.warn('[admin:research-lab] candidate V2 ICP telemetry unavailable', error)
+      return []
+    }
+  }
+  return rows
+}
+
+async function fetchLegacyCandidateTelemetry(
+  supabase: ReturnType<typeof getAdminSupabase>,
+  sourceRunId: string | null,
+  candidateIds: string[],
+): Promise<ResearchLabScoringTelemetryRow[]> {
+  if (candidateIds.length === 0) return []
+  const rows: ResearchLabScoringTelemetryRow[] = []
+  for (const batch of chunked(candidateIds, SUPABASE_IN_FILTER_BATCH_SIZE)) {
+    try {
+      rows.push(...await fetchPagedTelemetryRows<ResearchLabScoringTelemetryRow>(
+        'legacy candidate ICP telemetry',
+        (from, to) => {
+          let query = supabase
+            .from('research_lab_scoring_dashboard_telemetry')
+            .select('telemetry_mode, scoring_id, scoring_run_id, source_run_id, candidate_id, icp_execution_id, icp_ref, model_role, phase, execution_kind, retry_round, status, score, sourced_company_count, scored_company_count, cumulative_spend_usd, cap_usd, failure_category, retryable, telemetry_degraded, started_at, last_heartbeat_at, finished_at, observed_runtime_seconds, checkpoint_ref, expected_units')
+            .eq('telemetry_mode', 'legacy')
+            .is('scoring_run_id', null)
+            .in('candidate_id', batch)
+          if (sourceRunId && isUuid(sourceRunId)) query = query.eq('source_run_id', sourceRunId)
+          return query
+            .order('scoring_id', { ascending: true })
+            .order('icp_ordinal', { ascending: true })
+            .order('icp_ref', { ascending: true })
+            .range(from, to)
+        },
+      ))
+    } catch (error) {
+      console.warn('[admin:research-lab] legacy candidate ICP telemetry unavailable', error)
+      return []
+    }
+  }
+  return rows
+}
+
+function isUuid(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
 }
 
 function rollupCostsByIcp(rows: ProviderCostTelemetryRow[]): Map<string, IcpCostRollup> {
