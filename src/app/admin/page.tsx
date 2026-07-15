@@ -28,13 +28,12 @@ async function fetchChains(): Promise<AdminRequestsPayload> {
   const host = h.get('x-forwarded-host') ?? h.get('host')
   const proto = h.get('x-forwarded-proto') ?? 'https'
   const base = host ? `${proto}://${host}` : ''
-  // Forward the operator's Authorization header so the API call
-  // re-passes the basic-auth gate. Without this, the server-side
-  // fetch would hit /api/admin and bounce off middleware with 401.
-  const auth = h.get('authorization')
+  // Forward the operator's session cookie because server-side fetches do not
+  // automatically inherit cookies from the incoming page request.
+  const cookie = h.get('cookie')
   const res = await fetch(`${base}/api/admin/requests`, {
     cache: 'no-store',
-    headers: auth ? { authorization: auth } : undefined,
+    headers: cookie ? { cookie } : undefined,
   })
   if (!res.ok) {
     throw new Error(`API returned ${res.status}: ${await res.text()}`)
@@ -47,7 +46,7 @@ async function fetchSubmittedLeads(): Promise<AdminSubmittedLeadsPayload> {
   const host = h.get('x-forwarded-host') ?? h.get('host')
   const proto = h.get('x-forwarded-proto') ?? 'https'
   const base = host ? `${proto}://${host}` : ''
-  const auth = h.get('authorization')
+  const cookie = h.get('cookie')
   const end = new Date()
   const start = new Date(end)
   start.setUTCDate(end.getUTCDate() - 6)
@@ -57,7 +56,7 @@ async function fetchSubmittedLeads(): Promise<AdminSubmittedLeadsPayload> {
   })
   const res = await fetch(`${base}/api/admin/fulfillment-submissions?${params.toString()}`, {
     cache: 'no-store',
-    headers: auth ? { authorization: auth } : undefined,
+    headers: cookie ? { cookie } : undefined,
   })
   if (!res.ok) {
     throw new Error(`API returned ${res.status}: ${await res.text()}`)
@@ -70,10 +69,10 @@ async function fetchResearchLabEconomics(): Promise<ResearchLabEconomicsPayload>
   const host = h.get('x-forwarded-host') ?? h.get('host')
   const proto = h.get('x-forwarded-proto') ?? 'https'
   const base = host ? `${proto}://${host}` : ''
-  const auth = h.get('authorization')
+  const cookie = h.get('cookie')
   const res = await fetch(`${base}/api/admin/research-lab/economics`, {
     cache: 'no-store',
-    headers: auth ? { authorization: auth } : undefined,
+    headers: cookie ? { cookie } : undefined,
   })
   if (!res.ok) {
     const body = await res.json().catch(() => ({}))

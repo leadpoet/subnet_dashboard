@@ -57,11 +57,8 @@ function joinMulti(values: string[]): string {
 }
 
 function adminApiUrl(path: string): string {
-  // If the operator opened /admin via http://user:pass@localhost:3002,
-  // relative fetch URLs inherit that credentialed base URL and browsers
-  // reject the request ("Request cannot be constructed from a URL that
-  // includes credentials"). window.location.origin strips userinfo while
-  // preserving protocol/host/port.
+  // Keep admin API requests on the current origin so the signed session
+  // cookie is included automatically.
   return new URL(path, window.location.origin).toString()
 }
 

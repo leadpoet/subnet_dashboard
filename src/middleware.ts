@@ -1,54 +1,28 @@
 import { NextRequest, NextResponse } from 'next/server'
+import {
+  ADMIN_SESSION_COOKIE,
+  isAdminAuthConfigured,
+  safeAdminRedirectPath,
+  verifyAdminSessionToken,
+} from '@/lib/admin-auth'
 
 /**
- * HTTP Basic Auth gate for the admin surface.
+ * Signed-cookie authentication gate for the admin surface.
  *
- * Why HTTP Basic and not a login page:
- *   - One shared username + password for a two-person operator team.
- *   - No profile storage, no Google OAuth, no session table.
- *   - Browser handles the credential prompt and caches credentials
- *     for the duration of the tab. Zero UI to build or maintain.
- *
- * Threat model:
- *   - This protects PII (lead emails, contact names, intent details)
- *     from drive-by access by anyone who guesses the /admin URL.
- *   - It is NOT a defense against a server compromise. If the
- *     environment variables leak, the password leaks. Pick a 24+
- *     character random password (see .env.example) and rotate it
- *     if the env ever leaks.
- *
- * Configure via env vars on the deploy target:
- *   ADMIN_USER         (e.g. "leadpoet")
- *   ADMIN_PASS         (24+ char random string)
- *
- * If either env var is missing, the admin surface returns 503 with
- * a clear error instead of silently allowing access. Local development
- * on loopback hosts is exempt so embedded browsers that suppress the
- * native Basic Auth prompt can still load the admin UI.
- *
- * Runtime: this runs in the Edge runtime (Next's default for
- * middleware) so we cannot use node:crypto or Buffer. Constant-time
- * comparison is implemented manually below using a XOR-OR pattern.
+ * Operators sign in through /admin/login using the shared ADMIN_USER and
+ * ADMIN_PASS credentials. A signed, HttpOnly cookie keeps the standalone
+ * home-screen experience authenticated across launches while still protecting
+ * every /admin page and /api/admin endpoint.
  */
 
-// matcher: only intercept admin routes. The public dashboard at "/"
-// stays auth-free as before.
 export const config = {
   matcher: ['/admin/:path*', '/api/admin/:path*'],
 }
 
-function unauthorized(): NextResponse {
-  // The realm string is shown by the browser in the credential prompt.
-  // Keep it terse + branded so operators know they're hitting the right
-  // surface.
-  return new NextResponse('Authentication required', {
-    status: 401,
-    headers: {
-      'WWW-Authenticate': 'Basic realm="Leadpoet Admin", charset="UTF-8"',
-      'Cache-Control': 'no-store',
-    },
-  })
-}
+const PUBLIC_ADMIN_PATHS = new Set([
+  '/admin/login',
+  '/api/admin/login',
+])
 
 function misconfigured(): NextResponse {
   return new NextResponse(
@@ -57,88 +31,40 @@ function misconfigured(): NextResponse {
   )
 }
 
-function isLoopbackDev(req: NextRequest): boolean {
-  if (process.env.NODE_ENV !== 'development') return false
-
-  const hostname = req.nextUrl.hostname
-  return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1'
+function clearInvalidSession(response: NextResponse, hadSessionCookie: boolean): NextResponse {
+  if (hadSessionCookie) response.cookies.delete(ADMIN_SESSION_COOKIE)
+  return response
 }
 
-/**
- * Constant-time string comparison.
- *
- * Pure-JS implementation that works on both the Edge runtime and
- * Node. We XOR every byte and OR the result into an accumulator,
- * iterating over a fixed length (max of both inputs) so the loop
- * count itself does not leak the expected secret's length.
- *
- * The final result is true only if every byte matched AND the
- * lengths matched.
- */
-function safeEquals(a: string, b: string): boolean {
-  const encoder = new TextEncoder()
-  const aBytes = encoder.encode(a)
-  const bBytes = encoder.encode(b)
-  const len = Math.max(aBytes.length, bBytes.length, 1)
-  let diff = aBytes.length ^ bBytes.length
-  for (let i = 0; i < len; i++) {
-    const x = i < aBytes.length ? aBytes[i] : 0
-    const y = i < bBytes.length ? bBytes[i] : 0
-    diff |= x ^ y
-  }
-  return diff === 0
-}
+export async function middleware(req: NextRequest): Promise<NextResponse> {
+  if (!isAdminAuthConfigured()) return misconfigured()
 
-/**
- * Edge-compatible base64 decode that produces a UTF-8 string.
- *
- * atob() returns a "binary string" where each char's code point is
- * the original byte. We re-decode that as UTF-8 to recover the
- * original "user:pass" payload, which may contain unicode chars.
- */
-function decodeBase64(b64: string): string | null {
-  try {
-    const binary = atob(b64)
-    const bytes = new Uint8Array(binary.length)
-    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
-    return new TextDecoder().decode(bytes)
-  } catch {
-    return null
-  }
-}
+  const pathname = req.nextUrl.pathname
+  const token = req.cookies.get(ADMIN_SESSION_COOKIE)?.value
+  const authenticated = await verifyAdminSessionToken(token)
 
-export function middleware(req: NextRequest): NextResponse {
-  if (isLoopbackDev(req)) {
-    return NextResponse.next()
+  if (pathname === '/admin/login' && authenticated) {
+    const destination = safeAdminRedirectPath(req.nextUrl.searchParams.get('next'))
+    return NextResponse.redirect(new URL(destination, req.url))
   }
 
-  const expectedUser = process.env.ADMIN_USER
-  const expectedPass = process.env.ADMIN_PASS
-  if (!expectedUser || !expectedPass) {
-    return misconfigured()
+  if (PUBLIC_ADMIN_PATHS.has(pathname)) {
+    return clearInvalidSession(NextResponse.next(), Boolean(token) && !authenticated)
   }
 
-  const authHeader = req.headers.get('authorization') ?? ''
-  if (!authHeader.toLowerCase().startsWith('basic ')) {
-    return unauthorized()
+  if (authenticated) return NextResponse.next()
+
+  if (pathname.startsWith('/api/admin/')) {
+    return clearInvalidSession(
+      NextResponse.json(
+        { error: 'Authentication required' },
+        { status: 401, headers: { 'Cache-Control': 'no-store' } },
+      ),
+      Boolean(token),
+    )
   }
 
-  const decoded = decodeBase64(authHeader.slice(6).trim())
-  if (decoded === null) {
-    return unauthorized()
-  }
-  // "user:pass". Split on the FIRST colon only so passwords containing
-  // colons aren't truncated.
-  const colonAt = decoded.indexOf(':')
-  if (colonAt < 0) {
-    return unauthorized()
-  }
-  const user = decoded.slice(0, colonAt)
-  const pass = decoded.slice(colonAt + 1)
-
-  if (!safeEquals(user, expectedUser) || !safeEquals(pass, expectedPass)) {
-    return unauthorized()
-  }
-
-  return NextResponse.next()
+  const loginUrl = new URL('/admin/login', req.url)
+  loginUrl.searchParams.set('next', `${pathname}${req.nextUrl.search}`)
+  return clearInvalidSession(NextResponse.redirect(loginUrl), Boolean(token))
 }
