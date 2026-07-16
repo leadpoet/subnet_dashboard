@@ -38,6 +38,7 @@ function findPythonPath(): string {
 const globalForMetagraph = globalThis as unknown as {
   metagraphCache: { data: MetagraphData; timestamp: number } | null
   inFlightRequest: Promise<MetagraphData> | null
+  inFlightStartedAt: number
 }
 
 if (!globalForMetagraph.metagraphCache) {
@@ -45,6 +46,31 @@ if (!globalForMetagraph.metagraphCache) {
 }
 if (!globalForMetagraph.inFlightRequest) {
   globalForMetagraph.inFlightRequest = null
+}
+if (!globalForMetagraph.inFlightStartedAt) {
+  globalForMetagraph.inFlightStartedAt = 0
+}
+
+// A refresh that outlives the Python timeout plus the RPC fallback has hung;
+// stop treating it as "in flight" so the next request can start a fresh
+// refresh instead of the snapshot silently aging toward the stale ceiling.
+const IN_FLIGHT_MAX_AGE_MS = 150 * 1000
+
+function inFlightRefresh(): Promise<MetagraphData> | null {
+  const pending = globalForMetagraph.inFlightRequest
+  if (!pending) return null
+  if (Date.now() - globalForMetagraph.inFlightStartedAt > IN_FLIGHT_MAX_AGE_MS) {
+    console.warn('[Metagraph] Discarding hung in-flight refresh')
+    globalForMetagraph.inFlightRequest = null
+    return null
+  }
+  return pending
+}
+
+function trackInFlight(promise: Promise<MetagraphData>): Promise<MetagraphData> {
+  globalForMetagraph.inFlightRequest = promise
+  globalForMetagraph.inFlightStartedAt = Date.now()
+  return promise
 }
 
 // One Bittensor block is roughly 12 seconds. A 30-second snapshot keeps the
@@ -656,12 +682,29 @@ async function fetchMetagraphFromPython(): Promise<MetagraphData> {
 }
 
 // Fetch metagraph: try Python first, fall back to RPC
+// When the Python fetch fails it burns its full 120s timeout before the RPC
+// fallback even starts, so consecutive failures stretched snapshot staleness
+// to many minutes. After a failure, skip straight to RPC for a cooldown
+// window instead of re-paying the timeout on every refresh.
+const PYTHON_FAILURE_COOLDOWN_MS = 10 * 60 * 1000
+let pythonFailedAt = 0
+
 async function fetchMetagraphFromBittensor(): Promise<MetagraphData> {
   // Try Python script first (more complete data including alpha price)
-  try {
-    return await fetchMetagraphFromPython()
-  } catch {
-    console.log('[Metagraph] Python unavailable, falling back to RPC...')
+  if (Date.now() - pythonFailedAt > PYTHON_FAILURE_COOLDOWN_MS) {
+    try {
+      const data = await fetchMetagraphFromPython()
+      pythonFailedAt = 0
+      return data
+    } catch (error) {
+      pythonFailedAt = Date.now()
+      console.log(
+        '[Metagraph] Python unavailable, falling back to RPC (cooldown 10m):',
+        error instanceof Error ? error.message.slice(0, 200) : error,
+      )
+    }
+  } else {
+    console.log('[Metagraph] Python in failure cooldown - using RPC directly')
   }
 
   // Fallback: direct RPC query (works without Python/bittensor)
@@ -770,7 +813,7 @@ export async function fetchMetagraph(): Promise<MetagraphData> {
   // Once a successful snapshot exists, return it immediately and refresh in
   // the background. This keeps a slow Python/RPC call off the request path.
   if (cached && cacheAge < METAGRAPH_STALE_TTL && cached.data.totalNeurons > 0) {
-    if (!globalForMetagraph.inFlightRequest) {
+    if (!inFlightRefresh()) {
       const refreshPromise = (async () => {
         try {
           const data = await fetchMetagraphFromBittensor()
@@ -782,19 +825,22 @@ export async function fetchMetagraph(): Promise<MetagraphData> {
           globalForMetagraph.inFlightRequest = null
         }
       })()
-      globalForMetagraph.inFlightRequest = refreshPromise
+      trackInFlight(refreshPromise)
       void refreshPromise.catch((error) => {
         console.warn('[Metagraph] Background refresh failed; keeping stale snapshot', error)
       })
     }
-    console.log('[Metagraph] Cache STALE - serving snapshot while refreshing')
+    console.log(
+      `[Metagraph] Cache STALE (${Math.round(cacheAge / 1000)}s old) - serving snapshot while refreshing`,
+    )
     return withLiveBlock(withFreshnessDefaults(cached.data))
   }
 
   // If a request is already in flight, wait for it (deduplication)
-  if (globalForMetagraph.inFlightRequest) {
+  const pending = inFlightRefresh()
+  if (pending) {
     console.log('[Metagraph] Waiting for in-flight request')
-    return globalForMetagraph.inFlightRequest
+    return pending.then((data) => withLiveBlock(data))
   }
 
   // Fetch fresh data with deduplication
@@ -811,6 +857,6 @@ export async function fetchMetagraph(): Promise<MetagraphData> {
     }
   })()
 
-  globalForMetagraph.inFlightRequest = fetchPromise
-  return fetchPromise
+  trackInFlight(fetchPromise)
+  return fetchPromise.then((data) => withLiveBlock(data))
 }
