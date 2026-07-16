@@ -31,6 +31,11 @@ import {
   type ResearchLabTerminalReceiptEvent,
 } from '@/lib/research-lab-compute-spend'
 import { fetchGatewayPcr0Acceptance } from '@/lib/research-lab-pcr0-readiness'
+import {
+  fetchGatewayDeployment,
+  gatewayCommitFreshness,
+  type GatewayCommitFreshness,
+} from '@/lib/gateway-deployment'
 import { fetchMetagraph } from '@/lib/metagraph'
 import {
   evaluateResearchLabAlerts,
@@ -477,6 +482,16 @@ export type AdminLabRepositorySummary = {
   commitMessage: string | null
   authorLogin: string | null
   checkedAt: string
+  gatewaySourceAvailable: boolean
+  gatewayUnavailableReason: string | null
+  gatewayCommitSha: string | null
+  gatewayBranch: string | null
+  gatewayBuildId: string | null
+  gatewayBuiltAt: string | null
+  gatewayLoadedAt: string | null
+  gatewayCommitSource: string | null
+  gatewayCheckedAt: string | null
+  commitFreshness: GatewayCommitFreshness
 }
 
 export type AdminLabDataFreshness = {
@@ -4933,6 +4948,27 @@ async function fetchSourcingModelSummary(
 }
 
 async function fetchLeadpoetRepositorySummary(): Promise<AdminLabRepositorySummary> {
+  const [repository, gateway] = await Promise.all([
+    fetchLeadpoetRepositoryHead(),
+    fetchGatewayDeployment({ gatewayUrl: LEADPOET_GATEWAY_URL }),
+  ])
+
+  return {
+    ...repository,
+    gatewaySourceAvailable: gateway.sourceAvailable,
+    gatewayUnavailableReason: gateway.unavailableReason,
+    gatewayCommitSha: gateway.commitSha,
+    gatewayBranch: gateway.branch,
+    gatewayBuildId: gateway.buildId,
+    gatewayBuiltAt: gateway.builtAt,
+    gatewayLoadedAt: gateway.loadedAt,
+    gatewayCommitSource: gateway.commitSource,
+    gatewayCheckedAt: gateway.checkedAt,
+    commitFreshness: gatewayCommitFreshness(gateway.commitSha, repository.commitSha),
+  }
+}
+
+async function fetchLeadpoetRepositoryHead() {
   const checkedAt = new Date().toISOString()
   try {
     const headers: Record<string, string> = {

@@ -361,6 +361,16 @@ type AdminLabRepositorySummary = {
   commitMessage: string | null
   authorLogin: string | null
   checkedAt: string
+  gatewaySourceAvailable: boolean
+  gatewayUnavailableReason: string | null
+  gatewayCommitSha: string | null
+  gatewayBranch: string | null
+  gatewayBuildId: string | null
+  gatewayBuiltAt: string | null
+  gatewayLoadedAt: string | null
+  gatewayCommitSource: string | null
+  gatewayCheckedAt: string | null
+  commitFreshness: 'latest' | 'behind' | 'unknown'
 }
 
 type AdminLabDataFreshness = {
@@ -1456,11 +1466,29 @@ function LeadpoetRepositoryPopover({
   repository: AdminLabRepositorySummary
 }) {
   const hoverPopover = useHoverPopover()
-  const tone = sourcingModelAlignmentTone(repository.sourceAvailable, false)
-  const commitUrl = githubCommitUrl(repository.repositoryUrl, repository.commitSha)
-  const triggerLabel = repository.commitSha
-    ? `LeadPoet ${repository.branch} commit ${repository.commitSha}`
-    : 'View LeadPoet repository details'
+  const isLatest = repository.commitFreshness === 'latest'
+  const isBehind = repository.commitFreshness === 'behind'
+  const tone = sourcingModelAlignmentTone(isLatest, isBehind)
+  const gatewayCommitUrl = githubCommitUrl(repository.repositoryUrl, repository.gatewayCommitSha)
+  const latestCommitUrl = githubCommitUrl(repository.repositoryUrl, repository.commitSha)
+  const state: AdminHealthState = isLatest ? 'healthy' : isBehind ? 'degraded' : 'unknown'
+  const stateLabel = isLatest
+    ? 'Current'
+    : isBehind
+      ? 'Behind'
+      : repository.gatewaySourceAvailable
+        ? 'Unknown'
+        : 'Unavailable'
+  const comparisonCopy = isLatest
+    ? `Gateway is on the latest ${repository.branch} commit`
+    : isBehind
+      ? `Gateway is behind latest ${repository.branch} commit${repository.commitSha ? ` ${compactHash(repository.commitSha)}` : ''}`
+      : !repository.gatewaySourceAvailable
+        ? 'Gateway commit is unavailable'
+        : 'Latest-commit comparison is unavailable'
+  const triggerLabel = repository.gatewayCommitSha
+    ? `LeadPoet gateway commit ${repository.gatewayCommitSha} · ${stateLabel}`
+    : 'View LeadPoet gateway commit details'
 
   return (
     <Popover open={hoverPopover.open} onOpenChange={hoverPopover.setOpen}>
@@ -1506,16 +1534,13 @@ function LeadpoetRepositoryPopover({
               <Github className="h-3.5 w-3.5" style={{ color: tone.color }} aria-hidden />
             </div>
             <div className="min-w-0">
-              <div className="text-sm font-medium">LeadPoet repository</div>
+              <div className="text-sm font-medium">LeadPoet gateway</div>
               <div className="mt-0.5 text-[10px]" style={{ color: 'var(--text-tertiary)' }}>
-                Latest commit on {repository.owner}/{repository.name}
+                Deployed commit vs latest {repository.owner}/{repository.name}
               </div>
             </div>
           </div>
-          <StatePill
-            state={repository.sourceAvailable ? 'healthy' : 'unknown'}
-            label={repository.sourceAvailable ? 'Available' : 'Unavailable'}
-          />
+          <StatePill state={state} label={stateLabel} />
         </div>
 
         <div className="space-y-3 p-4">
@@ -1524,18 +1549,18 @@ function LeadpoetRepositoryPopover({
             style={{ borderColor: tone.borderColor, background: tone.background }}
           >
             <div className="text-[10px] uppercase tracking-[0.12em]" style={{ color: 'var(--text-tertiary)' }}>
-              Latest {repository.branch} commit
+              Gateway commit
             </div>
-            {repository.commitSha && commitUrl ? (
+            {repository.gatewayCommitSha && gatewayCommitUrl ? (
               <a
-                href={commitUrl}
+                href={gatewayCommitUrl}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="premium-focus mt-1.5 block rounded-sm break-all font-mono text-xs leading-relaxed underline-offset-4 hover:underline"
                 style={{ color: tone.color }}
                 title="Open commit in a new tab"
               >
-                {repository.commitSha}
+                {repository.gatewayCommitSha}
               </a>
             ) : (
               <code className="mt-1.5 block text-xs leading-relaxed" style={{ color: tone.color }}>
@@ -1544,34 +1569,49 @@ function LeadpoetRepositoryPopover({
             )}
             <div className="mt-2 flex items-center gap-2 text-[10px]" style={{ color: tone.color }}>
               <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: tone.color }} aria-hidden />
-              <span>{repository.commitMessage ?? 'Latest commit details are unavailable'}</span>
+              <span>{comparisonCopy}</span>
             </div>
           </div>
 
-          {!repository.sourceAvailable ? (
+          {!repository.gatewaySourceAvailable || !repository.sourceAvailable ? (
             <div
               className="rounded-lg border px-3 py-2 text-[11px] leading-relaxed"
               style={{ borderColor: 'var(--surface-border)', background: 'var(--surface)', color: 'var(--text-secondary)' }}
             >
-              LeadPoet repository telemetry is unavailable{repository.unavailableReason ? `: ${repository.unavailableReason}` : '.'}
+              {!repository.gatewaySourceAvailable
+                ? `Gateway deployment telemetry is unavailable${repository.gatewayUnavailableReason ? `: ${repository.gatewayUnavailableReason}` : '.'}`
+                : `LeadPoet repository telemetry is unavailable${repository.unavailableReason ? `: ${repository.unavailableReason}` : '.'}`}
             </div>
           ) : null}
 
           <div className="grid grid-cols-2 gap-2">
             <SourcingModelDetail
-              label="Commit"
-              value={repository.commitSha}
-              href={commitUrl}
+              label="Gateway commit"
+              value={repository.gatewayCommitSha}
+              href={gatewayCommitUrl}
               compact
             />
-            <SourcingModelDetail label="Branch" value={repository.branch} />
             <SourcingModelDetail
-              label="Committed"
+              label={`Latest ${repository.branch}`}
+              value={repository.commitSha}
+              href={latestCommitUrl}
+              compact
+            />
+            <SourcingModelDetail label="Gateway branch" value={repository.gatewayBranch ?? repository.branch} />
+            <SourcingModelDetail
+              label="Gateway built"
+              value={repository.gatewayBuiltAt ? formatDateTime(repository.gatewayBuiltAt) : null}
+            />
+            <SourcingModelDetail
+              label={`Latest ${repository.branch} committed`}
               value={repository.committedAt ? formatDateTime(repository.committedAt) : null}
             />
-            <SourcingModelDetail label="Author" value={repository.authorLogin} />
+            <SourcingModelDetail label={`Latest ${repository.branch} author`} value={repository.authorLogin} />
             <SourcingModelDetail label="Repository" value={`${repository.owner}/${repository.name}`} />
-            <SourcingModelDetail label="Checked" value={formatDateTime(repository.checkedAt)} />
+            <SourcingModelDetail
+              label="Checked"
+              value={formatDateTime(repository.gatewayCheckedAt ?? repository.checkedAt)}
+            />
           </div>
         </div>
       </PopoverContent>
