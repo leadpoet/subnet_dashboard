@@ -426,11 +426,6 @@ export function AdminMetagraph() {
 
       <div className="grid gap-2 p-3 md:grid-cols-2 xl:grid-cols-4">
         <SummaryCard
-          label="Official SN71 Epoch"
-          value={epochLoading || epochState === null ? '—' : formatAmount(epochState.subnetEpochIndex, 0)}
-          detail={epochState ? `SubnetEpochIndex · best block ${formatAmount(epochState.currentBlock, 0)}` : undefined}
-        />
-        <SummaryCard
           label="Epoch Block Position"
           value={epochLoading || epochState === null ? '—' : `${formatAmount(epochState.blocksElapsed, 0)} elapsed`}
           detail={epochState ? `${formatAmount(epochState.blocksRemaining, 0)} remaining · tempo ${formatAmount(epochState.tempo, 0)}` : undefined}
@@ -440,6 +435,11 @@ export function AdminMetagraph() {
           label="Time Until Next Epoch"
           value={epochLoading || nextEpochSeconds === null ? '—' : formatEpochMinutes(nextEpochSeconds)}
           progress={timeRemainingPercent}
+        />
+        <SummaryCard
+          label="Official SN71 Epoch"
+          value={epochLoading || epochState === null ? '—' : formatAmount(epochState.subnetEpochIndex, 0)}
+          detail={epochState ? `SubnetEpochIndex · best block ${formatAmount(epochState.currentBlock, 0)}` : undefined}
         />
         <SummaryCard
           label="Active validators"

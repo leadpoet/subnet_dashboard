@@ -335,8 +335,8 @@ class Subtensor:
   const timeCard = metagraphUiSource.indexOf('label="Time Until Next Epoch"')
   const activeCard = metagraphUiSource.indexOf('label="Active validators"')
   assert.ok(
-    officialEpochCard < blocksCard && blocksCard < timeCard && timeCard < activeCard,
-    'official epoch identity, position, timing, and validators should render in order',
+    blocksCard < timeCard && timeCard < officialEpochCard && officialEpochCard < activeCard,
+    'epoch position, timing, official identity, and validators should render in order',
   )
   assert.match(metagraphUiSource, /\.filter\(\(row\) => !row\.isMiner\)/)
   assert.match(metagraphUiSource, /formatAmount\(activeRows\.length, 0\)\}\/\$\{formatAmount\(rows\.length, 0\)/)
