@@ -118,6 +118,7 @@ try {
   process.env.PYTHON_PATH = unavailablePython
 
   let blockMode = 'finalized'
+  let liveBestHeadCalls = 0
   const payload = neuronLitePayload()
   const epochStorageValues = [
     storageUnsigned(360, 2),
@@ -172,7 +173,11 @@ try {
 
     if (request.method === 'chain_getHeader') {
       const isFinalizedHeader = request.params.length === 1
-      const result = blockMode === 'unavailable'
+      if (!isFinalizedHeader) liveBestHeadCalls += 1
+      const liveAttemptUnavailable = !isFinalizedHeader && (
+        blockMode === 'unavailable' || (blockMode === 'flaky-live' && liveBestHeadCalls === 1)
+      )
+      const result = liveAttemptUnavailable
         ? null
         : { number: isFinalizedHeader ? '0x10f447' : '0x10f44a' }
       return { ok: true, status: 200, json: async () => ({ result }) }
@@ -221,13 +226,22 @@ try {
   blockMode = 'finalized'
   const liveCachedRead = await fetchMetagraph()
   assert.equal(liveCachedRead.currentBlock, 1_111_114, 'cached metagraph reads should overlay the live best head')
+
+  blockMode = 'flaky-live'
+  liveBestHeadCalls = 0
+  const recoveredLiveCachedRead = await fetchMetagraph()
+  assert.equal(recoveredLiveCachedRead.currentBlock, 1_111_114, 'live best-head reads should retry once')
+  assert.equal(liveBestHeadCalls, 2, 'a failed live best-head read should be retried exactly once')
+
   blockMode = 'unavailable'
+  liveBestHeadCalls = 0
   const failedLiveCachedRead = await fetchMetagraph()
   assert.equal(
     failedLiveCachedRead.currentBlock,
     null,
     'a failed live best-head read must not fall back to the cached snapshot block',
   )
+  assert.equal(liveBestHeadCalls, 2, 'live best-head unavailability should stop after two attempts')
 
   const { blocksUntilNextSubnetEpoch } = require(join(outDir, 'subnet-epoch.js'))
   assert.equal(blocksUntilNextSubnetEpoch({
@@ -330,6 +344,10 @@ class Subtensor:
   const metagraphRouteSource = await readFile(resolve('src/app/api/metagraph/route.ts'), 'utf8')
   assert.match(metagraphRouteSource, /private, no-store, max-age=0/)
   assert.doesNotMatch(metagraphRouteSource, /stale-while-revalidate/)
+  const weightsAlertsSource = await readFile(resolve('src/app/admin/_components/AdminWeightsAlerts.tsx'), 'utf8')
+  assert.match(weightsAlertsSource, /const CONSECUTIVE_FAILURES_BEFORE_ALERT = 2/)
+  assert.match(weightsAlertsSource, /setConsecutiveFailures\(\(count\) => payload\.currentBlock === null \? count \+ 1 : 0\)/)
+  assert.match(weightsAlertsSource, /consecutiveFailures >= CONSECUTIVE_FAILURES_BEFORE_ALERT/)
   const officialEpochCard = metagraphUiSource.indexOf('label="Official SN71 Epoch"')
   const blocksCard = metagraphUiSource.indexOf('label="Epoch Block Position"')
   const timeCard = metagraphUiSource.indexOf('label="Time Until Next Epoch"')

@@ -5,6 +5,9 @@ import { AlertTriangle } from 'lucide-react'
 import type { MetagraphData } from '@/lib/types'
 
 const REFRESH_INTERVAL_MS = 30_000
+// A single best-head RPC miss is common enough that it should not page an
+// operator. Two consecutive misses still surface a real outage within ~30s.
+const CONSECUTIVE_FAILURES_BEFORE_ALERT = 2
 const EPOCH_LENGTH = 360
 // A validator that sets weights every epoch shows at most ~374 blocks
 // between sets (pos 345 one epoch, pos 359 the next). Anything past 380
@@ -62,6 +65,7 @@ function buildRows(data: MetagraphPayload | null): WatchRow[] {
 export function AdminWeightsAlerts() {
   const [data, setData] = useState<MetagraphPayload | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [consecutiveFailures, setConsecutiveFailures] = useState(0)
 
   const refresh = useCallback(async () => {
     try {
@@ -71,8 +75,10 @@ export function AdminWeightsAlerts() {
       if (payload.error) throw new Error(payload.error)
       setData(payload)
       setError(null)
+      setConsecutiveFailures((count) => payload.currentBlock === null ? count + 1 : 0)
     } catch (fetchError) {
       setError(fetchError instanceof Error ? fetchError.message : 'Failed to load weights watch')
+      setConsecutiveFailures((count) => count + 1)
     }
   }, [])
 
@@ -87,9 +93,12 @@ export function AdminWeightsAlerts() {
   const epoch = data?.currentBlock !== null && data?.currentBlock !== undefined
     ? Math.floor(data.currentBlock / EPOCH_LENGTH)
     : null
-  const monitorError = error ?? (data?.currentBlock === null
+  const currentMonitorError = error ?? (data?.currentBlock === null
     ? 'Live chain block unavailable; weight freshness cannot be verified.'
     : null)
+  const monitorError = consecutiveFailures >= CONSECUTIVE_FAILURES_BEFORE_ALERT
+    ? currentMonitorError
+    : null
 
   if (monitorError) {
     return (

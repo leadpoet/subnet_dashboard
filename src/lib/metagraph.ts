@@ -761,27 +761,46 @@ export async function fetchMetagraphFresh(): Promise<MetagraphData> {
 // read fails, return no block instead of silently presenting the snapshot's
 // cached head as current.
 const LIVE_BLOCK_TIMEOUT_MS = 4000
+const LIVE_BLOCK_ATTEMPTS = 2
 
 async function fetchLiveBlockNumber(): Promise<number | null> {
-  try {
-    const response = await fetch(SUBTENSOR_RPC, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        jsonrpc: '2.0',
-        method: 'chain_getHeader',
-        params: [],
-        id: 90,
-      }),
-      signal: AbortSignal.timeout(LIVE_BLOCK_TIMEOUT_MS),
-    })
-    if (!response.ok) return null
-    const json = await response.json() as RpcResponse<{ number?: unknown }>
-    if (json.error || !json.result) return null
-    return parseBlockNumber(json.result.number)
-  } catch {
-    return null
+  let lastError: unknown = null
+
+  for (let attempt = 1; attempt <= LIVE_BLOCK_ATTEMPTS; attempt += 1) {
+    try {
+      const response = await fetch(SUBTENSOR_RPC, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          method: 'chain_getHeader',
+          params: [],
+          id: 90,
+        }),
+        signal: AbortSignal.timeout(LIVE_BLOCK_TIMEOUT_MS),
+      })
+      if (!response.ok) {
+        throw new Error(`chain_getHeader returned HTTP ${response.status}`)
+      }
+
+      const json = await response.json() as RpcResponse<{ number?: unknown }>
+      if (json.error || !json.result) {
+        throw new Error(json.error?.message || 'chain_getHeader returned an empty result')
+      }
+
+      const block = parseBlockNumber(json.result.number)
+      if (block === null) throw new Error('chain_getHeader returned an invalid block number')
+      return block
+    } catch (error) {
+      lastError = error
+    }
   }
+
+  console.warn(
+    `[Metagraph] Live best-head lookup failed after ${LIVE_BLOCK_ATTEMPTS} attempts:`,
+    lastError,
+  )
+  return null
 }
 
 async function withLiveBlock(data: MetagraphData): Promise<MetagraphData> {
