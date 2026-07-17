@@ -191,7 +191,12 @@ try {
   }
 
   const require = createRequire(import.meta.url)
-  const { clearMetagraphCache, fetchMetagraph, fetchMetagraphFresh } = require(join(outDir, 'metagraph.js'))
+  const {
+    clearMetagraphCache,
+    fetchMetagraph,
+    fetchMetagraphFresh,
+    setMetagraphCache,
+  } = require(join(outDir, 'metagraph.js'))
 
   const finalized = await fetchMetagraphFresh()
   const [hotkey] = Object.keys(finalized.hotkeyToUid)
@@ -226,6 +231,21 @@ try {
   blockMode = 'finalized'
   const liveCachedRead = await fetchMetagraph()
   assert.equal(liveCachedRead.currentBlock, 1_111_114, 'cached metagraph reads should overlay the live best head')
+  const missingIdentityRefresh = setMetagraphCache({ ...liveCachedRead, names: {} })
+  assert.equal(
+    missingIdentityRefresh.names[hotkey],
+    'Test Validator',
+    'an empty identity refresh should preserve the last-known validator name',
+  )
+  const renamedIdentityRefresh = setMetagraphCache({
+    ...missingIdentityRefresh,
+    names: { [hotkey]: 'Renamed Validator' },
+  })
+  assert.equal(
+    renamedIdentityRefresh.names[hotkey],
+    'Renamed Validator',
+    'a new on-chain validator name should replace the retained value',
+  )
 
   blockMode = 'flaky-live'
   liveBestHeadCalls = 0
@@ -344,6 +364,9 @@ class Subtensor:
   const metagraphRouteSource = await readFile(resolve('src/app/api/metagraph/route.ts'), 'utf8')
   assert.match(metagraphRouteSource, /private, no-store, max-age=0/)
   assert.doesNotMatch(metagraphRouteSource, /stale-while-revalidate/)
+  const cacheSource = await readFile(resolve('src/lib/cache.ts'), 'utf8')
+  assert.match(cacheSource, /const newMetagraph = setMetagraphCache\(refreshedMetagraph\)/)
+  assert.doesNotMatch(cacheSource, /clearMetagraphCache\(\)\s*setMetagraphCache/)
   const weightsAlertsSource = await readFile(resolve('src/app/admin/_components/AdminWeightsAlerts.tsx'), 'utf8')
   assert.match(weightsAlertsSource, /const CONSECUTIVE_FAILURES_BEFORE_ALERT = 2/)
   assert.match(weightsAlertsSource, /setConsecutiveFailures\(\(count\) => payload\.currentBlock === null \? count \+ 1 : 0\)/)
@@ -380,7 +403,7 @@ class Subtensor:
     'Metagraph should render between Lab Ops and Daily Benchmark',
   )
 
-  console.log('metagraph-weight-freshness: telemetry, freshness callouts, column order, and Lab placement passed')
+  console.log('metagraph-weight-freshness: telemetry, identity retention, freshness callouts, column order, and Lab placement passed')
 } finally {
   globalThis.fetch = originalFetch
   if (originalPythonPath === undefined) delete process.env.PYTHON_PATH

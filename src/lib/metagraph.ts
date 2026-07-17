@@ -134,12 +134,24 @@ export function clearMetagraphCache(): void {
   globalForMetagraph.metagraphCache = null
 }
 
-// Set metagraph cache directly (for atomic swap during refresh)
-export function setMetagraphCache(data: MetagraphData): void {
+// Set metagraph cache directly (for atomic swap during refresh). Validator
+// identities are a separate best-effort RPC enrichment, so a transient miss
+// must not erase names that were present in the previous good snapshot.
+export function setMetagraphCache(data: MetagraphData): MetagraphData {
+  const normalized = withFreshnessDefaults(data)
+  const previousNames = globalForMetagraph.metagraphCache?.data.names ?? {}
+  const names = Object.fromEntries(
+    Object.keys(normalized.hotkeyToUid).flatMap((hotkey) => {
+      const name = normalized.names[hotkey] || previousNames[hotkey]
+      return name ? [[hotkey, name]] : []
+    }),
+  )
+  const preserved = { ...normalized, names }
   globalForMetagraph.metagraphCache = {
-    data: { ...withFreshnessDefaults(data), currentBlock: null },
+    data: { ...preserved, currentBlock: null },
     timestamp: Date.now(),
   }
+  return preserved
 }
 
 // --- SCALE decoder for NeuronInfoLite ---
@@ -840,7 +852,7 @@ export async function fetchMetagraph(): Promise<MetagraphData> {
         try {
           const data = await fetchMetagraphFromBittensor()
           if (data.totalNeurons > 0) {
-            setMetagraphCache(data)
+            return setMetagraphCache(data)
           }
           return data
         } finally {
@@ -871,7 +883,7 @@ export async function fetchMetagraph(): Promise<MetagraphData> {
       const data = await fetchMetagraphFromBittensor()
       // Only cache successful results
       if (data.totalNeurons > 0) {
-        setMetagraphCache(data)
+        return setMetagraphCache(data)
       }
       return data
     } finally {

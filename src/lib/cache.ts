@@ -149,16 +149,13 @@ async function doRefresh(): Promise<void> {
   const startTime = Date.now()
 
   try {
-    const { fetchMetagraphFresh, setMetagraphCache, clearMetagraphCache } = await import('./metagraph')
+    const { fetchMetagraphFresh, setMetagraphCache } = await import('./metagraph')
     const { fetchAllDashboardData, warmLatestLeadsCache } = await import('./db-precalc')
 
-    // Pre-warm: Fetch fresh metagraph FIRST (before clearing cache)
-    // This eliminates the race condition where requests see null/stale data during fetch
-    const newMetagraph = await fetchMetagraphFresh()
-
-    // Atomic swap: Clear old cache and set new data immediately
-    clearMetagraphCache()
-    setMetagraphCache(newMetagraph)
+    // Fetch first, then atomically replace the cache while retaining any
+    // last-known validator names that the identity enrichment omitted.
+    const refreshedMetagraph = await fetchMetagraphFresh()
+    const newMetagraph = setMetagraphCache(refreshedMetagraph)
 
     // Clear dashboard cache and refresh with new metagraph
     clearCache('dashboard_precalc')
