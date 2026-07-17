@@ -18,26 +18,27 @@
  */
 
 import { createClient, SupabaseClient } from '@supabase/supabase-js'
+import { getRuntimeSecretValue } from './runtime-secret-environment'
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL
-const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SECRET_KEY
 
 let _client: SupabaseClient | null = null
 
 export function getAdminSupabase(): SupabaseClient {
   if (_client) return _client
+  const supabaseServiceKey = getRuntimeSecretValue('SUPABASE_SECRET_KEY')
   if (!SUPABASE_URL) {
     throw new Error(
       '[admin] NEXT_PUBLIC_SUPABASE_URL is not set. The admin surface cannot read from Supabase.',
     )
   }
-  if (!SUPABASE_SERVICE_KEY) {
+  if (!supabaseServiceKey) {
     throw new Error(
       '[admin] SUPABASE_SECRET_KEY is not set. The admin surface requires the service role key ' +
         'so it can read lead PII and other RLS-restricted columns.',
     )
   }
-  _client = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, {
+  _client = createClient(SUPABASE_URL, supabaseServiceKey, {
     auth: { persistSession: false },
   })
   return _client

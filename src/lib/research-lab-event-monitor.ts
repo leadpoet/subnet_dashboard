@@ -14,6 +14,7 @@ import {
   type ResearchLabImprovementAnalysisDoc,
   type ResearchLabImprovementEvidence,
 } from './research-lab-improvement-analysis'
+import { getRuntimeSecretEnvironment } from './runtime-secret-environment'
 
 const EVENT_MONITOR_ID = 'research-lab-events:v1'
 const EVENT_MONITOR_LEASE_SECONDS = 180
@@ -98,7 +99,7 @@ async function executeEventMonitor(
   dependencies: ResearchLabEventMonitorDependencies,
 ): Promise<ResearchLabEventMonitorResult> {
   const supabase = dependencies.supabase ?? getAdminSupabase()
-  const env = dependencies.env ?? process.env
+  const env = dependencies.env ?? getRuntimeSecretEnvironment()
   const now = dependencies.now?.() ?? new Date()
   const nowIso = now.toISOString()
   // Stable ownership lets this worker renew its lease on every configured
@@ -185,7 +186,7 @@ async function executeImprovementWorker(
   dependencies: ResearchLabEventMonitorDependencies,
 ): Promise<ResearchLabImprovementWorkerResult> {
   const supabase = dependencies.supabase ?? getAdminSupabase()
-  const env = dependencies.env ?? process.env
+  const env = dependencies.env ?? getRuntimeSecretEnvironment()
   const { data, error } = await supabase.rpc('claim_ops_research_lab_improvement_analysis', {
     p_stale_after_seconds: ANALYSIS_STALE_AFTER_SECONDS,
   })

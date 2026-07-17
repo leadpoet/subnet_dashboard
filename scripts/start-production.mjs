@@ -8,6 +8,7 @@ export async function startProduction({
 } = {}) {
   const values = await loadSecrets({ env })
   for (const key of RUNTIME_SECRET_KEYS) env[key] = values[key]
+  globalThis.__leadpoetSubnetDashboardRuntimeSecretsV1 = values
 
   log(
     `Loaded ${RUNTIME_SECRET_KEYS.length} validated runtime secrets from AWS Secrets Manager into the production worker.`,

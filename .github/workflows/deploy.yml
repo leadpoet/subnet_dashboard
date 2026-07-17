@@ -163,6 +163,33 @@ jobs:
               CANDIDATE_SLOT=".next-blue"
             fi
 
+            # A previous deployment may have passed HTTP health and then failed
+            # its monitor verification before recording the slot. Trust the
+            # running PM2 process over a stale pointer so we never delete the
+            # build currently serving production.
+            RUNNING_SLOT="$(pm2 jlist 2>/dev/null | node -e '
+              let input = "";
+              process.stdin.setEncoding("utf8");
+              process.stdin.on("data", (chunk) => { input += chunk; });
+              process.stdin.on("end", () => {
+                try {
+                  const app = JSON.parse(input).find((item) => item.name === "subnet-dashboard");
+                  process.stdout.write(app?.pm2_env?.NEXT_DIST_DIR ?? "");
+                } catch {}
+              });
+            ' || true)"
+            if [ "$RUNNING_SLOT" = ".next" ] || [ "$RUNNING_SLOT" = ".next-blue" ] || [ "$RUNNING_SLOT" = ".next-green" ]; then
+              if [ "$RUNNING_SLOT" != "$ACTIVE_SLOT" ]; then
+                echo "Correcting stale slot pointer: $ACTIVE_SLOT -> $RUNNING_SLOT"
+                ACTIVE_SLOT="$RUNNING_SLOT"
+                if [ "$ACTIVE_SLOT" = ".next-blue" ]; then
+                  CANDIDATE_SLOT=".next-green"
+                else
+                  CANDIDATE_SLOT=".next-blue"
+                fi
+              fi
+            fi
+
             echo "Starting bounded EC2 disk recovery"
             echo "Active build slot: $ACTIVE_SLOT; candidate build slot: $CANDIDATE_SLOT"
 
@@ -380,16 +407,26 @@ jobs:
               rm -f "$RUNTIME_SECRET_FILE"
             }
             trap cleanup_runtime_secret_file EXIT
-            node "$APP_ROOT/scripts/load-runtime-secret.mjs" > "$RUNTIME_SECRET_FILE"
-            (
+            monitor_verified=true
+            if ! node "$APP_ROOT/scripts/load-runtime-secret.mjs" > "$RUNTIME_SECRET_FILE"; then
+              monitor_verified=false
+            elif ! (
               set -a
               . "$RUNTIME_SECRET_FILE"
               set +a
               VERIFY_MONITOR_AFTER="$MONITOR_VERIFY_AFTER" \
                 node "$APP_ROOT/scripts/verify-runtime-monitors.mjs"
-            )
+            ); then
+              monitor_verified=false
+            fi
             cleanup_runtime_secret_file
             trap - EXIT
+
+            if [ "$monitor_verified" != true ]; then
+              echo "Runtime monitor verification failed; restoring $ACTIVE_SLOT"
+              NEXT_DIST_DIR="$ACTIVE_SLOT" pm2 startOrReload "$APP_ROOT/ecosystem.config.cjs" --update-env || true
+              exit 1
+            fi
 
             # Record the slot only after the production health check succeeds.
             printf '%s\n' "$CANDIDATE_SLOT" > "$ACTIVE_SLOT_FILE.tmp"

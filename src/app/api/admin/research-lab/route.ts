@@ -45,6 +45,7 @@ import {
   type ResearchLabValidatorAlertObservation,
 } from '@/lib/research-lab-alerts'
 import { parseResearchLabAlertDeliveryConfig } from '@/lib/research-lab-alert-delivery'
+import { getRuntimeSecretEnvironment } from '@/lib/runtime-secret-environment'
 import {
   normalizeAdminLabCompanyIntent,
   normalizeAdminLabGatewayControl,
@@ -4250,7 +4251,7 @@ async function fetchAlertOperationsSummary(
   let discordConfigured = false
   let deliveryConfigError: string | null = null
   try {
-    const config = parseResearchLabAlertDeliveryConfig(process.env)
+    const config = parseResearchLabAlertDeliveryConfig(getRuntimeSecretEnvironment())
     emailConfigured = Boolean(config.email)
     discordConfigured = Boolean(config.discord)
   } catch (error) {

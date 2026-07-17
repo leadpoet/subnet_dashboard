@@ -51,6 +51,7 @@ const { readFile } = await import('node:fs/promises')
 const launcher = await readFile(new URL('./start-production.mjs', import.meta.url), 'utf8')
 assert.match(launcher, /const values = await loadSecrets\(\{ env \}\)/)
 assert.match(launcher, /for \(const key of RUNTIME_SECRET_KEYS\) env\[key\] = values\[key\]/)
+assert.match(launcher, /globalThis\.__leadpoetSubnetDashboardRuntimeSecretsV1 = values/)
 assert.match(launcher, /await runNext\(\)/)
 assert.match(launcher, /startProduction\(\)\.catch/)
 assert.doesNotMatch(launcher, /if \(process\.argv\[1\]/)
@@ -65,5 +66,13 @@ assert.equal(ecosystem.apps[0].env.RESEARCH_LAB_EVENT_MONITOR_ENABLED, 'true')
 const deployment = await readFile(new URL('../.github/workflows/deploy.yml', import.meta.url), 'utf8')
 assert.match(deployment, /scripts\/verify-runtime-monitors\.mjs/)
 assert.match(deployment, /VERIFY_MONITOR_AFTER/)
+assert.match(deployment, /Correcting stale slot pointer/)
+assert.match(deployment, /Runtime monitor verification failed; restoring \$ACTIVE_SLOT/)
+
+const runtimeSecretEnvironment = await readFile(
+  new URL('../src/lib/runtime-secret-environment.ts', import.meta.url),
+  'utf8',
+)
+assert.match(runtimeSecretEnvironment, /runtimeSecretStore\(\)\?\.\[name\] \?\? process\.env\[name\]/)
 
 console.log('runtime-secret-loader: strict allowlist, validation, and shell escaping passed')

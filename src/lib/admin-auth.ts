@@ -1,3 +1,5 @@
+import { getRuntimeSecretValue } from './runtime-secret-environment'
+
 const ADMIN_SESSION_VERSION = 1
 
 export const ADMIN_SESSION_COOKIE = 'leadpoet_admin_session'
@@ -11,8 +13,8 @@ type AdminSessionPayload = {
 }
 
 function configuredCredentials(): { username: string; password: string } | null {
-  const username = process.env.ADMIN_USER
-  const password = process.env.ADMIN_PASS
+  const username = getRuntimeSecretValue('ADMIN_USER')
+  const password = getRuntimeSecretValue('ADMIN_PASS')
   if (!username || !password) return null
   return { username, password }
 }
@@ -24,7 +26,7 @@ function sessionSecret(): string | null {
   // A separate secret is recommended, but falling back to the existing long
   // admin password keeps deployments backwards-compatible. Rotating either
   // value invalidates every active admin session.
-  return process.env.ADMIN_SESSION_SECRET || credentials.password
+  return getRuntimeSecretValue('ADMIN_SESSION_SECRET') || credentials.password
 }
 
 export function isAdminAuthConfigured(): boolean {

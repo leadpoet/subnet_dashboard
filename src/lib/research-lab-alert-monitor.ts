@@ -21,6 +21,7 @@ import type {
   ResearchLabEvaluatedAlert,
 } from './research-lab-alerts'
 import { parseResearchLabAlertSignalAllowlist } from './research-lab-alerts'
+import { getRuntimeSecretEnvironment } from './runtime-secret-environment'
 
 const MONITOR_ID = 'research-lab-alerts:v1'
 const LEASE_SECONDS = 180
@@ -76,7 +77,7 @@ async function executeMonitor(
   // renew its own 180-second lease. A new UUID per tick would lock the worker
   // out until the prior lease expired.
   const owner = dependencies.owner ?? MONITOR_OWNER
-  const env = dependencies.env ?? process.env
+  const env = dependencies.env ?? getRuntimeSecretEnvironment()
   const acquired = await claimMonitorLease(supabase, owner, LEASE_SECONDS)
   if (!acquired) return emptyResult(false)
 
