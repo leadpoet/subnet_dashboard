@@ -357,7 +357,9 @@ class Subtensor:
   assert.match(metagraphUiSource, /role="progressbar"/)
   assert.match(metagraphUiSource, /nextEpochSeconds \/ \(epochState\.tempo \* BLOCK_TIME_SECONDS\)/)
   assert.match(metagraphUiSource, /label="Official SN71 Epoch"/)
-  assert.match(metagraphUiSource, /label="Epoch Block Position"/)
+  assert.match(metagraphUiSource, /label="Epoch Blocks Remaining"/)
+  assert.match(metagraphUiSource, /epochState\.blocksRemaining, 0\)\} remaining/)
+  assert.match(metagraphUiSource, /Epoch \$\{formatAmount\(epochState\.subnetEpochIndex, 0\)\} · \$\{formatAmount\(epochState\.blocksElapsed, 0\)\} elapsed/)
   assert.match(metagraphUiSource, /label="Time Until Next Epoch"/)
   assert.doesNotMatch(metagraphUiSource, /label="Average VTrust"/)
 
@@ -372,12 +374,18 @@ class Subtensor:
   assert.match(weightsAlertsSource, /setConsecutiveFailures\(\(count\) => payload\.currentBlock === null \? count \+ 1 : 0\)/)
   assert.match(weightsAlertsSource, /consecutiveFailures >= CONSECUTIVE_FAILURES_BEFORE_ALERT/)
   const officialEpochCard = metagraphUiSource.indexOf('label="Official SN71 Epoch"')
-  const blocksCard = metagraphUiSource.indexOf('label="Epoch Block Position"')
+  const blocksCard = metagraphUiSource.indexOf('label="Epoch Blocks Remaining"')
   const timeCard = metagraphUiSource.indexOf('label="Time Until Next Epoch"')
   const activeCard = metagraphUiSource.indexOf('label="Active validators"')
   assert.ok(
     blocksCard < timeCard && timeCard < officialEpochCard && officialEpochCard < activeCard,
     'epoch position, timing, official identity, and validators should render in order',
+  )
+  const blocksCardSource = metagraphUiSource.slice(blocksCard, timeCard)
+  assert.match(
+    blocksCardSource,
+    /progress=\{timeRemainingPercent\}/,
+    'blocks and time vials should count down on the same remaining-time basis',
   )
   assert.match(metagraphUiSource, /\.filter\(\(row\) => !row\.isMiner\)/)
   assert.match(metagraphUiSource, /formatAmount\(activeRows\.length, 0\)\}\/\$\{formatAmount\(rows\.length, 0\)/)

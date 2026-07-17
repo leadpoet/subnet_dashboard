@@ -346,12 +346,6 @@ export function AdminMetagraph() {
   const nextEpochSeconds = epochState === null
     ? null
     : Math.max(0, (epochState.blocksRemaining * BLOCK_TIME_SECONDS) - countdownTick)
-  const epochWindowBlocks = epochState === null
-    ? null
-    : epochState.blocksElapsed + epochState.blocksRemaining
-  const epochProgressPercent = epochState === null || !epochWindowBlocks
-    ? undefined
-    : (epochState.blocksElapsed / epochWindowBlocks) * 100
   const timeRemainingPercent = nextEpochSeconds === null || !epochState?.tempo
     ? undefined
     : (nextEpochSeconds / (epochState.tempo * BLOCK_TIME_SECONDS)) * 100
@@ -426,10 +420,10 @@ export function AdminMetagraph() {
 
       <div className="grid gap-2 p-3 md:grid-cols-2 xl:grid-cols-4">
         <SummaryCard
-          label="Epoch Block Position"
-          value={epochLoading || epochState === null ? '—' : `${formatAmount(epochState.blocksElapsed, 0)} elapsed`}
-          detail={epochState ? `${formatAmount(epochState.blocksRemaining, 0)} remaining · tempo ${formatAmount(epochState.tempo, 0)}` : undefined}
-          progress={epochProgressPercent}
+          label="Epoch Blocks Remaining"
+          value={epochLoading || epochState === null ? '—' : `${formatAmount(epochState.blocksRemaining, 0)} remaining`}
+          detail={epochState ? `Epoch ${formatAmount(epochState.subnetEpochIndex, 0)} · ${formatAmount(epochState.blocksElapsed, 0)} elapsed` : undefined}
+          progress={timeRemainingPercent}
         />
         <SummaryCard
           label="Time Until Next Epoch"
