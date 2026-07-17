@@ -1,19 +1,50 @@
 export type ResearchLabAlertSeverity = 'warning' | 'critical'
 
-export type ResearchLabAlertSignal =
-  | 'pcr0_mismatch'
-  | 'pcr0_missing'
-  | 'pcr0_stale'
-  | 'offchain_weight_bundle_missing'
-  | 'offchain_weight_bundle_stale'
-  | 'onchain_validator_update_missing'
-  | 'onchain_validator_update_stale'
-  | 'benchmark_failed'
-  | 'benchmark_stalled'
-  | 'active_run_stale'
-  | 'active_run_blocked'
-  | 'transparency_checkpoint_stale'
-  | 'data_freshness'
+export const RESEARCH_LAB_ALERT_SIGNALS = [
+  'pcr0_mismatch',
+  'pcr0_missing',
+  'pcr0_stale',
+  'offchain_weight_bundle_missing',
+  'offchain_weight_bundle_stale',
+  'onchain_validator_update_missing',
+  'onchain_validator_update_stale',
+  'benchmark_failed',
+  'benchmark_stalled',
+  'active_run_stale',
+  'active_run_blocked',
+  'transparency_checkpoint_stale',
+  'data_freshness',
+] as const
+
+export type ResearchLabAlertSignal = (typeof RESEARCH_LAB_ALERT_SIGNALS)[number]
+
+const RESEARCH_LAB_ALERT_SIGNAL_SET = new Set<string>(RESEARCH_LAB_ALERT_SIGNALS)
+
+/**
+ * Parse an optional deployment allowlist. An unset or blank value preserves the
+ * historical behavior of monitoring every canonical signal. Invalid names fail
+ * closed so a typo cannot silently disable a page.
+ */
+export function parseResearchLabAlertSignalAllowlist(
+  value: string | undefined,
+): ReadonlySet<ResearchLabAlertSignal> | null {
+  const requested = [...new Set(
+    (value ?? '')
+      .split(/[,;\s]+/)
+      .map((item) => item.trim().toLowerCase())
+      .filter(Boolean),
+  )]
+  if (requested.length === 0) return null
+
+  const invalid = requested.filter((signal) => !RESEARCH_LAB_ALERT_SIGNAL_SET.has(signal))
+  if (invalid.length > 0) {
+    throw new Error(
+      `RESEARCH_LAB_ALERT_SIGNALS contains unknown signal(s): ${invalid.sort().join(', ')}.`,
+    )
+  }
+
+  return new Set(requested as ResearchLabAlertSignal[])
+}
 
 export type ResearchLabAlertScope =
   | 'validator'

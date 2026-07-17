@@ -20,6 +20,7 @@ import type {
   ResearchLabAlertSeverity,
   ResearchLabEvaluatedAlert,
 } from './research-lab-alerts'
+import { parseResearchLabAlertSignalAllowlist } from './research-lab-alerts'
 
 const MONITOR_ID = 'research-lab-alerts:v1'
 const LEASE_SECONDS = 180
@@ -84,11 +85,17 @@ async function executeMonitor(
   try {
     const config = parseResearchLabAlertDeliveryConfig(env)
     const destinations = buildResearchLabAlertDestinations(config, env)
-    const [evaluatedAlerts, previousIncidents, priorDeliveryAttempts] = await Promise.all([
+    const enabledSignals = parseResearchLabAlertSignalAllowlist(
+      env.RESEARCH_LAB_ALERT_SIGNALS,
+    )
+    const [collectedAlerts, previousIncidents, priorDeliveryAttempts] = await Promise.all([
       (dependencies.collectAlerts ?? collectCanonicalAlertsFromAdminRoute)(),
       readCurrentIncidents(supabase),
       readDeliveryAttempts(supabase),
     ])
+    const evaluatedAlerts = enabledSignals
+      ? collectedAlerts.filter((alert) => enabledSignals.has(alert.signal))
+      : collectedAlerts
     evaluatedAlertCount = evaluatedAlerts.length
 
     const plan = planResearchLabAlertLifecycle({
@@ -119,6 +126,9 @@ async function executeMonitor(
         incident_upserts: incidentUpsertCount,
         transitions: transitionCount,
         configured_channels: destinations.map((item) => item.channel),
+        configured_signals: enabledSignals
+          ? [...enabledSignals].sort()
+          : 'all',
       },
     })
 

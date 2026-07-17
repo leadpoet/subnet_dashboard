@@ -25,6 +25,8 @@ assert.match(monitor, /ops_alert_current/)
 assert.match(monitor, /ops_alert_events/)
 assert.match(monitor, /ops_alert_delivery_events/)
 assert.match(monitor, /deliverResearchLabAlert/)
+assert.match(monitor, /RESEARCH_LAB_ALERT_SIGNALS/)
+assert.match(monitor, /enabledSignals\.has\(alert\.signal\)/)
 assert.match(monitor, /idempotencyKey: intent\.idempotencyKey/)
 assert.match(monitor, /\.eq\('status', 'pending'\)/)
 const persistenceBlock = monitor.slice(

@@ -25,10 +25,26 @@ try {
   const require = createRequire(import.meta.url)
   const {
     DEFAULT_RESEARCH_LAB_ALERT_THRESHOLDS,
+    RESEARCH_LAB_ALERT_SIGNALS,
     buildResearchLabAlertFingerprint,
     evaluateResearchLabAlerts,
+    parseResearchLabAlertSignalAllowlist,
     resolveResearchLabAlertThresholds,
   } = require(join(outDir, 'research-lab-alerts.js'))
+
+  assert.equal(RESEARCH_LAB_ALERT_SIGNALS.length, 13)
+  assert.equal(parseResearchLabAlertSignalAllowlist(undefined), null)
+  assert.equal(parseResearchLabAlertSignalAllowlist('  '), null)
+  assert.deepEqual(
+    [...parseResearchLabAlertSignalAllowlist(
+      'pcr0_missing, benchmark_failed;PCR0_MISSING',
+    )],
+    ['pcr0_missing', 'benchmark_failed'],
+  )
+  assert.throws(
+    () => parseResearchLabAlertSignalAllowlist('pcr0_missing,typo_signal'),
+    /unknown signal\(s\): typo_signal/,
+  )
 
   const NOW_MS = Date.parse('2026-07-10T12:00:00.000Z')
   const NOW = new Date(NOW_MS).toISOString()
