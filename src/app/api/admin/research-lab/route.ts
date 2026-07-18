@@ -41,6 +41,7 @@ import { fetchMetagraph } from '@/lib/metagraph'
 import {
   buildResearchLabAlertFingerprint,
   evaluateResearchLabAlerts,
+  isExpectedResearchLabBaselineWait,
   shouldSuppressResearchLabExecutionAlert,
   type ResearchLabAlertObservations,
   type ResearchLabAlertResolution,
@@ -1600,6 +1601,7 @@ function shouldSuppressRunAlert(
   detail: string | null,
   input: Pick<Parameters<typeof buildCanonicalAlertObservations>[0], 'controls' | 'now'>,
 ): boolean {
+  if (isExpectedResearchLabBaselineWait(status, detail)) return true
   const controls = phase === 'scoring'
     ? [input.controls.loops, input.controls.scoring]
     : [input.controls.loops]
@@ -3698,6 +3700,46 @@ async function fetchScoreBundleMetrics(
     }
   }
 
+  // Score bundles advance only when an ICP finishes. Healthy long-running ICPs
+  // still emit scorer heartbeats, so use those heartbeats as run activity and
+  // reserve “stale” for workers that have actually stopped reporting.
+  for (const batch of chunked(interestingTicketIds, SUPABASE_IN_FILTER_BATCH_SIZE)) {
+    const { data, error } = await supabase
+      .from('research_lab_scoring_run_current')
+      .select('ticket_id, last_heartbeat_at, current_status_at, started_at, created_at')
+      .eq('run_type', 'candidate_scoring')
+      .in('ticket_id', batch)
+      .order('created_at', { ascending: false, nullsFirst: false })
+      .limit(5_000)
+
+    if (error) {
+      if (!isExpectedOptionalTimelineSourceMiss(error.message)) {
+        console.warn('[admin:research-lab] scoring heartbeat metrics unavailable', error.message)
+      }
+      continue
+    }
+
+    for (const row of (data ?? []) as Array<Record<string, unknown>>) {
+      const ticketId = stringOr(row.ticket_id)
+      if (!ticketId) continue
+      const heartbeatAt = latestIso(
+        isoStringOr(row.last_heartbeat_at),
+        isoStringOr(row.current_status_at),
+        isoStringOr(row.started_at),
+        isoStringOr(row.created_at),
+      )
+      if (!heartbeatAt) continue
+      const previous = byTicket.get(ticketId)
+      byTicket.set(ticketId, {
+        scoreBundleId: previous?.scoreBundleId ?? null,
+        scoreBundleStatus: previous?.scoreBundleStatus ?? null,
+        icpTotal: previous?.icpTotal ?? null,
+        icpsScored: previous?.icpsScored ?? null,
+        lastScoringAt: latestIso(previous?.lastScoringAt, heartbeatAt) ?? heartbeatAt,
+      })
+    }
+  }
+
   const volume = await fetchScoreBundleVolume(supabase)
   return {
     byTicket,
@@ -4012,7 +4054,8 @@ function buildActiveRuns(
     .filter((loop) => isActiveResearchLabLoopStatus(loop.statusKey))
     .map((loop) => {
       const scoreMetrics = scoreMetricsByTicket.get(loop.ticketId)
-      const idleMs = Math.max(0, now - timestampOrZero(loop.lastActivityAt))
+      const lastActivityAt = latestIso(loop.lastActivityAt, scoreMetrics?.lastScoringAt) ?? loop.lastActivityAt
+      const idleMs = Math.max(0, now - timestampOrZero(lastActivityAt))
       const ageMs = Math.max(0, now - timestampOrZero(loop.submittedAt))
       const icpTotal = scoreMetrics?.icpTotal ?? null
       const icpsScored = scoreMetrics?.icpsScored ?? null
@@ -4022,6 +4065,8 @@ function buildActiveRuns(
           : Math.max(0, icpTotal - (icpsScored ?? 0))
       const candidatesRemaining = Math.max(0, loop.candidateCount - loop.scoredCandidateCount)
       const staleThreshold = loop.statusKey === 'scoring' ? STALE_SCORING_MS : STALE_ACTIVE_MS
+      const blocker = loop.actionNote?.detail ?? loop.statusNote?.detail ?? loop.statusDetail ?? loop.opsReason ?? null
+      const expectedBaselineWait = isExpectedResearchLabBaselineWait(loop.statusKey, blocker)
       return {
         ticketId: loop.ticketId,
         runId: loop.runId,
@@ -4040,12 +4085,12 @@ function buildActiveRuns(
         icpsRemaining,
         scoreBundleId: scoreMetrics?.scoreBundleId ?? null,
         scoreBundleStatus: scoreMetrics?.scoreBundleStatus ?? null,
-        blocker: loop.actionNote?.detail ?? loop.statusNote?.detail ?? loop.statusDetail ?? loop.opsReason ?? null,
+        blocker,
         submittedAt: loop.submittedAt,
-        lastActivityAt: loop.lastActivityAt,
+        lastActivityAt,
         ageMs,
         idleMs,
-        stale: idleMs >= staleThreshold,
+        stale: !expectedBaselineWait && idleMs >= staleThreshold,
       }
     })
     .sort((a, b) => {

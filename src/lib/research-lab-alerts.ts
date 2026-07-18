@@ -246,6 +246,22 @@ const MINUTE_MS = 60 * 1000
 export const DEFAULT_RESEARCH_LAB_MAINTENANCE_RESUME_GRACE_MS = 5 * MINUTE_MS
 
 /**
+ * Candidate scoring deliberately waits while the next UTC day's private
+ * benchmark establishes the new ICP window. That handoff is owned by the
+ * benchmark monitor; treating each queued candidate as blocked or stale
+ * creates duplicate pages for a healthy daily rollover.
+ */
+export function isExpectedResearchLabBaselineWait(
+  status?: string | null,
+  detail?: string | null,
+): boolean {
+  const operationalText = `${status ?? ''} ${detail ?? ''}`.trim().toLowerCase()
+  if (!operationalText) return false
+  return /(?:^|\b|_)(?:baseline_not_ready|benchmark_baseline_not_ready|parent_baseline_not_ready|waiting_for_baseline|candidate_scoring_(?:next_)?daily_baseline_not_ready|candidatebaselinenotready)(?:\b|_|$)/.test(operationalText) ||
+    /waiting for (?:the )?(?:(?:next|current) )?(?:daily |benchmark |private )?baseline/.test(operationalText)
+}
+
+/**
  * Intentional maintenance is not an incident. After maintenance resumes, wait
  * briefly for workers and projections to emit fresh activity before treating
  * their pre-maintenance timestamp as a new stale condition.
@@ -325,7 +341,6 @@ const ACTIVE_BENCHMARK_STATUSES = new Set([
 const ACTIVE_RUN_STATUSES = new Set([
   ...ACTIVE_BENCHMARK_STATUSES,
   'paid_not_started',
-  'waiting_for_baseline',
 ])
 
 const BLOCKED_RUN_STATUSES = new Set([
@@ -333,7 +348,6 @@ const BLOCKED_RUN_STATUSES = new Set([
   'blocked_for_credit',
   'paused',
   'stale',
-  'waiting_for_baseline',
   'waiting_for_credits',
 ])
 
@@ -616,6 +630,8 @@ function evaluateActiveRunObservation(
   const source = sourceLabel(observation.source, 'run telemetry')
   const status = normalizedStatus(observation.status)
   const activityAtMs = firstTimestamp(observation.lastActivityAt, observation.startedAt)
+
+  if (isExpectedResearchLabBaselineWait(status, observation.blocker)) return
 
   if (ACTIVE_RUN_STATUSES.has(status)) {
     const stale = staleCandidate({

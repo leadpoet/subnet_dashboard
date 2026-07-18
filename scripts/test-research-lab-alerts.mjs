@@ -28,12 +28,16 @@ try {
     RESEARCH_LAB_ALERT_SIGNALS,
     buildResearchLabAlertFingerprint,
     evaluateResearchLabAlerts,
+    isExpectedResearchLabBaselineWait,
     parseResearchLabAlertSignalAllowlist,
     resolveResearchLabAlertThresholds,
     shouldSuppressResearchLabExecutionAlert,
   } = require(join(outDir, 'research-lab-alerts.js'))
 
   assert.equal(RESEARCH_LAB_ALERT_SIGNALS.length, 14)
+  assert.equal(isExpectedResearchLabBaselineWait('waiting_for_baseline'), true)
+  assert.equal(isExpectedResearchLabBaselineWait('queued', 'CandidateBaselineNotReady: same-day baseline missing'), true)
+  assert.equal(isExpectedResearchLabBaselineWait('blocked', 'OpenRouter credits exhausted'), false)
   assert.equal(parseResearchLabAlertSignalAllowlist(undefined), null)
   assert.equal(parseResearchLabAlertSignalAllowlist('  '), null)
   assert.deepEqual(
@@ -374,6 +378,32 @@ try {
     signals(multiSignalRunFixture),
     ['active_run_blocked', 'active_run_stale'],
     'a blocker does not short-circuit independent stale-run evaluation',
+  )
+
+  const dailyRolloverFixture = evaluate({
+    activeRuns: [
+      {
+        runId: 'run-waiting-for-new-window',
+        status: 'waiting_for_baseline',
+        blocked: true,
+        blocker: 'Scoring is waiting for the daily benchmark baseline.',
+        lastActivityAt: ago(60),
+        blockedAt: ago(60),
+      },
+      {
+        runId: 'run-requeued-for-new-window',
+        status: 'queued',
+        blocked: true,
+        blocker: 'baseline_not_ready',
+        lastActivityAt: ago(60),
+        blockedAt: ago(60),
+      },
+    ],
+  })
+  assert.deepEqual(
+    dailyRolloverFixture,
+    [],
+    'expected daily baseline handoffs are monitored by benchmark health, not paged per candidate',
   )
 
   const explicitMatchFixture = evaluate({

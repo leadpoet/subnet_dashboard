@@ -94,6 +94,11 @@ try {
   )
   assert.match(routeSource, /normalizeAdminLabCompanyIntent\(row\)/)
   assert.match(routeSource, /research_lab_gateway_control_current/)
+  assert.match(routeSource, /research_lab_scoring_run_current/)
+  assert.match(routeSource, /\.eq\('run_type', 'candidate_scoring'\)/)
+  assert.match(routeSource, /isoStringOr\(row\.last_heartbeat_at\)/)
+  assert.match(routeSource, /latestIso\(loop\.lastActivityAt, scoreMetrics\?\.lastScoringAt\)/)
+  assert.match(routeSource, /isExpectedResearchLabBaselineWait\(loop\.statusKey, blocker\)/)
   assert.match(routeSource, /rowFor\('scoring_maintenance'\)/)
   assert.match(routeSource, /rowFor\('autoresearch_maintenance'\)/)
   const healthSignalsSource = routeSource.slice(
