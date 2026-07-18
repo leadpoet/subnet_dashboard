@@ -46,6 +46,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { cn } from '@/lib/utils'
 import { formatDateTime, formatRelative, shortHotkey } from '@/lib/admin-format'
 import {
+  adminLabRefreshErrorMessage,
   adminLabOverviewResponseKeys,
   classifyAdminLabOverviewResponse,
 } from '@/lib/admin-research-lab-refresh'
@@ -712,7 +713,9 @@ export function AdminResearchLab({
           signal: controller.signal,
         })
         const body = await res.json().catch(() => ({}))
-        if (!res.ok) throw new Error(body.error || `Live refresh failed with ${res.status}`)
+        if (!res.ok) {
+          throw new Error(adminLabRefreshErrorMessage(res.status, body.error))
+        }
         const responseKind = classifyAdminLabOverviewResponse(body)
         if (responseKind === 'invalid') {
           console.error('[admin:research-lab] invalid overview refresh response', {

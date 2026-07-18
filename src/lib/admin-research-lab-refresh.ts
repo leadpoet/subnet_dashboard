@@ -1,6 +1,25 @@
 export type AdminLabOverviewResponseKind = 'refresh' | 'full' | 'invalid'
 
 /**
+ * Explain body-less server failures without claiming every 5xx is a deployment.
+ * Structured API errors remain more useful and should always take precedence.
+ */
+export function adminLabRefreshErrorMessage(
+  status: number,
+  serverError: unknown,
+): string {
+  if (typeof serverError === 'string' && serverError.trim()) {
+    return serverError.trim()
+  }
+
+  if (status >= 500 && status <= 504) {
+    return `The dashboard server may be restarting for a deployment (HTTP ${status}). Live refresh will retry automatically`
+  }
+
+  return `Live refresh failed with ${status}`
+}
+
+/**
  * Classify the two successful Admin Research Lab overview response shapes.
  *
  * The endpoint normally returns the compact refresh shape when `mode=refresh`,

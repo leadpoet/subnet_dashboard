@@ -27,9 +27,31 @@ try {
 
   const require = createRequire(import.meta.url)
   const {
+    adminLabRefreshErrorMessage,
     adminLabOverviewResponseKeys,
     classifyAdminLabOverviewResponse,
   } = require(join(outDir, 'admin-research-lab-refresh.js'))
+
+  assert.equal(
+    adminLabRefreshErrorMessage(500, undefined),
+    'The dashboard server may be restarting for a deployment (HTTP 500). Live refresh will retry automatically',
+    'a body-less 500 should explain the likely deployment restart and automatic retry',
+  )
+  assert.equal(
+    adminLabRefreshErrorMessage(503, ''),
+    'The dashboard server may be restarting for a deployment (HTTP 503). Live refresh will retry automatically',
+    'temporary infrastructure statuses should share the deployment-aware explanation',
+  )
+  assert.equal(
+    adminLabRefreshErrorMessage(502, 'Supabase request timed out'),
+    'Supabase request timed out',
+    'a structured server error should remain more specific than the deployment hint',
+  )
+  assert.equal(
+    adminLabRefreshErrorMessage(401, undefined),
+    'Live refresh failed with 401',
+    'non-server failures should retain the generic status message',
+  )
 
   const common = {
     ops: {},
@@ -84,6 +106,7 @@ try {
     'utf8',
   )
   assert.match(componentSource, /classifyAdminLabOverviewResponse\(body\)/)
+  assert.match(componentSource, /adminLabRefreshErrorMessage\(res\.status, body\.error\)/)
   assert.match(componentSource, /refreshPayloadFromAdminResearchLabOverview\(fullOverview\)/)
   assert.match(componentSource, /The server returned an incomplete Lab refresh response/)
   assert.match(componentSource, /if \(!cancelled && !controller\.signal\.aborted\)/)
