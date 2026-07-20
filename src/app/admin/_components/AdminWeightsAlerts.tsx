@@ -8,12 +8,7 @@ const REFRESH_INTERVAL_MS = 30_000
 // A single best-head RPC miss is common enough that it should not page an
 // operator. Two consecutive misses still surface a real outage within ~30s.
 const CONSECUTIVE_FAILURES_BEFORE_ALERT = 2
-const EPOCH_LENGTH = 360
-// A validator that sets weights every epoch shows at most ~374 blocks
-// between sets (pos 345 one epoch, pos 359 the next). Anything past 380
-// means the previous submission window was missed. Mirrors the Discord
-// weights watch running on the validator host.
-const STALE_BLOCKS = 380
+const WEIGHT_SUBMISSION_GRACE_BLOCKS = 20
 
 const WATCHED_UIDS: Array<{ uid: number; label: string }> = [
   { uid: 0, label: 'primary (Leadpoet)' },
@@ -28,7 +23,7 @@ type MetagraphPayload = MetagraphData & { cachedAt?: number }
 interface WatchRow {
   uid: number
   label: string
-  lastSetEpoch: number | null
+  lastSetBlock: number | null
   blocksSince: number | null
   stale: boolean
   unavailable: boolean
@@ -37,6 +32,9 @@ interface WatchRow {
 function buildRows(data: MetagraphPayload | null): WatchRow[] {
   if (!data || data.currentBlock === null) return []
   const block = data.currentBlock
+  const staleBlocks = data.tempo !== null && Number.isSafeInteger(data.tempo) && data.tempo > 0
+    ? data.tempo + WEIGHT_SUBMISSION_GRACE_BLOCKS
+    : null
   return WATCHED_UIDS.map(({ uid, label }) => {
     const hotkey = data.uidToHotkey?.[uid]
     const lastUpdate = hotkey !== undefined ? data.lastUpdates?.[hotkey] : undefined
@@ -44,7 +42,7 @@ function buildRows(data: MetagraphPayload | null): WatchRow[] {
       return {
         uid,
         label,
-        lastSetEpoch: null,
+        lastSetBlock: null,
         blocksSince: null,
         stale: false,
         unavailable: true,
@@ -54,9 +52,9 @@ function buildRows(data: MetagraphPayload | null): WatchRow[] {
     return {
       uid,
       label,
-      lastSetEpoch: Math.floor(lastUpdate / EPOCH_LENGTH),
+      lastSetBlock: lastUpdate,
       blocksSince,
-      stale: blocksSince > STALE_BLOCKS,
+      stale: staleBlocks !== null && blocksSince > staleBlocks,
       unavailable: false,
     }
   })
@@ -75,7 +73,12 @@ export function AdminWeightsAlerts() {
       if (payload.error) throw new Error(payload.error)
       setData(payload)
       setError(null)
-      setConsecutiveFailures((count) => payload.currentBlock === null ? count + 1 : 0)
+      const authorityUnavailable = (
+        payload.currentBlock === null ||
+        payload.tempo === null ||
+        payload.subnetEpochIndex === null
+      )
+      setConsecutiveFailures((count) => authorityUnavailable ? count + 1 : 0)
     } catch (fetchError) {
       setError(fetchError instanceof Error ? fetchError.message : 'Failed to load weights watch')
       setConsecutiveFailures((count) => count + 1)
@@ -90,12 +93,14 @@ export function AdminWeightsAlerts() {
 
   const rows = buildRows(data)
   const issues = rows.filter((row) => row.stale || row.unavailable)
-  const epoch = data?.currentBlock !== null && data?.currentBlock !== undefined
-    ? Math.floor(data.currentBlock / EPOCH_LENGTH)
-    : null
-  const currentMonitorError = error ?? (data?.currentBlock === null
-    ? 'Live chain block unavailable; weight freshness cannot be verified.'
-    : null)
+  const epoch = data?.subnetEpochIndex ?? null
+  const currentMonitorError = error ?? (
+    data?.currentBlock === null ||
+    data?.tempo === null ||
+    data?.subnetEpochIndex === null
+      ? 'Official subnet epoch authority unavailable; weight freshness cannot be verified.'
+      : null
+  )
   const monitorError = consecutiveFailures >= CONSECUTIVE_FAILURES_BEFORE_ALERT
     ? currentMonitorError
     : null
@@ -138,7 +143,7 @@ export function AdminWeightsAlerts() {
               title={
                 row.unavailable
                   ? 'No on-chain last_update for this UID'
-                  : `Last set epoch ${row.lastSetEpoch}, ${row.blocksSince} blocks since last update`
+                  : `Last set at block ${row.lastSetBlock}, ${row.blocksSince} blocks since last update`
               }
               className="inline-flex items-center gap-1 rounded-full border border-red-500/50 bg-red-500/10 px-2 py-0.5 text-[11px] font-medium text-red-300"
             >
@@ -151,15 +156,13 @@ export function AdminWeightsAlerts() {
         </div>
       </div>
       <div className="mt-2 space-y-1 text-xs text-red-300/90">
-        <div className="font-semibold">
-          Weight set issue (epoch {epoch !== null ? epoch - 1 : '—'})
-        </div>
+        <div className="font-semibold">Weight set issue</div>
         {issues.map((row) => (
           <div key={row.uid}>
             UID {row.uid} {row.label}:{' '}
             {row.unavailable
               ? 'no on-chain last_update is available'
-              : `last set epoch ${row.lastSetEpoch}, ${row.blocksSince} blocks since last update`}
+              : `last set block ${row.lastSetBlock}, ${row.blocksSince} blocks since last update`}
           </div>
         ))}
         <div style={{ color: 'var(--text-tertiary)' }}>
