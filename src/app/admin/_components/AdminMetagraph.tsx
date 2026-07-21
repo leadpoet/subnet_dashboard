@@ -22,6 +22,7 @@ const METAGRAPH_REFRESH_INTERVAL_MS = 30_000
 const EPOCH_REFRESH_INTERVAL_MS = 12_000
 const ACTIVE_VALIDATOR_MAX_BLOCKS = 360
 const BLOCK_TIME_SECONDS = 12
+const PRIMARY_VALIDATOR_UID = 0
 
 type MetagraphPayload = MetagraphData & { cachedAt?: number }
 type SortKey =
@@ -89,7 +90,7 @@ function validatorRows(data: MetagraphPayload | null): ValidatorRow[] {
         isMiner: trust > 0 || consensus > 0 || incentive > 0,
       }
     })
-    .filter((row) => !row.isMiner)
+    .filter((row) => row.uid === PRIMARY_VALIDATOR_UID || !row.isMiner)
 }
 
 function numericValue(row: ValidatorRow, key: SortKey): number | string {

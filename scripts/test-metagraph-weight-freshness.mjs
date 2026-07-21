@@ -394,7 +394,9 @@ class Subtensor:
   )
   assert.match(blocksCardSource, /epochState\.blocksElapsed, 0\)\} elapsed/)
   assert.doesNotMatch(blocksCardSource, /epochState\.subnetEpochIndex/)
-  assert.match(metagraphUiSource, /\.filter\(\(row\) => !row\.isMiner\)/)
+  assert.match(metagraphUiSource, /const PRIMARY_VALIDATOR_UID = 0/)
+  assert.match(metagraphUiSource, /\.filter\(\(row\) => row\.uid === PRIMARY_VALIDATOR_UID \|\| !row\.isMiner\)/)
+  assert.match(metagraphUiSource, /const activeRows = rows\.filter\(\(row\) => row\.updated !== null && row\.updated < ACTIVE_VALIDATOR_MAX_BLOCKS\)/)
   assert.match(metagraphUiSource, /formatAmount\(activeRows\.length, 0\)\}\/\$\{formatAmount\(rows\.length, 0\)/)
   const tableHead = metagraphUiSource.slice(
     metagraphUiSource.indexOf('<thead'),
