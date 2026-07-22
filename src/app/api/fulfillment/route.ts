@@ -37,6 +37,14 @@ const CACHE_TTL = 60_000
 const LEADERBOARD_WINDOW_DAYS = 7
 const LEADERBOARD_ROW_LIMIT = 10_000
 const CONSENSUS_ROW_LIMIT = 25_000
+// Only the consensus columns the response mapper reads (audited end to end).
+// Selecting these instead of '*' drops the four large JSONB columns
+// (intent_signal_mapping, intent_details, intent_breakdown,
+// attribute_verification) from every 25k-row scan on each 60s refresh.
+const CONSENSUS_COLUMNS =
+  'consensus_id,request_id,miner_hotkey,lead_id,consensus_final_score,' +
+  'consensus_rep_score,any_fabricated,is_winner,reward_pct,computed_at,' +
+  'consensus_email_verified,consensus_person_verified,consensus_company_verified'
 const SCORE_ROW_BATCH_SIZE = 1000
 const TOP_MINER_BONUS_PCTS = [5, 3, 1.5] as const
 
@@ -185,7 +193,7 @@ async function fetchFulfillmentData() {
     const [scoreConsensusResult, chainSummariesResult] = await Promise.all([
       supabase
         .from('fulfillment_score_consensus')
-        .select('*')
+        .select(CONSENSUS_COLUMNS)
         .in('request_id', allRequestIds)
         .order('computed_at', { ascending: false })
         .limit(CONSENSUS_ROW_LIMIT),
@@ -261,14 +269,14 @@ async function fetchFulfillmentData() {
         const batch = allChainLeadIds.slice(i, i + 100)
         const { data: chainData, error: chainErr } = await supabase
           .from('fulfillment_score_consensus')
-          .select('*')
+          .select(CONSENSUS_COLUMNS)
           .in('lead_id', batch)
           .eq('is_winner', true)
           .limit(1000)
         if (chainErr) {
           console.error('[Fulfillment API] chain canonical consensus error:', chainErr)
         } else {
-          chainCanonicalRows.push(...((chainData || []) as Array<Record<string, unknown>>))
+          chainCanonicalRows.push(...((chainData || []) as unknown as Array<Record<string, unknown>>))
         }
       }
     }
@@ -277,7 +285,9 @@ async function fetchFulfillmentData() {
     // overridden by the chain-canonical set when chain data is available.
     // Normalize column names so the client receives a stable shape regardless
     // of whether the table uses `consensus_*` or un-prefixed column names.
-    const rawConsensusBase = scoreConsensusResult.data || []
+    // A non-literal .select(column list) loses supabase-js's row typing, so
+    // normalize the rows to the shape the mapper below expects.
+    const rawConsensusBase = (scoreConsensusResult.data || []) as unknown as Array<Record<string, unknown>>
     // Merge in chain-canonical winners that aren't already represented under
     // the visible request_id, rewriting their request_id to the visible rid
     // so they show up in the dialog. Dedup by (visibleRid, lead_id).

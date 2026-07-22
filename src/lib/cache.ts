@@ -549,6 +549,9 @@ async function fetchModelCompetitionData(): Promise<unknown> {
     .gt('score', 0)
     .gte('champion_at', MODEL_COMPETITION_V2_LIVE_AT)
     .order('champion_at', { ascending: false })
+    // Bound this every-60s scan so it can never grow unbounded as history
+    // accumulates (well above the current post-cutover row count).
+    .limit(1000)
 
   if (historyError) {
     console.error('[Cache] Error fetching qualification_champion_history:', historyError)

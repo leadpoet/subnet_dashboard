@@ -121,16 +121,27 @@ async function buildBoard(minerHotkey: string | null, setId: number): Promise<Fa
     .order('set_id', { ascending: false })
     .limit(10)
 
+  // Batch the icp_sets lookup into ONE query instead of one per baseline
+  // (the former N+1). Build a set_id -> icps map, then process locally.
+  const baselineSetIds = Array.from(
+    new Set((recentBaselines ?? []).map((b) => b.set_id as number)),
+  )
+  const icpsBySet = new Map<number, Array<Record<string, unknown>>>()
+  if (baselineSetIds.length > 0) {
+    const { data: setRows } = await sb
+      .from('qualification_private_icp_sets')
+      .select('set_id, icps')
+      .in('set_id', baselineSetIds)
+    for (const s of setRows ?? []) {
+      icpsBySet.set(s.set_id as number, (s.icps as Array<Record<string, unknown>>) ?? [])
+    }
+  }
+
   const intentScores = new Map<string, number[]>()
   for (const b of recentBaselines ?? []) {
     const sid = b.set_id as number
     const scores = (b.per_icp_scores as number[]) ?? []
-    const { data: setRow } = await sb
-      .from('qualification_private_icp_sets')
-      .select('icps')
-      .eq('set_id', sid)
-      .limit(1)
-    const icps = (setRow?.[0]?.icps as Array<Record<string, unknown>>) ?? []
+    const icps = icpsBySet.get(sid) ?? []
     for (let i = 0; i < Math.min(icps.length, scores.length); i++) {
       const intents = (icps[i]?.intent_signals as string[]) ?? []
       if (intents.length === 0) continue
