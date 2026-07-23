@@ -385,7 +385,7 @@ type AdminLabValidatorDeploymentSummary = {
   unavailableReason: string | null
   currentCommitVerified: boolean
   verificationReason: string | null
-  source: AdminLabAttestationSummary['source']
+  source: AdminLabAttestationSummary['source'] | 'attested_execution_receipts_v2'
   commitSha: string | null
   buildId: string | null
   reportedAt: string | null
@@ -1800,7 +1800,9 @@ function ValidatorRepositoryPopover({
             : 'Unknown'
   const comparisonCopy = !isVerified
     ? deployment.reportedAt
-      ? `Running validator commit is unknown. Last published telemetry was ${formatDateTime(deployment.reportedAt)}.`
+      ? deployment.source === 'attested_execution_receipts_v2'
+        ? `Running validator commit is unknown. Last attested execution was ${formatDateTime(deployment.reportedAt)}.`
+        : `Running validator commit is unknown. Last published telemetry was ${formatDateTime(deployment.reportedAt)}.`
       : 'Running validator commit is unknown until fresh runtime telemetry reports it.'
     : isMixed
       ? `${deployment.reportingNodeCount} reporting validators are split across ${deployment.distinctCommitCount} commits`
@@ -1952,7 +1954,11 @@ function ValidatorRepositoryPopover({
 
           <div className="grid grid-cols-2 gap-2">
             <SourcingModelDetail
-              label={isVerified ? 'Validator commit' : 'Last published commit'}
+              label={isVerified
+                ? 'Validator commit'
+                : deployment.source === 'attested_execution_receipts_v2'
+                  ? 'Last attested commit'
+                  : 'Last published commit'}
               value={deployment.commitSha}
               href={validatorCommitUrl}
               compact
@@ -1963,10 +1969,29 @@ function ValidatorRepositoryPopover({
               href={latestCommitUrl}
               compact
             />
-            <SourcingModelDetail label={isVerified ? 'Reported by' : 'Last published by'} value={reportingNode} compact />
-            <SourcingModelDetail label={isVerified ? 'Validator build' : 'Published epoch'} value={deployment.buildId} />
             <SourcingModelDetail
-              label={isVerified ? 'Validator reported' : 'Last published'}
+              label={deployment.source === 'attested_execution_receipts_v2'
+                ? 'Attested role'
+                : isVerified
+                  ? 'Reported by'
+                  : 'Last published by'}
+              value={reportingNode}
+              compact
+            />
+            <SourcingModelDetail
+              label={deployment.source === 'attested_execution_receipts_v2'
+                ? 'Boot identity'
+                : isVerified
+                  ? 'Validator build'
+                  : 'Published epoch'}
+              value={deployment.buildId}
+            />
+            <SourcingModelDetail
+              label={deployment.source === 'attested_execution_receipts_v2'
+                ? 'Last execution'
+                : isVerified
+                  ? 'Validator reported'
+                  : 'Last published'}
               value={deployment.reportedAt ? formatDateTime(deployment.reportedAt) : null}
             />
             <SourcingModelDetail

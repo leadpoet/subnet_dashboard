@@ -112,6 +112,7 @@ const PUBLIC_LOG_LIMIT = 1_000
 const FRESH_PUBLISHED_ATTESTATION_MS = 3 * 60 * 60 * 1000
 const DEGRADED_PUBLISHED_ATTESTATION_MS = 6 * 60 * 60 * 1000
 const FRESH_VALIDATOR_RUNTIME_ATTESTATION_MS = 5 * 60 * 1000
+const FRESH_VALIDATOR_EXECUTION_RECEIPT_MS = 3 * 60 * 60 * 1000
 const FRESH_WEIGHT_SUBMISSION_MS = 3 * 60 * 60 * 1000
 const DEGRADED_WEIGHT_SUBMISSION_MS = 6 * 60 * 60 * 1000
 const FRESH_ARWEAVE_CHECKPOINT_MS = 6 * 60 * 60 * 1000
@@ -511,7 +512,7 @@ export type AdminLabValidatorDeploymentSummary = {
   unavailableReason: string | null
   currentCommitVerified: boolean
   verificationReason: string | null
-  source: AdminLabAttestationSummary['source']
+  source: AdminLabAttestationSummary['source'] | 'attested_execution_receipts_v2'
   commitSha: string | null
   buildId: string | null
   reportedAt: string | null
@@ -1354,6 +1355,7 @@ async function fetchAdminLabOps(
   const alertResolutions = buildRunAlertResolutions(loops, alertNow)
   const alerts = mergeEvaluatedAlertSummary(baseAlerts, evaluatedAlerts)
   const validatorDeployment = await buildValidatorDeploymentSummary(
+    supabase,
     attestation,
     leadpoetRepository,
   )
@@ -5256,10 +5258,21 @@ async function fetchLeadpoetRepositorySummary(): Promise<AdminLabRepositorySumma
 }
 
 async function buildValidatorDeploymentSummary(
+  supabase: ReturnType<typeof getAdminSupabase>,
   attestation: AdminLabAttestationSummary,
   repository: AdminLabRepositorySummary,
 ): Promise<AdminLabValidatorDeploymentSummary> {
   const checkedAt = new Date().toISOString()
+  const runtimeReceipt = await fetchLatestValidatorExecutionReceipt(supabase)
+  const runtimeReceiptAgeMs = runtimeReceipt.reportedAt
+    ? Date.now() - timestampOrZero(runtimeReceipt.reportedAt)
+    : null
+  const runtimeReceiptVerified = Boolean(
+    runtimeReceipt.commitSha &&
+    runtimeReceiptAgeMs !== null &&
+    runtimeReceiptAgeMs >= -60_000 &&
+    runtimeReceiptAgeMs <= FRESH_VALIDATOR_EXECUTION_RECEIPT_MS,
+  )
   const validatorNodes = attestation.nodes.filter((node) =>
     attestation.source === 'published_weight_bundles' ||
     node.component.toLowerCase().includes('validator'),
@@ -5276,22 +5289,28 @@ async function buildValidatorDeploymentSummary(
     : 0
   const reportAgeMs = reportedAtMs > 0 ? Date.now() - reportedAtMs : null
   const currentCommitVerified = Boolean(
-    latestValidator &&
-    attestation.source === 'ops_attestation_current' &&
-    reportAgeMs !== null &&
-    reportAgeMs >= -60_000 &&
-    reportAgeMs <= FRESH_VALIDATOR_RUNTIME_ATTESTATION_MS,
+    runtimeReceiptVerified ||
+    (
+      latestValidator &&
+      attestation.source === 'ops_attestation_current' &&
+      reportAgeMs !== null &&
+      reportAgeMs >= -60_000 &&
+      reportAgeMs <= FRESH_VALIDATOR_RUNTIME_ATTESTATION_MS
+    ),
   )
+  const currentCommitSha = runtimeReceipt.commitSha ?? latestValidator?.gitSha ?? null
   const comparison: GatewayCommitComparison = currentCommitVerified
     ? await fetchLeadpoetCommitComparison(
-        latestValidator?.gitSha ?? null,
+        currentCommitSha,
         repository.commitSha,
         'validator',
       )
     : { freshness: 'unknown', commitsBehind: null }
 
-  const unavailableReason = latestValidator
+  const unavailableReason = runtimeReceipt.commitSha || latestValidator
     ? null
+    : runtimeReceipt.unavailableReason
+      ? runtimeReceipt.unavailableReason
     : !attestation.sourceAvailable
       ? attestation.unavailableReason ?? 'Validator attestation telemetry is unavailable'
       : validatorNodes.length === 0
@@ -5299,6 +5318,8 @@ async function buildValidatorDeploymentSummary(
         : 'Validator telemetry did not report a valid commit SHA'
   const verificationReason = currentCommitVerified
     ? null
+    : runtimeReceipt.commitSha
+      ? 'The latest attested validator execution receipt is stale'
     : latestValidator && attestation.source === 'published_weight_bundles'
       ? 'Only the last published weight bundle is available; it does not verify the currently running validator'
       : latestValidator && reportAgeMs === null
@@ -5308,24 +5329,72 @@ async function buildValidatorDeploymentSummary(
           : unavailableReason
 
   return {
-    sourceAvailable: Boolean(latestValidator),
+    sourceAvailable: Boolean(runtimeReceipt.commitSha || latestValidator),
     unavailableReason,
     currentCommitVerified,
     verificationReason,
-    source: attestation.source,
-    commitSha: latestValidator?.gitSha ?? null,
-    buildId: latestValidator?.buildId ?? null,
-    reportedAt: latestValidator?.attestedAt ?? null,
-    nodeId: latestValidator?.nodeId ?? null,
-    hotkey: latestValidator?.hotkey ?? null,
+    source: runtimeReceipt.commitSha
+      ? 'attested_execution_receipts_v2'
+      : attestation.source,
+    commitSha: currentCommitSha,
+    buildId: runtimeReceipt.bootIdentityHash ?? latestValidator?.buildId ?? null,
+    reportedAt: runtimeReceipt.reportedAt ?? latestValidator?.attestedAt ?? null,
+    nodeId: runtimeReceipt.commitSha ? 'validator_weights' : latestValidator?.nodeId ?? null,
+    hotkey: runtimeReceipt.commitSha ? null : latestValidator?.hotkey ?? null,
     checkedAt,
     commitFreshness: comparison.freshness,
     commitsBehind: comparison.commitsBehind,
-    reportingNodeCount: reportingNodes.length,
-    distinctCommitCount: new Set(reportingNodes.map((node) => node.gitSha.toLowerCase())).size,
-    commitShas: Array.from(
-      new Map(reportingNodes.map((node) => [node.gitSha.toLowerCase(), node.gitSha])).values(),
-    ),
+    reportingNodeCount: runtimeReceipt.commitSha ? 1 : reportingNodes.length,
+    distinctCommitCount: runtimeReceipt.commitSha
+      ? 1
+      : new Set(reportingNodes.map((node) => node.gitSha.toLowerCase())).size,
+    commitShas: runtimeReceipt.commitSha
+      ? [runtimeReceipt.commitSha]
+      : Array.from(
+          new Map(reportingNodes.map((node) => [node.gitSha.toLowerCase(), node.gitSha])).values(),
+        ),
+  }
+}
+
+async function fetchLatestValidatorExecutionReceipt(
+  supabase: ReturnType<typeof getAdminSupabase>,
+): Promise<{
+  commitSha: string | null
+  bootIdentityHash: string | null
+  reportedAt: string | null
+  unavailableReason: string | null
+}> {
+  const { data, error } = await supabase
+    .from('research_lab_attested_execution_receipts_v2')
+    .select('commit_sha,boot_identity_hash,issued_at,created_at')
+    .eq('role', 'validator_weights')
+    .order('issued_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  if (error) {
+    return {
+      commitSha: null,
+      bootIdentityHash: null,
+      reportedAt: null,
+      unavailableReason: `Attested validator execution receipts are unavailable: ${error.message}`,
+    }
+  }
+
+  const row = (data ?? null) as Record<string, unknown> | null
+  const commitSha = githubCommitShaOrNull(row?.commit_sha)
+  return {
+    commitSha,
+    bootIdentityHash: stringOr(row?.boot_identity_hash) ?? null,
+    reportedAt:
+      isoStringOr(row?.issued_at) ??
+      isoStringOr(row?.created_at) ??
+      null,
+    unavailableReason: row
+      ? commitSha
+        ? null
+        : 'The latest attested validator execution receipt has no valid commit SHA'
+      : 'No attested validator execution receipt is available',
   }
 }
 
