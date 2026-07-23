@@ -78,7 +78,7 @@ const migration = await readFile(
   resolve('supabase/migrations/20260722212844_batch_chain_summaries.sql'),
   'utf8',
 )
-assert.match(migration, /at most 100 unique request ids/, 'input must be bounded to 100 ids')
+assert.match(migration, /cardinality\(p_request_ids\) > 100/, 'raw array bounded BEFORE unnest (duplicate-flood safe)')
 assert.match(migration, /ERRCODE = '22023'/, 'oversized input raises a defined error')
 // Check the executable SQL (comments mention "UNION ALL" to explain the choice).
 const sqlOnly = migration
@@ -103,7 +103,7 @@ const histName = (await readdir(migDir)).find((f) => f.endsWith('_rejection_reas
 assert.ok(histName, 'rejection-histogram migration must exist')
 const hist = await readFile(join(migDir, histName), 'utf8')
 assert.match(hist, /get_rejection_reason_histogram/, 'defines the histogram RPC')
-assert.match(hist, /at most 100 unique request ids/, 'histogram RPC bounded to 100 ids')
+assert.match(hist, /cardinality\(p_request_ids\) > 100/, 'histogram bounded BEFORE unnest')
 const histSql = hist.split('\n').filter((l) => !l.trim().startsWith('--')).join('\n')
 assert.doesNotMatch(histSql, /UNION ALL/, 'histogram recursion must be cycle-safe')
 assert.match(hist, /LIMIT 25000/, 'mirrors the route 25k consensus window')

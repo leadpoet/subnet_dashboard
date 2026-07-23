@@ -29,8 +29,10 @@ BEGIN
     IF p_request_ids IS NULL THEN
         RETURN;
     END IF;
-    IF (SELECT count(DISTINCT x) FROM unnest(p_request_ids) AS t(x)) > 100 THEN
-        RAISE EXCEPTION 'get_chain_summaries accepts at most 100 unique request ids'
+    -- Bound the RAW array BEFORE any unnest: a huge array full of duplicates
+    -- must not be scanned just to count its distinct members.
+    IF cardinality(p_request_ids) > 100 THEN
+        RAISE EXCEPTION 'get_chain_summaries accepts at most 100 request ids'
             USING ERRCODE = '22023';
     END IF;
 
