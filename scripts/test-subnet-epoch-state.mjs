@@ -257,12 +257,29 @@ try {
   assert.match(middlewareSource, /'\/api\/admin\/:path\*'/, 'admin middleware must protect the endpoint')
 
   const uiSource = await readFile(resolve('src/app/admin/_components/AdminMetagraph.tsx'), 'utf8')
-  assert.match(uiSource, /const EPOCH_REFRESH_INTERVAL_MS = 12_000/)
+  assert.doesNotMatch(uiSource, /EPOCH_REFRESH_INTERVAL_MS/)
+  assert.match(uiSource, /Validator and epoch data refresh together every 30s/)
+  assert.match(uiSource, /const refreshFlight = useRef<Promise<void> \| null>\(null\)/)
+  assert.match(uiSource, /const refreshAll = useCallback\(\(\) =>/)
+  assert.match(uiSource, /if \(refreshFlight\.current\) return refreshFlight\.current/)
+  assert.match(uiSource, /Promise\.all\(\[\s*fetchMetagraph\(\),\s*fetchEpochState\(\),\s*\]\)/)
+  assert.match(uiSource, /if \(metagraphFresh && epochFresh\) setLastRefreshAt\(Date\.now\(\)\)/)
+  assert.match(uiSource, /Data refreshed \{lastRefreshAt/)
+  assert.match(uiSource, /onClick=\{\(\) => void refreshAll\(\)\}/)
+  assert.equal(
+    (uiSource.match(/addEventListener\('leadpoet-admin-refresh'/g) ?? []).length,
+    1,
+    'validator and epoch data must share one admin-refresh listener',
+  )
+  assert.equal(
+    (uiSource.match(/METAGRAPH_REFRESH_INTERVAL_MS/g) ?? []).length,
+    2,
+    'the coordinated data cycle must have exactly one 30-second timer',
+  )
   assert.match(uiSource, /\/api\/admin\/subnet-epoch\?t=/)
   assert.match(uiSource, /cache: 'no-store'/)
   assert.doesNotMatch(uiSource, /setEpochState\(null\)/, 'a transient live-read failure must retain the last successful epoch')
   assert.match(uiSource, /const EPOCH_LAST_GOOD_MAX_AGE_MS = 5 \* 60_000/)
-  assert.match(uiSource, /`Last good \$\{epochObservedLabel\} · \$\{epochAgeLabel\}`/)
   assert.match(uiSource, /Showing the last successful snapshot/)
   assert.match(uiSource, /pulled at \$\{epochObservedLabel\} \(\$\{epochAgeLabel\}\)/)
   assert.match(uiSource, /countdown is paused until live reads recover/)
@@ -271,7 +288,7 @@ try {
   assert.match(uiSource, /displayedEpochState\.blocksElapsed/)
   assert.match(uiSource, /displayedEpochState\.blocksRemaining/)
   assert.match(uiSource, /epochState\.observedAt/)
-  assert.match(uiSource, /displayedEpochState\.blockHash/)
+  assert.match(uiSource, /payload\.blockHash/)
   assert.doesNotMatch(uiSource, /lastEpochBlock: data\?\./, 'epoch cards must not use cached metagraph schedule fields')
 
   console.log('subnet-epoch-state: exact best-head reads, shared snapshots, bounded last-good fallback, and paused stale countdown passed')

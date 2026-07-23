@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ArrowDown,
   ArrowUp,
@@ -20,7 +20,6 @@ import type { SubnetEpochSnapshot } from '@/lib/subnet-epoch'
 import { cn } from '@/lib/utils'
 
 const METAGRAPH_REFRESH_INTERVAL_MS = 30_000
-const EPOCH_REFRESH_INTERVAL_MS = 12_000
 const EPOCH_LAST_GOOD_MAX_AGE_MS = 5 * 60_000
 const ACTIVE_VALIDATOR_MAX_BLOCKS = 360
 const BLOCK_TIME_SECONDS = 12
@@ -240,8 +239,9 @@ export function AdminMetagraph() {
   const [error, setError] = useState<string | null>(null)
   const [epochError, setEpochError] = useState<string | null>(null)
   const [epochRefreshFailedAt, setEpochRefreshFailedAt] = useState<number | null>(null)
-  const [lastSyncedAt, setLastSyncedAt] = useState<number | null>(null)
+  const [lastRefreshAt, setLastRefreshAt] = useState<number | null>(null)
   const [clockNow, setClockNow] = useState(() => Date.now())
+  const refreshFlight = useRef<Promise<void> | null>(null)
   const [search, setSearch] = useState('')
   const [detailsExpanded, setDetailsExpanded] = useState(false)
   const [sortKey, setSortKey] = useState<SortKey>('stake')
@@ -255,10 +255,11 @@ export function AdminMetagraph() {
       const payload = await response.json() as MetagraphPayload
       if (payload.error) throw new Error(payload.error)
       setData(payload)
-      setLastSyncedAt(Date.now())
       setError(null)
+      return true
     } catch (fetchError) {
       setError(fetchError instanceof Error ? fetchError.message : 'Failed to refresh the metagraph')
+      return false
     } finally {
       setLoading(false)
       setRefreshing(false)
@@ -289,46 +290,48 @@ export function AdminMetagraph() {
       if (payload.freshness === 'stale') {
         setEpochError(payload.refreshError || 'Live subnet epoch refresh failed')
         setEpochRefreshFailedAt((failedAt) => failedAt ?? Date.now())
+        return false
       } else {
         setEpochError(null)
         setEpochRefreshFailedAt(null)
+        return true
       }
     } catch (fetchError) {
       setEpochError(fetchError instanceof Error ? fetchError.message : 'Failed to read the live subnet epoch')
       setEpochRefreshFailedAt((failedAt) => failedAt ?? Date.now())
+      return false
     } finally {
       setEpochLoading(false)
       setEpochRefreshing(false)
     }
   }, [])
 
-  useEffect(() => {
-    void fetchMetagraph()
-    const interval = window.setInterval(() => {
-      if (document.visibilityState === 'visible') void fetchMetagraph()
-    }, METAGRAPH_REFRESH_INTERVAL_MS)
-    const handleVisibility = () => {
-      if (document.visibilityState === 'visible') void fetchMetagraph()
+  const refreshAll = useCallback(() => {
+    if (refreshFlight.current) return refreshFlight.current
+
+    const refresh = Promise.all([
+      fetchMetagraph(),
+      fetchEpochState(),
+    ]).then(([metagraphFresh, epochFresh]) => {
+      if (metagraphFresh && epochFresh) setLastRefreshAt(Date.now())
+    })
+    refreshFlight.current = refresh
+    const clear = () => {
+      if (refreshFlight.current === refresh) refreshFlight.current = null
     }
-    const handleAdminRefresh = () => void fetchMetagraph()
-    document.addEventListener('visibilitychange', handleVisibility)
-    window.addEventListener('leadpoet-admin-refresh', handleAdminRefresh)
-    return () => {
-      window.clearInterval(interval)
-      document.removeEventListener('visibilitychange', handleVisibility)
-      window.removeEventListener('leadpoet-admin-refresh', handleAdminRefresh)
-    }
-  }, [fetchMetagraph])
+    void refresh.then(clear, clear)
+    return refresh
+  }, [fetchEpochState, fetchMetagraph])
 
   useEffect(() => {
-    void fetchEpochState()
+    void refreshAll()
     const interval = window.setInterval(() => {
-      if (document.visibilityState === 'visible') void fetchEpochState()
-    }, EPOCH_REFRESH_INTERVAL_MS)
+      if (document.visibilityState === 'visible') void refreshAll()
+    }, METAGRAPH_REFRESH_INTERVAL_MS)
     const handleVisibility = () => {
-      if (document.visibilityState === 'visible') void fetchEpochState()
+      if (document.visibilityState === 'visible') void refreshAll()
     }
-    const handleAdminRefresh = () => void fetchEpochState()
+    const handleAdminRefresh = () => void refreshAll()
     document.addEventListener('visibilitychange', handleVisibility)
     window.addEventListener('leadpoet-admin-refresh', handleAdminRefresh)
     return () => {
@@ -336,7 +339,7 @@ export function AdminMetagraph() {
       document.removeEventListener('visibilitychange', handleVisibility)
       window.removeEventListener('leadpoet-admin-refresh', handleAdminRefresh)
     }
-  }, [fetchEpochState])
+  }, [refreshAll])
 
   useEffect(() => {
     const interval = window.setInterval(() => setClockNow(Date.now()), 1000)
@@ -413,7 +416,7 @@ export function AdminMetagraph() {
             </span>
           </div>
           <p className="mt-0.5 text-[11px]" style={{ color: 'var(--text-tertiary)' }}>
-            Validator snapshot every 30s · official epoch clock every 12s
+            Validator and epoch data refresh together every 30s
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -421,32 +424,16 @@ export function AdminMetagraph() {
             className="inline-flex h-8 items-center gap-2 rounded-lg border px-2.5 text-[10px]"
             style={{ borderColor: 'var(--surface-border)', background: 'var(--surface)', color: 'var(--text-secondary)' }}
           >
-            <Wifi className="h-3.5 w-3.5 text-gold" />
+            <Wifi className={cn('h-3.5 w-3.5', lastRefreshAt && !error && !epochError ? 'text-gold' : '')} />
             <span>
-              Metagraph {lastSyncedAt
-                ? new Date(lastSyncedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+              Data refreshed {lastRefreshAt
+                ? new Date(lastRefreshAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
                 : 'syncing…'}
-            </span>
-          </div>
-          <div
-            className="inline-flex h-8 items-center gap-2 rounded-lg border px-2.5 font-mono text-[10px]"
-            style={{ borderColor: 'var(--surface-border)', background: 'var(--surface)', color: 'var(--text-secondary)' }}
-            title={displayedEpochState
-              ? `${epochError ? 'Last successful' : 'Best'} head ${displayedEpochState.blockHash}`
-              : undefined}
-          >
-            <Wifi className={cn('h-3.5 w-3.5', displayedEpochState && !epochError ? 'text-gold' : '')} />
-            <span>
-              {displayedEpochState
-                ? epochError
-                  ? `Last good ${epochObservedLabel} · ${epochAgeLabel}`
-                  : `${epochObservedLabel} · ${displayedEpochState.blockHash.slice(0, 10)}…`
-                : epochLoading ? 'Reading best head…' : 'Best head unavailable'}
             </span>
           </div>
           <button
             type="button"
-            onClick={() => void Promise.all([fetchMetagraph(), fetchEpochState()])}
+            onClick={() => void refreshAll()}
             disabled={refreshing || epochRefreshing}
             className="inline-flex h-8 items-center gap-2 rounded-lg border px-2.5 text-[11px] transition-colors hover:text-gold disabled:opacity-60"
             style={{ borderColor: 'var(--surface-border)', background: 'var(--surface)', color: 'var(--text-secondary)' }}
