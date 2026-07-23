@@ -53,7 +53,6 @@ interface OverviewProps {
   alphaPrice: number | null
   onMinerClick?: (minerHotkey: string) => void
   metagraph?: MetagraphData | null
-  qualificationMinerHotkeys?: string[]
 }
 
 export function Overview({
@@ -67,7 +66,6 @@ export function Overview({
   alphaPrice,
   onMinerClick,
   metagraph,
-  qualificationMinerHotkeys: _qualificationMinerHotkeys = [],
 }: OverviewProps) {
   const [sortKey, setSortKey] = useState<SortKey>('accepted')
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc')

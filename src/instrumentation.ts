@@ -6,10 +6,7 @@
  *
  *   1. Cache warm-up + background refresh for the public dashboard.
  *      Pre-warms `dashboard_precalc` so the first user doesn't pay the
- *      cold-start cost, then schedules 5-minute dashboard refreshes and
- *      1-minute Model Competition refreshes. Without these timers
- *      running, `/api/model-competition` returns 503 forever and the
- *      UI shows "Failed to fetch data".
+ *      cold-start cost, then schedules 5-minute dashboard refreshes.
  *
  *   2. Optional Deep Research auto-sweep loop. When explicitly enabled,
  *      a background interval calls the QA sweep every 60 seconds so
@@ -79,7 +76,6 @@ export async function register(): Promise<void> {
       const {
         warmCache,
         startBackgroundRefresh,
-        startModelCompetitionRefresh,
       } = await import('./lib/cache')
 
       console.log('[Server] Starting cache warm-up...')
@@ -88,17 +84,13 @@ export async function register(): Promise<void> {
         .then(() => {
           console.log('[Server] Cache warm-up complete')
           startBackgroundRefresh()
-          startModelCompetitionRefresh()
         })
         .catch((err) => {
           console.error('[Server] Cache warm-up failed:', err)
-          // Even on warm-up failure, start the refresh loops so the
-          // cache can self-heal on the next tick instead of being
-          // permanently empty (which is what made the Model
-          // Competition tab show "Failed to fetch data").
+          // Even on warm-up failure, start the refresh loop so the
+          // cache can self-heal on the next tick.
           try {
             startBackgroundRefresh()
-            startModelCompetitionRefresh()
           } catch (innerErr) {
             console.error(
               '[Server] Failed to start refresh loops after warm-up failure:',

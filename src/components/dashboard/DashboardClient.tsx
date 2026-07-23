@@ -7,7 +7,6 @@ import {
   MinerTracker,
   EpochAnalysis,
   SubmissionTracker,
-  ModelCompetition,
   ResearchLab,
   FAQ,
 } from '@/components/dashboard'
@@ -25,7 +24,6 @@ import { cn } from '@/lib/utils'
 type TabKey =
   | 'research-lab'
   | 'fulfillment'
-  | 'model-competition'
   | 'overview'
   | 'miner-tracker'
   | 'epoch-analysis'
@@ -48,7 +46,6 @@ interface DashboardData extends AllDashboardData {
   serverRefreshedAt?: string
   serverRelativeTime?: string
   buildVersion?: string
-  qualificationMinerHotkeys?: string[]
 }
 
 // Props received from Server Component
@@ -361,13 +358,6 @@ export function DashboardClient({ initialData, metagraph: initialMetagraph }: Da
                 label="Fulfillment"
               />
             )}
-            {VISIBLE_TABS.includes('model-competition') && (
-              <DashboardTabTrigger
-                value="model-competition"
-                label="Model Competition"
-                shortLabel="Model"
-              />
-            )}
             {/* Legacy tabs stay registered in code, but are not publicly visible. */}
             {VISIBLE_TABS.includes('overview') && (
               <DashboardTabTrigger
@@ -435,18 +425,6 @@ export function DashboardClient({ initialData, metagraph: initialMetagraph }: Da
             </TabsContent>
           )}
 
-          {VISIBLE_TABS.includes('model-competition') && mountedTabs.has('model-competition') && (
-            <TabsContent
-              value="model-competition"
-              keepMounted
-              className="data-[state=active]:animate-in data-[state=active]:fade-in-0 data-[state=active]:duration-300"
-            >
-              <ErrorBoundary label="ModelCompetition">
-                <ModelCompetition />
-              </ErrorBoundary>
-            </TabsContent>
-          )}
-
           {VISIBLE_TABS.includes('faq') && mountedTabs.has('faq') && (
             <TabsContent
               value="faq"
@@ -475,7 +453,6 @@ export function DashboardClient({ initialData, metagraph: initialMetagraph }: Da
                 alphaPrice={metagraph?.alphaPrice ?? null}
                 onMinerClick={handleMinerClick}
                 metagraph={metagraph}
-                qualificationMinerHotkeys={dashboardData.qualificationMinerHotkeys || []}
               />
             </TabsContent>
           )}
