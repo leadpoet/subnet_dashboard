@@ -1,0 +1,29 @@
+name: PR Checks
+
+# The other workflows only run on push to main, so pull requests had no reported
+# check. This runs type-checking and linting on every PR to main so changes get
+# a green required signal before merge.
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  typecheck-and-lint:
+    name: Typecheck and Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: TypeScript typecheck
+        run: npx tsc --noEmit -p tsconfig.json
+      - name: ESLint
+        run: npx next lint --max-warnings=100000
