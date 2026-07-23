@@ -1,6 +1,8 @@
 import { createClient } from '@supabase/supabase-js'
 import { createHash } from 'node:crypto'
 import { NextRequest, NextResponse } from 'next/server'
+import { runSingleFlight, type SingleFlightState } from '@/lib/single-flight'
+import { reshapeChainSummaries, type ChainSummaryRow } from '@/lib/chain-summaries'
 
 function getSupabase() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL!
@@ -63,6 +65,20 @@ type ScoreReasonRow = {
 }
 
 let cache: CachedResponse | null = null
+// Single-flight: when the cache is cold/expired, many concurrent clients hitting
+// the 60s boundary would each launch the full DB refresh (thundering herd). This
+// coalesces them onto ONE in-progress refresh via the shared, tested helper.
+const refreshState: SingleFlightState<CachedResponse> = { current: null }
+
+async function getFreshBase(): Promise<CachedResponse> {
+  if (cache && Date.now() - cache.ts < CACHE_TTL) return cache
+  return runSingleFlight(refreshState, async () => {
+    const data = await fetchFulfillmentData()
+    const entry: CachedResponse = { data, etag: computeEtag(data), ts: Date.now() }
+    cache = entry
+    return entry
+  })
+}
 
 function computeEtag(payload: unknown): string {
   // Weak ETag over a stable JSON serialization. SHA-1 is fine here
@@ -207,79 +223,22 @@ async function fetchFulfillmentData() {
       console.error('[Fulfillment API] get_chain_summaries error:', chainSummariesResult.error)
     }
 
-    // Reshape the one batched response back into per-request arrays aligned to
-    // allRequestIds, preserving the exact shapes the downstream code consumes:
-    // winners rows carry { lead_id }, root_num_leads is a number|null, and
-    // held_count is a number.
-    type ChainSummary = {
-      request_id: string
-      winners: Array<{ lead_id?: string }> | null
-      root_num_leads: number | null
-      held_count: number | null
-    }
-    const summaryByRid = new Map<string, ChainSummary>()
-    for (const row of (chainSummariesResult.data || []) as ChainSummary[]) {
-      summaryByRid.set(row.request_id, row)
-    }
-    const chainWinnersResults = allRequestIds.map(rid => ({
-      data: summaryByRid.get(rid)?.winners ?? [],
-      error: null as unknown,
-    }))
-    const rootLeadsResults = allRequestIds.map(rid => ({
-      data: summaryByRid.get(rid)?.root_num_leads ?? null,
-      error: null as unknown,
-    }))
-    const heldResults = allRequestIds.map(rid => ({
-      data: summaryByRid.get(rid)?.held_count ?? 0,
-      error: null as unknown,
-    }))
-
-    // Build a set of (request_id, lead_id) for chain-canonical winners; used to
-    // override is_winner when the off-chain consensus disagrees with the chain.
-    // Also build a lead_id -> visible request_id map so we can pull in
-    // consensus rows that live under earlier/later cycles of the same chain
-    // (recycled fulfillment requests share a chain but use different
-    // request_ids, so a per-rid query alone misses them).
-    const chainWinnerKeys = new Set<string>()
-    const leadIdToVisibleRid = new Map<string, string>()
-    for (let i = 0; i < chainWinnersResults.length; i++) {
-      const { data, error } = chainWinnersResults[i]
-      if (error) console.error(`[Fulfillment API] Chain winners error for ${allRequestIds[i]}:`, error)
-      for (const row of (data || []) as Array<{ lead_id?: string }>) {
-        if (!row.lead_id) continue
-        chainWinnerKeys.add(`${allRequestIds[i]}|${row.lead_id}`)
-        // First-claim wins. A lead_id should only attach to one visible
-        // request in this response.
-        if (!leadIdToVisibleRid.has(row.lead_id)) {
-          leadIdToVisibleRid.set(row.lead_id, allRequestIds[i])
-        }
-      }
-    }
-
-    // Pull chain-canonical winners' consensus rows even when their actual
-    // request_id is from another cycle in the chain. Without this the
-    // dialog only shows leads scored under the visible request_id, which
-    // for a recycled chain can be far fewer than the chain's num_leads.
-    // Batch in groups of 100 to avoid Supabase default row limit (1000)
-    // and .in() value limits.
-    const chainCanonicalRows: Array<Record<string, unknown>> = []
-    const allChainLeadIds = Array.from(leadIdToVisibleRid.keys())
-    if (allChainLeadIds.length > 0) {
-      for (let i = 0; i < allChainLeadIds.length; i += 100) {
-        const batch = allChainLeadIds.slice(i, i + 100)
-        const { data: chainData, error: chainErr } = await supabase
-          .from('fulfillment_score_consensus')
-          .select(CONSENSUS_COLUMNS)
-          .in('lead_id', batch)
-          .eq('is_winner', true)
-          .limit(1000)
-        if (chainErr) {
-          console.error('[Fulfillment API] chain canonical consensus error:', chainErr)
-        } else {
-          chainCanonicalRows.push(...((chainData || []) as unknown as Array<Record<string, unknown>>))
-        }
-      }
-    }
+    // Reshape the one batched response into the per-request arrays downstream
+    // consumes, and derive the winner keys / lead_id map / chain-canonical rows
+    // directly from the full winner rows -- no supplemental `lead_id IN (...)`
+    // query (previously ~3.46M cumulative calls). Pure + unit-tested
+    // (scripts/test-chain-summaries.mjs).
+    const {
+      chainWinnersResults,
+      rootLeadsResults,
+      heldResults,
+      chainWinnerKeys,
+      leadIdToVisibleRid,
+      chainCanonicalRows,
+    } = reshapeChainSummaries(
+      allRequestIds,
+      (chainSummariesResult.data || []) as ChainSummaryRow[],
+    )
 
     // Use score_consensus rows as the primary consensus dataset, with is_winner
     // overridden by the chain-canonical set when chain data is available.
@@ -456,23 +415,13 @@ export async function GET(request: NextRequest) {
   try {
     // Base data: use cache when possible. We keep the ETag alongside the data
     // so 304 responses are free when the cache is warm.
-    let baseEntry: CachedResponse
-    if (!minerHotkey && cache && Date.now() - cache.ts < CACHE_TTL) {
-      baseEntry = cache
-    } else if (!minerHotkey) {
-      const data = await fetchFulfillmentData()
-      baseEntry = { data, etag: computeEtag(data), ts: Date.now() }
-      cache = baseEntry
-    } else {
-      // Miner search. Reuse cached base when fresh; otherwise refresh it.
-      if (cache && Date.now() - cache.ts < CACHE_TTL) {
-        baseEntry = cache
-      } else {
-        const data = await fetchFulfillmentData()
-        baseEntry = { data, etag: computeEtag(data), ts: Date.now() }
-        cache = baseEntry
-      }
-    }
+    // Fresh cache serves immediately; otherwise a single shared refresh runs
+    // (concurrent callers await the same in-flight promise instead of each
+    // launching their own full DB refresh).
+    const baseEntry: CachedResponse =
+      !minerHotkey && cache && Date.now() - cache.ts < CACHE_TTL
+        ? cache
+        : await getFreshBase()
 
     // Phase 2: ETag / 304 not-modified for base data.
     // If the client already has this exact snapshot, return 304 with no body.
