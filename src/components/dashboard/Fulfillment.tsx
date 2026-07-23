@@ -35,7 +35,7 @@ import {
 } from 'lucide-react'
 import {
   FulfillmentCosmos,
-  type CosmosConsensusLead,
+  type CosmosMinerLink,
   type CosmosRequest,
 } from './FulfillmentCosmos'
 import { FulfillmentMobile } from './FulfillmentMobile'
@@ -106,9 +106,18 @@ interface MinerScore {
   company_verified: boolean
 }
 
+interface ConsensusSummaryRow {
+  request_id: string
+  miner_hotkey: string
+  lead_count: number
+  win_count: number
+  last_computed_at: string | null
+}
+
 interface FulfillmentData {
   activeRequests: ActiveRequest[]
-  allConsensus: ConsensusResult[]
+  // Aggregated per (request, miner) — raw lead rows load on demand per dialog.
+  consensusSummary: ConsensusSummaryRow[]
   minerScores: MinerScore[] | null
   requestMap: Record<string, { icp_details: IcpDetails; num_leads: number; status: string }>
   rejectionBreakdown: { reason: string; count: number }[]
@@ -472,7 +481,7 @@ export function Fulfillment({ onSync }: { onSync?: () => void } = {}) {
 
   const graphableActiveRequests = useMemo(() => {
     if (!data) return []
-    const requestIdsWithVisibleLeads = new Set(data.allConsensus.map((c) => c.request_id))
+    const requestIdsWithVisibleLeads = new Set(data.consensusSummary.map((g) => g.request_id))
     return data.activeRequests.filter(
       (r) => PENDING_STATUSES.includes(r.status) || requestIdsWithVisibleLeads.has(r.request_id)
     )
@@ -495,18 +504,10 @@ export function Fulfillment({ onSync }: { onSync?: () => void } = {}) {
       }))
   }, [graphableActiveRequests, filter])
 
-  const filteredLeads = useMemo<CosmosConsensusLead[]>(() => {
+  const filteredLeads = useMemo<CosmosMinerLink[]>(() => {
     if (!data) return []
     const ids = new Set(filteredRequests.map((r) => r.request_id))
-    return data.allConsensus
-      .filter((c) => ids.has(c.request_id))
-      .map((c) => ({
-        request_id: c.request_id,
-        miner_hotkey: c.miner_hotkey,
-        lead_id: c.lead_id,
-        is_winner: c.is_winner,
-        consensus_final_score: c.consensus_final_score,
-      }))
+    return data.consensusSummary.filter((g) => ids.has(g.request_id))
   }, [data, filteredRequests])
 
   const { visibleNodeIds, matchedNodeIds, resultCount } = useMemo(() => {
@@ -552,7 +553,7 @@ export function Fulfillment({ onSync }: { onSync?: () => void } = {}) {
     if (!data) return null
     const lower = q.toLowerCase()
     const hotkeys = new Set<string>()
-    for (const c of data.allConsensus) hotkeys.add(c.miner_hotkey)
+    for (const g of data.consensusSummary) hotkeys.add(g.miner_hotkey)
     for (const l of data.leaderboard) hotkeys.add(l.hotkey)
     for (const h of hotkeys) {
       if (h.toLowerCase() === lower) return h
@@ -677,25 +678,58 @@ export function Fulfillment({ onSync }: { onSync?: () => void } = {}) {
     return new Set<string>([`mnr:${focusedMinerHotkey}`])
   }, [focusedMinerHotkey])
 
-  const dialogLeads = useMemo<ConsensusResult[]>(() => {
-    if (!data || !dialogRequest) return []
-    return data.allConsensus
-      .filter((c) => c.request_id === dialogRequest.request_id)
-      .slice()
-      .sort((a, b) => {
-        if (a.is_winner !== b.is_winner) return a.is_winner ? -1 : 1
-        return b.consensus_final_score - a.consensus_final_score
+  // The 60s payload carries per-(request, miner) aggregates only; the full
+  // lead rows for a request load on demand when its dialog opens.
+  const [detailLeads, setDetailLeads] = useState<ConsensusResult[] | null>(null)
+  const [detailLoading, setDetailLoading] = useState(false)
+  const [detailError, setDetailError] = useState<string | null>(null)
+  const [detailRetryNonce, setDetailRetryNonce] = useState(0)
+  useEffect(() => {
+    setDetailLeads(null)
+    setDetailError(null)
+    if (!dialogRequest) {
+      setDetailLoading(false)
+      return
+    }
+
+    let cancelled = false
+    setDetailLoading(true)
+    fetch(`/api/fulfillment?requestId=${encodeURIComponent(dialogRequest.request_id)}`)
+      .then(async (res) => {
+        const payload = await res.json().catch(() => null)
+        if (!res.ok || !payload?.success || !Array.isArray(payload.leads)) {
+          throw new Error(payload?.error || 'Could not load scored leads')
+        }
+        return payload
       })
-  }, [data, dialogRequest])
+      .then((payload) => {
+        if (cancelled) return
+        setDetailLeads(payload.leads as ConsensusResult[])
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) {
+          setDetailError(error instanceof Error ? error.message : 'Could not load scored leads')
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setDetailLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [dialogRequest, detailRetryNonce])
+
+  const dialogLeads = detailLeads ?? []
 
   const historyStats = useMemo(() => {
     if (!data) return { submissions: 0, fulfilled: 0, miners: 0 }
     const miners = new Set<string>()
-    for (const c of data.allConsensus) {
-      miners.add(c.miner_hotkey)
+    for (const g of data.consensusSummary) {
+      miners.add(g.miner_hotkey)
     }
+    const summaryLeadTotal = data.consensusSummary.reduce((acc, g) => acc + g.lead_count, 0)
     return {
-      submissions: data.stats.totalSubmittedLeads ?? data.allConsensus.length,
+      submissions: data.stats.totalSubmittedLeads ?? summaryLeadTotal,
       fulfilled: data.stats.totalDeliveredLeads ?? data.stats.totalWinners,
       miners: miners.size,
     }
@@ -719,17 +753,17 @@ export function Fulfillment({ onSync }: { onSync?: () => void } = {}) {
       return entry
     }
 
-    for (const c of data.allConsensus) {
-      if (!c.miner_hotkey) continue
-      const entry = ensureHotkey(c.miner_hotkey)
-      entry.scored += 1
-      if (c.is_winner) entry.fulfilled += 1
+    for (const g of data.consensusSummary) {
+      if (!g.miner_hotkey) continue
+      const entry = ensureHotkey(g.miner_hotkey)
+      entry.scored += g.lead_count
+      entry.fulfilled += g.win_count
       if (
-        c.computed_at &&
+        g.last_computed_at &&
         (!entry.lastActive ||
-          new Date(c.computed_at).getTime() > new Date(entry.lastActive).getTime())
+          new Date(g.last_computed_at).getTime() > new Date(entry.lastActive).getTime())
       ) {
-        entry.lastActive = c.computed_at
+        entry.lastActive = g.last_computed_at
       }
     }
 
@@ -802,10 +836,10 @@ export function Fulfillment({ onSync }: { onSync?: () => void } = {}) {
       <div className="md:hidden">
         <FulfillmentMobile
           activeRequests={data.activeRequests}
-          allConsensus={data.allConsensus}
+          consensusSummary={data.consensusSummary}
           leaderboard={data.leaderboard}
           leaderboardWindowDays={data.stats.leaderboardWindowDays ?? 30}
-          totalSubmittedLeads={data.stats.totalSubmittedLeads ?? data.allConsensus.length}
+          totalSubmittedLeads={data.stats.totalSubmittedLeads ?? data.consensusSummary.reduce((acc, g) => acc + g.lead_count, 0)}
           totalDeliveredLeads={data.stats.totalDeliveredLeads ?? data.stats.totalWinners}
           rejectionBreakdown={data.rejectionBreakdown}
           scoreTotals={data.scoreTotals}
@@ -939,6 +973,9 @@ export function Fulfillment({ onSync }: { onSync?: () => void } = {}) {
       <RequestDetailDialog
         request={dialogRequest}
         leads={dialogLeads}
+        loading={detailLoading}
+        error={detailError}
+        onRetry={() => setDetailRetryNonce((nonce) => nonce + 1)}
         onOpenChange={(open) => !open && setDialogRequest(null)}
       />
 
@@ -1659,10 +1696,16 @@ function readableStatus(status: string): string {
 function RequestDetailDialog({
   request,
   leads,
+  loading,
+  error,
+  onRetry,
   onOpenChange,
 }: {
   request: ActiveRequest | null
   leads: ConsensusResult[]
+  loading: boolean
+  error: string | null
+  onRetry: () => void
   onOpenChange: (open: boolean) => void
 }) {
   const open = request !== null
@@ -1726,11 +1769,15 @@ function RequestDetailDialog({
               <>
                 <span>
                   <span className="text-slate-500">Submitted</span>{' '}
-                  <span className="text-slate-200 tabular-nums">{leads.length}</span>
+                  <span className="text-slate-200 tabular-nums">
+                    {loading || error ? '—' : leads.length}
+                  </span>
                 </span>
                 <span>
                   <span className="text-slate-500">Fulfilled</span>{' '}
-                  <span className="text-gold tabular-nums">{winners}</span>
+                  <span className="text-gold tabular-nums">
+                    {loading || error ? '—' : winners}
+                  </span>
                 </span>
               </>
             ) : (
@@ -1821,7 +1868,24 @@ function RequestDetailDialog({
         </DialogHeader>
 
         <div className="flex-1 overflow-y-auto px-5 py-3">
-          {!isFulfilled ? (
+          {loading ? (
+            <div className="flex flex-col items-center justify-center py-12 text-center">
+              <Loader2 className="h-6 w-6 animate-spin text-gold" aria-hidden />
+              <p className="mt-2 text-sm text-slate-500">Loading scored leads...</p>
+            </div>
+          ) : error ? (
+            <div className="flex flex-col items-center justify-center py-12 text-center">
+              <AlertCircle className="h-6 w-6 text-amber-warm" aria-hidden />
+              <p className="mt-2 text-sm text-slate-300">{error}</p>
+              <button
+                type="button"
+                onClick={onRetry}
+                className="mt-4 inline-flex h-8 items-center rounded border border-slate-700 px-3 text-xs font-medium text-slate-200 transition-colors hover:border-slate-600 hover:bg-slate-900"
+              >
+                Try again
+              </button>
+            </div>
+          ) : !isFulfilled ? (
             <PendingRequestBody
               heldCount={heldCount}
               requested={request.num_leads}

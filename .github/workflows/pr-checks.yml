@@ -1,0 +1,47 @@
+name: PR Checks
+
+# The other workflows only run on push to main, so pull requests had no reported
+# check. This runs typecheck, lint, the full test suite (including the
+# real-PostgreSQL RPC fixture test), and a production build on every PR to main.
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    name: Typecheck, Lint, Test, Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Ensure PostgreSQL server binaries (RPC fixture test)
+        run: |
+          if ! ls /usr/lib/postgresql/*/bin/initdb >/dev/null 2>&1 \
+             && ! command -v initdb >/dev/null 2>&1; then
+            sudo apt-get update && sudo apt-get install -y postgresql
+          fi
+          pgbin="$(ls -d /usr/lib/postgresql/*/bin 2>/dev/null | sort -r | head -1)"
+          [ -n "$pgbin" ] && echo "$pgbin" >> "$GITHUB_PATH" || true
+          "${pgbin:+$pgbin/}initdb" --version || true
+      - name: TypeScript typecheck
+        run: npx tsc --noEmit -p tsconfig.json
+      - name: ESLint
+        run: npx next lint --max-warnings=100000
+      - name: Test suite (unit + real-PostgreSQL RPC fixtures)
+        run: npm test
+      - name: Production build
+        env:
+          # Build-time env: placeholder Supabase values so page data collection
+          # constructs clients without contacting anything real.
+          NEXT_PUBLIC_SUPABASE_URL: https://example.supabase.co
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-anon-key
+        run: npm run build
