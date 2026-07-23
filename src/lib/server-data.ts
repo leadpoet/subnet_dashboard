@@ -3,7 +3,6 @@
 
 import { fetchAllDashboardData, type AllDashboardData } from './db-precalc'
 import { fetchMetagraph } from './metagraph'
-import { getQualificationMinerHotkeys } from './cache'
 import type { MetagraphData } from './types'
 
 // Build version - changes on each deploy, triggers client reload
@@ -28,7 +27,6 @@ export interface InitialPageData {
     serverRefreshedAt: string
     serverRelativeTime: string
     buildVersion: string
-    qualificationMinerHotkeys: string[]
   }
   metagraph: MetagraphData | null
 }
@@ -51,9 +49,6 @@ export async function getInitialPageData(): Promise<InitialPageData> {
   const fetchTime = Date.now() - startTime
   console.log(`[Server] Initial data fetched in ${fetchTime}ms (precalc)`)
 
-  // Get qualification miner hotkeys from cache
-  const qualificationMinerHotkeys = getQualificationMinerHotkeys()
-
   return {
     dashboardData: {
       ...dashboardData,
@@ -62,7 +57,6 @@ export async function getInitialPageData(): Promise<InitialPageData> {
       serverRefreshedAt,
       serverRelativeTime,
       buildVersion: BUILD_VERSION,
-      qualificationMinerHotkeys,
     },
     metagraph,
   }
