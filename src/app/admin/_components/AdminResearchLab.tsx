@@ -2111,8 +2111,10 @@ function githubCommitUrl(repositoryUrl: string | null, sha: string | null): stri
 }
 
 function HealthSignalCard({ signal }: { signal: AdminLabHealthSignal }) {
-  const Icon = signalIcon(signal.id, signal.state)
-  const emphasizedMismatch = signal.id === 'pcr0' && signal.state === 'critical'
+  const neutralPcr0Acceptance = signal.id === 'pcr0' && signal.value.endsWith(' accepted')
+  const visualState: AdminHealthState = neutralPcr0Acceptance ? 'unknown' : signal.state
+  const Icon = signalIcon(signal.id, visualState)
+  const emphasizedMismatch = signal.id === 'pcr0' && signal.state === 'critical' && !neutralPcr0Acceptance
   return (
     <div
       className="rounded-lg border p-3"
@@ -2128,7 +2130,7 @@ function HealthSignalCard({ signal }: { signal: AdminLabHealthSignal }) {
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             <Icon
-              className={cn('h-3.5 w-3.5 shrink-0', stateTextClass(signal.state))}
+              className={cn('h-3.5 w-3.5 shrink-0', stateTextClass(visualState))}
               style={emphasizedMismatch ? { color: '#f06d78' } : undefined}
             />
             <div
@@ -2143,7 +2145,7 @@ function HealthSignalCard({ signal }: { signal: AdminLabHealthSignal }) {
           </div>
         </div>
         <span
-          className={cn('mt-1 h-2 w-2 shrink-0 rounded-full', stateDotClass(signal.state))}
+          className={cn('mt-1 h-2 w-2 shrink-0 rounded-full', stateDotClass(visualState))}
           style={emphasizedMismatch ? { background: '#f06d78', boxShadow: '0 0 0 3px rgba(240, 109, 120, 0.12)' } : undefined}
         />
       </div>
