@@ -6,6 +6,7 @@ import {
   Activity,
   AlertTriangle,
   BarChart3,
+  BrainCircuit,
   Clock3,
   CircleDollarSign,
   ChevronLeft,
@@ -14,7 +15,6 @@ import {
   Database,
   Gauge,
   GitCommitHorizontal,
-  Github,
   Loader2,
   PauseCircle,
   PlayCircle,
@@ -1457,7 +1457,7 @@ function SourcingModelPopover({ model }: { model: AdminLabSourcingModelSummary }
             color: alignmentTone.color,
           }}
         >
-          <Container className="h-3.5 w-3.5" aria-hidden />
+          <BrainCircuit className="h-3.5 w-3.5" aria-hidden />
         </button>
       </PopoverAnchor>
       <PopoverContent
@@ -1653,7 +1653,7 @@ function LeadpoetRepositoryPopover({
             color: tone.color,
           }}
         >
-          <Github className="h-3.5 w-3.5" aria-hidden />
+          <Container className="h-3.5 w-3.5" aria-hidden />
         </button>
       </PopoverAnchor>
       <PopoverContent
@@ -1673,7 +1673,7 @@ function LeadpoetRepositoryPopover({
               className="mt-0.5 rounded-md border p-1.5"
               style={{ borderColor: tone.borderColor, background: tone.background }}
             >
-              <Github className="h-3.5 w-3.5" style={{ color: tone.color }} aria-hidden />
+              <Container className="h-3.5 w-3.5" style={{ color: tone.color }} aria-hidden />
             </div>
             <div className="min-w-0">
               <div className="text-sm font-medium">LeadPoet gateway</div>
