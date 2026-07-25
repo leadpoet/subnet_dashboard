@@ -9,9 +9,11 @@ with the on-chain ``Tempo`` — the same authority the dashboard uses, NOT the
 legacy ``block // 360`` bucket. A validator is stale when its ``last_update``
 is more than one full tempo (plus a submission grace) behind the chain head.
 
-Posts one combined message to the Discord webhook per official epoch per UID
-(deduped in STATE_FILE). Webhook URL lives in WEBHOOK_FILE (one line);
-empty/missing file = log-only mode.
+Posts one combined message to the Discord webhook for each newly observed
+validator problem. Persistent problems are deduped in STATE_FILE until they
+recover; crossing an epoch boundary alone never re-pages the same incident.
+Webhook URL lives in WEBHOOK_FILE (one line); empty/missing file = log-only
+mode.
 
 Usage: weights_alert.py [--test]   (--test posts a labeled test message)
 """
@@ -79,6 +81,38 @@ def save_state(state: dict) -> None:
     with open(tmp, "w") as handle:
         json.dump(state, handle)
     os.replace(tmp, STATE_FILE)
+
+
+def update_incident_state(
+    state: dict, validator_id: str, incident_keys: list
+) -> bool:
+    """Record active incidents and return whether any incident is newly active.
+
+    Incident keys contain stable evidence, never the current epoch or changing
+    block age. For example, a stale-weight incident is anchored to the
+    validator's unchanged last-set block, so it survives an epoch boundary
+    without paging twice.
+
+    The previous state format stored an integer epoch per validator. Treat that
+    as an already-alerted condition on the first upgraded pass and replace it
+    with the current incident keys, avoiding a deployment-time replay.
+    """
+    current = sorted(set(incident_keys))
+    previous = state.get(validator_id)
+    if not current:
+        state.pop(validator_id, None)
+        return False
+
+    if isinstance(previous, list):
+        previous_keys = {key for key in previous if isinstance(key, str)}
+        should_alert = bool(set(current) - previous_keys)
+    elif isinstance(previous, int) and not isinstance(previous, bool):
+        should_alert = False
+    else:
+        should_alert = True
+
+    state[validator_id] = current
+    return should_alert
 
 
 def webhook_url() -> str:
@@ -188,30 +222,36 @@ def main() -> int:
         if not vid or not hotkey:
             continue
         problems = []
+        incident_keys = []
         uid = hotkey_to_uid.get(hotkey)
         last_set_block = None
         blocks_since = None
         if uid is None:
             problems.append("hotkey no longer registered")
+            incident_keys.append("hotkey_not_registered")
         else:
             coldkey = str(mg.coldkeys[uid])
             if expected_coldkey and coldkey != expected_coldkey:
                 problems.append("unexpected coldkey")
+                incident_keys.append("unexpected_coldkey")
             if not bool(mg.validator_permit[uid]):
                 problems.append("validator permit lost")
+                incident_keys.append("validator_permit_lost")
             if not bool(mg.active[uid]):
                 problems.append("validator inactive")
+                incident_keys.append("validator_inactive")
             last_set_block = int(mg.last_update[uid])
             blocks_since = block - last_set_block
             if blocks_since > stale_blocks:
                 problems.append(
                     f"weight update stale ({blocks_since} blocks since last set)"
                 )
-        # Deduplicate per validator identity and official epoch — never per
-        # UID, which can change under the validator.
-        if problems and state.get(vid) != epoch_index:
+                incident_keys.append(f"weight_update_stale:{last_set_block}")
+        # Deduplicate by stable validator identity and incident evidence, never
+        # by epoch or UID. Resolved incidents are removed from state so a later
+        # recurrence can alert again.
+        if update_incident_state(state, vid, incident_keys):
             misses.append((vid, label, uid, last_set_block, blocks_since, problems))
-            state[vid] = epoch_index
 
     if misses:
         epoch_block = max(0, block - last_epoch_block)
