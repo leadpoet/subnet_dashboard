@@ -150,6 +150,13 @@ try {
   assert.match(componentSource, /label="Gateway commit"/)
   assert.match(componentSource, /function ValidatorRepositoryPopover/)
   assert.match(componentSource, /deployment=\{ops\.validatorDeployment\}/)
+  assert.match(
+    componentSource,
+    /const gatewayValidatorAligned = ops\.validatorDeployment\.currentCommitVerified\s+&& commitsMatch\(ops\.leadpoetRepository\.gatewayCommitSha, ops\.validatorDeployment\.commitSha\)/,
+  )
+  assert.match(componentSource, /gatewayValidatorAligned=\{gatewayValidatorAligned\}/)
+  assert.match(componentSource, /const triggerTone = gatewayValidatorAligned \? gatewayValidatorAlignmentTone\(\) : tone/)
+  assert.match(componentSource, /<BrainCircuit className="h-3 w-3" aria-hidden \/>/)
   assert.match(componentSource, /Validator is on the latest/)
   assert.match(componentSource, /deployment\.source === 'attested_execution_receipts_v2'/)
   assert.match(componentSource, /'Last attested commit'/)

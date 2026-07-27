@@ -1315,6 +1315,9 @@ export function AdminResearchLab({
 }
 
 function OpsHealthStrip({ ops }: { ops: AdminLabOpsSummary }) {
+  const gatewayValidatorAligned = ops.validatorDeployment.currentCommitVerified
+    && commitsMatch(ops.leadpoetRepository.gatewayCommitSha, ops.validatorDeployment.commitSha)
+
   return (
     <section
       className="rounded-xl border"
@@ -1341,10 +1344,14 @@ function OpsHealthStrip({ ops }: { ops: AdminLabOpsSummary }) {
           </div>
           <div className="flex items-center gap-1.5">
             <SourcingModelPopover model={ops.sourcingModel} />
-            <LeadpoetRepositoryPopover repository={ops.leadpoetRepository} />
+            <LeadpoetRepositoryPopover
+              repository={ops.leadpoetRepository}
+              gatewayValidatorAligned={gatewayValidatorAligned}
+            />
             <ValidatorRepositoryPopover
               deployment={ops.validatorDeployment}
               repository={ops.leadpoetRepository}
+              gatewayValidatorAligned={gatewayValidatorAligned}
             />
           </div>
         </div>
@@ -1457,7 +1464,7 @@ function SourcingModelPopover({ model }: { model: AdminLabSourcingModelSummary }
             color: alignmentTone.color,
           }}
         >
-          <BrainCircuit className="h-3.5 w-3.5" aria-hidden />
+          <BrainCircuit className="h-3 w-3" aria-hidden />
         </button>
       </PopoverAnchor>
       <PopoverContent
@@ -1590,8 +1597,10 @@ function SourcingModelPopover({ model }: { model: AdminLabSourcingModelSummary }
 
 function LeadpoetRepositoryPopover({
   repository,
+  gatewayValidatorAligned,
 }: {
   repository: AdminLabRepositorySummary
+  gatewayValidatorAligned: boolean
 }) {
   const hoverPopover = useHoverPopover()
   const isLatest = repository.commitFreshness === 'latest'
@@ -1600,6 +1609,7 @@ function LeadpoetRepositoryPopover({
   const isDiverged = repository.commitFreshness === 'diverged'
   const isOutOfLine = isBehind || isAhead || isDiverged
   const tone = sourcingModelAlignmentTone(isLatest, isOutOfLine)
+  const triggerTone = gatewayValidatorAligned ? gatewayValidatorAlignmentTone() : tone
   const gatewayCommitUrl = githubCommitUrl(repository.repositoryUrl, repository.gatewayCommitSha)
   const latestCommitUrl = githubCommitUrl(repository.repositoryUrl, repository.commitSha)
   const state: AdminHealthState = isLatest ? 'healthy' : isOutOfLine ? 'degraded' : 'unknown'
@@ -1648,9 +1658,9 @@ function LeadpoetRepositoryPopover({
           onClick={hoverPopover.togglePinned}
           className="premium-focus inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border transition-colors hover-bg-warm"
           style={{
-            borderColor: tone.borderColor,
-            background: tone.background,
-            color: tone.color,
+            borderColor: triggerTone.borderColor,
+            background: triggerTone.background,
+            color: triggerTone.color,
           }}
         >
           <Container className="h-3.5 w-3.5" aria-hidden />
@@ -1764,9 +1774,11 @@ function LeadpoetRepositoryPopover({
 function ValidatorRepositoryPopover({
   deployment,
   repository,
+  gatewayValidatorAligned,
 }: {
   deployment: AdminLabValidatorDeploymentSummary
   repository: AdminLabRepositorySummary
+  gatewayValidatorAligned: boolean
 }) {
   const hoverPopover = useHoverPopover()
   const isVerified = deployment.currentCommitVerified
@@ -1779,6 +1791,7 @@ function ValidatorRepositoryPopover({
   const tone = isVerified
     ? sourcingModelAlignmentTone(isLatest, isOutOfLine)
     : sourcingModelAlignmentTone(false, false)
+  const triggerTone = gatewayValidatorAligned ? gatewayValidatorAlignmentTone() : tone
   const validatorCommitUrl = githubCommitUrl(repository.repositoryUrl, deployment.commitSha)
   const latestCommitUrl = githubCommitUrl(repository.repositoryUrl, repository.commitSha)
   const state: AdminHealthState = isLatest ? 'healthy' : isOutOfLine ? 'degraded' : 'unknown'
@@ -1842,9 +1855,9 @@ function ValidatorRepositoryPopover({
           onClick={hoverPopover.togglePinned}
           className="premium-focus inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border transition-colors hover-bg-warm"
           style={{
-            borderColor: tone.borderColor,
-            background: tone.background,
-            color: tone.color,
+            borderColor: triggerTone.borderColor,
+            background: triggerTone.background,
+            color: triggerTone.color,
           }}
         >
           <GitCommitHorizontal className="h-3.5 w-3.5" aria-hidden />
@@ -2040,6 +2053,24 @@ function sourcingModelAlignmentTone(
     background: 'var(--surface-base)',
     color: 'var(--text-tertiary)',
   }
+}
+
+function gatewayValidatorAlignmentTone(): SourcingModelAlignmentTone {
+  return {
+    borderColor: 'rgba(61, 151, 108, 0.52)',
+    background: 'rgba(61, 151, 108, 0.13)',
+    color: '#6fc49a',
+  }
+}
+
+function commitsMatch(left: string | null, right: string | null): boolean {
+  if (!left || !right) return false
+
+  const normalizedLeft = left.trim().toLowerCase()
+  const normalizedRight = right.trim().toLowerCase()
+  if (normalizedLeft.length < 7 || normalizedRight.length < 7) return false
+
+  return normalizedLeft.startsWith(normalizedRight) || normalizedRight.startsWith(normalizedLeft)
 }
 
 function SourcingModelAlignmentPill({
