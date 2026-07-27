@@ -1464,7 +1464,7 @@ function SourcingModelPopover({ model }: { model: AdminLabSourcingModelSummary }
             color: alignmentTone.color,
           }}
         >
-          <BrainCircuit className="h-3 w-3" aria-hidden />
+          <BrainCircuit className="h-2.5 w-2.5" aria-hidden />
         </button>
       </PopoverAnchor>
       <PopoverContent
@@ -1609,7 +1609,7 @@ function LeadpoetRepositoryPopover({
   const isDiverged = repository.commitFreshness === 'diverged'
   const isOutOfLine = isBehind || isAhead || isDiverged
   const tone = sourcingModelAlignmentTone(isLatest, isOutOfLine)
-  const triggerTone = gatewayValidatorAligned ? gatewayValidatorAlignmentTone() : tone
+  const triggerTone = gatewayValidatorAligned ? gatewayValidatorAlignmentTone(isLatest) : tone
   const gatewayCommitUrl = githubCommitUrl(repository.repositoryUrl, repository.gatewayCommitSha)
   const latestCommitUrl = githubCommitUrl(repository.repositoryUrl, repository.commitSha)
   const state: AdminHealthState = isLatest ? 'healthy' : isOutOfLine ? 'degraded' : 'unknown'
@@ -1791,7 +1791,7 @@ function ValidatorRepositoryPopover({
   const tone = isVerified
     ? sourcingModelAlignmentTone(isLatest, isOutOfLine)
     : sourcingModelAlignmentTone(false, false)
-  const triggerTone = gatewayValidatorAligned ? gatewayValidatorAlignmentTone() : tone
+  const triggerTone = gatewayValidatorAligned ? gatewayValidatorAlignmentTone(isLatest) : tone
   const validatorCommitUrl = githubCommitUrl(repository.repositoryUrl, deployment.commitSha)
   const latestCommitUrl = githubCommitUrl(repository.repositoryUrl, repository.commitSha)
   const state: AdminHealthState = isLatest ? 'healthy' : isOutOfLine ? 'degraded' : 'unknown'
@@ -2055,11 +2055,19 @@ function sourcingModelAlignmentTone(
   }
 }
 
-function gatewayValidatorAlignmentTone(): SourcingModelAlignmentTone {
+function gatewayValidatorAlignmentTone(isLatest: boolean): SourcingModelAlignmentTone {
+  if (isLatest) {
+    return {
+      borderColor: 'rgba(61, 151, 108, 0.52)',
+      background: 'rgba(61, 151, 108, 0.13)',
+      color: '#6fc49a',
+    }
+  }
+
   return {
-    borderColor: 'rgba(61, 151, 108, 0.52)',
-    background: 'rgba(61, 151, 108, 0.13)',
-    color: '#6fc49a',
+    borderColor: 'rgba(112, 132, 120, 0.44)',
+    background: 'rgba(92, 110, 99, 0.12)',
+    color: '#8fa398',
   }
 }
 

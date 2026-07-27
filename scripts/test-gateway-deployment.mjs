@@ -155,8 +155,10 @@ try {
     /const gatewayValidatorAligned = ops\.validatorDeployment\.currentCommitVerified\s+&& commitsMatch\(ops\.leadpoetRepository\.gatewayCommitSha, ops\.validatorDeployment\.commitSha\)/,
   )
   assert.match(componentSource, /gatewayValidatorAligned=\{gatewayValidatorAligned\}/)
-  assert.match(componentSource, /const triggerTone = gatewayValidatorAligned \? gatewayValidatorAlignmentTone\(\) : tone/)
-  assert.match(componentSource, /<BrainCircuit className="h-3 w-3" aria-hidden \/>/)
+  assert.match(componentSource, /const triggerTone = gatewayValidatorAligned \? gatewayValidatorAlignmentTone\(isLatest\) : tone/)
+  assert.match(componentSource, /<BrainCircuit className="h-2\.5 w-2\.5" aria-hidden \/>/)
+  assert.match(componentSource, /function gatewayValidatorAlignmentTone\(isLatest: boolean\)/)
+  assert.match(componentSource, /color: '#8fa398'/)
   assert.match(componentSource, /Validator is on the latest/)
   assert.match(componentSource, /deployment\.source === 'attested_execution_receipts_v2'/)
   assert.match(componentSource, /'Last attested commit'/)
