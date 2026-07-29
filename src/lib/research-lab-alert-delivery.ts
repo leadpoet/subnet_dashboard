@@ -14,7 +14,6 @@ export type ResearchLabAlertTransition = 'open' | 'escalate' | 'remind' | 'recov
 
 export type ResearchLabDiscordAlertChannel = Readonly<{
   webhookUrl: string
-  username?: string
 }>
 
 export type ResearchLabEmailAlertChannel = Readonly<{
@@ -135,7 +134,6 @@ export const RESEARCH_LAB_ALERT_ENV_KEYS = Object.freeze({
   dashboardUrl: 'RESEARCH_LAB_ALERT_DASHBOARD_URL',
   timeoutMs: 'RESEARCH_LAB_ALERT_TIMEOUT_MS',
   discordWebhookUrl: 'RESEARCH_LAB_ALERT_DISCORD_WEBHOOK_URL',
-  discordUsername: 'RESEARCH_LAB_ALERT_DISCORD_USERNAME',
   resendApiKey: 'RESEARCH_LAB_ALERT_RESEND_API_KEY',
   emailFrom: 'RESEARCH_LAB_ALERT_EMAIL_FROM',
   emailTo: 'RESEARCH_LAB_ALERT_EMAIL_TO',
@@ -202,17 +200,10 @@ export function parseResearchLabAlertDeliveryConfig(
     env,
     RESEARCH_LAB_ALERT_ENV_KEYS.discordWebhookUrl,
   )
-  const discordUsername = optionalEnvValue(env, RESEARCH_LAB_ALERT_ENV_KEYS.discordUsername)
   const resendApiKey = optionalEnvValue(env, RESEARCH_LAB_ALERT_ENV_KEYS.resendApiKey)
   const emailFrom = optionalEnvValue(env, RESEARCH_LAB_ALERT_ENV_KEYS.emailFrom)
   const emailToValue = optionalEnvValue(env, RESEARCH_LAB_ALERT_ENV_KEYS.emailTo)
   const emailReplyTo = optionalEnvValue(env, RESEARCH_LAB_ALERT_ENV_KEYS.emailReplyTo)
-
-  if (discordUsername && !discordWebhookUrl) {
-    throw new Error(
-      'Research Lab Discord alerts require RESEARCH_LAB_ALERT_DISCORD_WEBHOOK_URL when a username is configured.',
-    )
-  }
 
   const emailValuesPresent = [resendApiKey, emailFrom, emailToValue, emailReplyTo]
     .some((value) => value !== null)
@@ -225,9 +216,6 @@ export function parseResearchLabAlertDeliveryConfig(
   const discord = discordWebhookUrl
     ? Object.freeze({
         webhookUrl: normalizeDiscordWebhookUrl(discordWebhookUrl),
-        ...(discordUsername
-          ? { username: truncate(normalizeInlineText(discordUsername), 80) }
-          : {}),
       })
     : null
 
@@ -340,7 +328,6 @@ export function buildResearchLabDiscordPayload(
   alert: ResearchLabAlert,
   transition: ResearchLabAlertTransition,
   dashboardUrl: string,
-  channel: Pick<ResearchLabDiscordAlertChannel, 'username'> = {},
 ): ResearchLabDiscordAlertPayload {
   const message = renderResearchLabOperatorAlert(alert, transition, dashboardUrl)
   const color = transition === 'recover'
@@ -349,12 +336,8 @@ export function buildResearchLabDiscordPayload(
       : DISCORD_EMBED_COLORS.cleared
     : DISCORD_EMBED_COLORS[alert.severity]
   const observedAt = optionalIsoTimestamp(alert.observedAt)
-  const username = channel.username
-    ? truncate(normalizeInlineText(channel.username), 80)
-    : null
 
   return Object.freeze({
-    ...(username ? { username } : {}),
     allowed_mentions: Object.freeze({ parse: Object.freeze([]) }),
     embeds: Object.freeze([
       Object.freeze({
@@ -428,7 +411,6 @@ export async function deliverResearchLabAlert(
       request.alert,
       request.transition,
       requiredDashboardUrl(config.dashboardUrl),
-      config.discord,
     )
     requests.push({
       channel: 'discord',
@@ -631,9 +613,6 @@ function normalizeDeliveryConfig(config: ResearchLabAlertChannelConfig): Normali
   const discord = config.discord
     ? Object.freeze({
         webhookUrl: normalizeDiscordWebhookUrl(config.discord.webhookUrl),
-        ...(config.discord.username
-          ? { username: truncate(normalizeInlineText(config.discord.username), 80) }
-          : {}),
       })
     : null
   const email = config.email
