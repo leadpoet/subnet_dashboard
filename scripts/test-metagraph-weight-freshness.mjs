@@ -484,6 +484,10 @@ class Subtensor:
   assert.match(metagraphUiSource, /displayedEpochState\.blocksRemaining, 0\)\} remaining/)
   assert.match(metagraphUiSource, /label="Time Until Next Epoch"/)
   assert.doesNotMatch(metagraphUiSource, /label="Average VTrust"/)
+  assert.match(metagraphUiSource, /const burnRate = rows\.find\(\(row\) => row\.uid === 0\)\?\.incentive/)
+  assert.match(metagraphUiSource, /label="Burn Percentage"/)
+  assert.match(metagraphUiSource, /formatAmount\(burnRate \* 100, 1\)/)
+  assert.match(metagraphUiSource, /UID 0 incentive allocation/)
 
   const metagraphRouteSource = await readFile(resolve('src/app/api/metagraph/route.ts'), 'utf8')
   assert.match(metagraphRouteSource, /private, no-store, max-age=0/)
@@ -549,9 +553,13 @@ class Subtensor:
   const blocksCard = metagraphUiSource.indexOf('label="Epoch Blocks Remaining"')
   const timeCard = metagraphUiSource.indexOf('label="Time Until Next Epoch"')
   const activeCard = metagraphUiSource.indexOf('label="Active validators"')
+  const burnCard = metagraphUiSource.indexOf('label="Burn Percentage"')
   assert.ok(
-    blocksCard < timeCard && timeCard < officialEpochCard && officialEpochCard < activeCard,
-    'epoch position, timing, official identity, and validators should render in order',
+    blocksCard < timeCard
+      && timeCard < officialEpochCard
+      && officialEpochCard < activeCard
+      && activeCard < burnCard,
+    'epoch position, timing, official identity, validators, and burn percentage should render in order',
   )
   const blocksCardSource = metagraphUiSource.slice(blocksCard, timeCard)
   assert.match(

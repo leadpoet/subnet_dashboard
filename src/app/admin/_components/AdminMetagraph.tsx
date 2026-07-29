@@ -364,6 +364,7 @@ export function AdminMetagraph() {
 
   const freshnessAvailable = data?.currentBlock !== null && data?.currentBlock !== undefined
   const activeRows = rows.filter((row) => row.updated !== null && row.updated < ACTIVE_VALIDATOR_MAX_BLOCKS)
+  const burnRate = rows.find((row) => row.uid === 0)?.incentive
   const epochObservedAt = epochState ? Date.parse(epochState.observedAt) : null
   const epochSnapshotAgeMs = epochObservedAt === null ? null : Math.max(0, clockNow - epochObservedAt)
   const epochSnapshotExpired = epochSnapshotAgeMs !== null && epochSnapshotAgeMs > EPOCH_LAST_GOOD_MAX_AGE_MS
@@ -444,7 +445,7 @@ export function AdminMetagraph() {
         </div>
       </div>
 
-      <div className="grid gap-2 p-3 md:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-2 p-3 md:grid-cols-2 xl:grid-cols-5">
         <SummaryCard
           label="Epoch Blocks Remaining"
           value={epochLoading || displayedEpochState === null ? '—' : `${formatAmount(displayedEpochState.blocksRemaining, 0)} remaining`}
@@ -465,6 +466,11 @@ export function AdminMetagraph() {
           label="Active validators"
           value={loading || !freshnessAvailable ? '—' : `${formatAmount(activeRows.length, 0)}/${formatAmount(rows.length, 0)}`}
           detail={`Weight updated < ${ACTIVE_VALIDATOR_MAX_BLOCKS} blocks ago`}
+        />
+        <SummaryCard
+          label="Burn Percentage"
+          value={loading || burnRate === undefined ? '—' : `${formatAmount(burnRate * 100, 1)}%`}
+          detail="UID 0 incentive allocation"
         />
       </div>
 
