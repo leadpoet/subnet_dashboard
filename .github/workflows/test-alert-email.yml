@@ -7,11 +7,11 @@ permissions:
   contents: read
 
 concurrency:
-  group: test-alert-email-fallback
+  group: test-research-lab-discord-webhooks
   cancel-in-progress: false
 
 jobs:
-  send-test-email:
+  send-test-webhooks:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -26,11 +26,11 @@ jobs:
           key: ${{ secrets.EC2_SSH_KEY }}
           timeout: 45s
           command_timeout: 2m
-          source: scripts/send-research-lab-alert-email-test.mjs
-          target: /tmp/research-lab-email-test-${{ github.run_id }}
+          source: scripts/send-research-lab-discord-webhook-tests.mjs
+          target: /tmp/research-lab-discord-test-${{ github.run_id }}
           strip_components: 1
 
-      - name: Send controlled test email
+      - name: Send controlled Discord webhook tests
         uses: appleboy/ssh-action@v1.2.0
         timeout-minutes: 3
         env:
@@ -38,24 +38,21 @@ jobs:
           AWS_DEFAULT_REGION: us-east-1
           SUBNET_DASHBOARD_SECRET_ID: leadpoet/prod/subnet-dashboard/env
           SUBNET_DASHBOARD_APP_ROOT: /home/ec2-user/subnet_dashboard
-          RESEARCH_LAB_EMAIL_TEST_EXPECTED_FROM: hello@leadpoet.com
-          RESEARCH_LAB_EMAIL_TEST_EXPECTED_TO: gavin@leadpoet.com,pranav@leadpoet.com,tasnimul@leadpoet.com
-          RESEARCH_LAB_EMAIL_TEST_EXPECTED_REPLY_TO: hello@leadpoet.com
-          RESEARCH_LAB_EMAIL_TEST_IDEMPOTENCY_KEY: research-lab-email-test-${{ github.run_id }}-${{ github.run_attempt }}
+          RESEARCH_LAB_DISCORD_TEST_ID: research-lab-discord-test-${{ github.run_id }}-${{ github.run_attempt }}
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ec2-user
           key: ${{ secrets.EC2_SSH_KEY }}
           timeout: 45s
           command_timeout: 2m
-          envs: AWS_REGION,AWS_DEFAULT_REGION,SUBNET_DASHBOARD_SECRET_ID,SUBNET_DASHBOARD_APP_ROOT,RESEARCH_LAB_EMAIL_TEST_EXPECTED_FROM,RESEARCH_LAB_EMAIL_TEST_EXPECTED_TO,RESEARCH_LAB_EMAIL_TEST_EXPECTED_REPLY_TO,RESEARCH_LAB_EMAIL_TEST_IDEMPOTENCY_KEY
+          envs: AWS_REGION,AWS_DEFAULT_REGION,SUBNET_DASHBOARD_SECRET_ID,SUBNET_DASHBOARD_APP_ROOT,RESEARCH_LAB_DISCORD_TEST_ID
           script: |
             set -euo pipefail
-            TEST_ROOT="/tmp/research-lab-email-test-${{ github.run_id }}"
+            TEST_ROOT="/tmp/research-lab-discord-test-${{ github.run_id }}"
             cleanup() {
               rm -rf -- "$TEST_ROOT"
             }
             trap cleanup EXIT
 
             cd "$SUBNET_DASHBOARD_APP_ROOT"
-            node "$TEST_ROOT/send-research-lab-alert-email-test.mjs"
+            node "$TEST_ROOT/send-research-lab-discord-webhook-tests.mjs"
