@@ -167,28 +167,12 @@ export function AdminWeightsAlerts() {
       role="alert"
       className="rounded-xl border border-red-500/40 bg-red-500/[0.06] px-4 py-3"
     >
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-        <div className="flex items-center gap-1.5 text-xs font-medium text-red-300/90">
-          <AlertTriangle className="h-3.5 w-3.5 text-red-400" />
-          Weights watch
-          {epoch !== null && (
-            <span style={{ color: 'var(--text-tertiary)' }}>· epoch {epoch}</span>
-          )}
-        </div>
-        <div className="flex flex-wrap items-center gap-1.5">
-          {issues.map((row) => (
-            <span
-              key={row.id}
-              title={rowProblems(row).join('; ')}
-              className="inline-flex items-center gap-1 rounded-full border border-red-500/50 bg-red-500/10 px-2 py-0.5 text-[11px] font-medium text-red-300"
-            >
-              {row.label}
-              <span className="text-red-300/70">
-                {row.notRegistered ? 'not registered' : `UID ${row.uid}`}
-              </span>
-            </span>
-          ))}
-        </div>
+      <div className="flex items-center gap-1.5 text-xs font-medium text-red-300/90">
+        <AlertTriangle className="h-3.5 w-3.5 text-red-400" />
+        Weights watch
+        {epoch !== null && (
+          <span style={{ color: 'var(--text-tertiary)' }}>· epoch {epoch}</span>
+        )}
       </div>
       <div className="mt-2 space-y-1 text-xs text-red-300/90">
         <div className="font-semibold">Weight set issue</div>

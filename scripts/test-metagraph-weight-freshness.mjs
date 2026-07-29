@@ -508,6 +508,12 @@ class Subtensor:
   )
   assert.match(weightsAlertsSource, /const identityName = coldkeyVerified/)
   assert.match(weightsAlertsSource, /identityName \? `\$\{role\} \(\$\{identityName\}\)` : fallbackLabel/)
+  assert.equal(
+    (weightsAlertsSource.match(/\{issues\.map\(\(row\) => \(/g) ?? []).length,
+    1,
+    'weight issues should render once in the detailed list without duplicate summary pills',
+  )
+  assert.doesNotMatch(weightsAlertsSource, /rounded-full border border-red-500\/50/)
 
   const validatorRegistry = JSON.parse(
     await readFile(resolve('validator_registry.json'), 'utf8'),
