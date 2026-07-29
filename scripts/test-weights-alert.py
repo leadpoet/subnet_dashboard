@@ -8,9 +8,11 @@ from unittest.mock import patch
 
 import weights_alert
 from weights_alert import (
+    EPOCH_OBSERVATION_KEY,
     LAST_ALERT_EPOCH_KEY,
     claim_epoch_alert,
     display_label,
+    observe_completed_epoch,
     query_identity_name,
     safe_identity_name,
     update_incident_state,
@@ -18,6 +20,22 @@ from weights_alert import (
 
 
 class WeightsAlertIncidentStateTest(unittest.TestCase):
+    def test_completed_epoch_uses_observed_start_after_early_rollover(self):
+        state = {}
+
+        self.assertEqual(observe_completed_epoch(state, 100, 10_000, 360), (99, 9_640))
+        self.assertEqual(
+            observe_completed_epoch(state, 101, 10_200, 360),
+            (100, 10_000),
+            "an owner-triggered early rollover must use the observed epoch start",
+        )
+        self.assertEqual(
+            observe_completed_epoch(state, 101, 10_200, 360),
+            (100, 10_000),
+            "later passes in the same epoch must retain the completed start",
+        )
+        self.assertEqual(state[EPOCH_OBSERVATION_KEY]["start_block"], 10_200)
+
     def test_epoch_alert_can_only_be_claimed_once(self):
         state = {}
 
@@ -25,13 +43,23 @@ class WeightsAlertIncidentStateTest(unittest.TestCase):
         self.assertFalse(claim_epoch_alert(state, 24_169, True))
         self.assertEqual(state[LAST_ALERT_EPOCH_KEY], 24_169)
 
-    def test_main_combines_validators_at_cutoff_and_posts_once_in_epoch(self):
+    def test_main_waits_for_rollover_then_posts_once_for_completed_epoch(self):
         class Metagraph:
-            hotkeys = ["hotkey-auditor", "hotkey-primary", "hotkey-late"]
-            coldkeys = ["coldkey-auditor", "coldkey-primary", "coldkey-late"]
-            validator_permit = [True, True, True]
-            active = [True, True, True]
-            last_update = [1000, 1024, 1049]
+            hotkeys = [
+                "hotkey-primary",
+                "hotkey-tao",
+                "hotkey-yuma",
+                "hotkey-unconfirmed",
+            ]
+            coldkeys = [
+                "coldkey-primary",
+                "coldkey-tao",
+                "coldkey-yuma",
+                "coldkey-unconfirmed",
+            ]
+            validator_permit = [True, True, True, True]
+            active = [True, True, True, True]
+            last_update = [9948, 9947, 9948, 9947]
 
         class Subtensor:
             def __init__(self, network):
@@ -47,30 +75,38 @@ class WeightsAlertIncidentStateTest(unittest.TestCase):
         messages = []
         registry = [
             {
-                "id": "auditor",
-                "role": "auditor",
-                "label": "auditor",
-                "hotkey": "hotkey-auditor",
-                "expectedColdkey": "coldkey-auditor",
-            },
-            {
                 "id": "leadpoet-primary",
                 "role": "primary",
-                "label": "primary",
+                "label": "primary (Leadpoet)",
                 "hotkey": "hotkey-primary",
                 "expectedColdkey": "coldkey-primary",
             },
             {
-                "id": "late-auditor",
+                "id": "tao-auditor",
                 "role": "auditor",
-                "label": "late auditor",
-                "hotkey": "hotkey-late",
-                "expectedColdkey": "coldkey-late",
+                "label": "auditor (TAO.com)",
+                "hotkey": "hotkey-tao",
+                "expectedColdkey": "coldkey-tao",
+            },
+            {
+                "id": "yuma-auditor",
+                "role": "auditor",
+                "label": "auditor (Yuma)",
+                "hotkey": "hotkey-yuma",
+                "expectedColdkey": "coldkey-yuma",
+            },
+            {
+                "id": "unconfirmed-auditor",
+                "role": "auditor",
+                "label": "auditor (identity unconfirmed)",
+                "hotkey": "hotkey-unconfirmed",
+                "expectedColdkey": "coldkey-unconfirmed",
             },
         ]
         epoch_snapshots = [
-            (24_169, 1075, 360, 1404),
-            (24_169, 1075, 360, 1430),
+            (24_172, 10_000, 360, 10_349),
+            (24_173, 10_360, 360, 10_374),
+            (24_173, 10_360, 360, 10_399),
         ]
         fake_bittensor = types.SimpleNamespace(Subtensor=Subtensor)
 
@@ -99,14 +135,18 @@ class WeightsAlertIncidentStateTest(unittest.TestCase):
             )
             stack.enter_context(patch.object(weights_alert, "log"))
             self.assertEqual(weights_alert.main(), 0)
+            self.assertEqual(messages, [], "must not page before epoch 24172 ends")
+            self.assertEqual(weights_alert.main(), 0)
             self.assertEqual(weights_alert.main(), 0)
 
         self.assertEqual(len(messages), 1)
-        self.assertIn("auditor", messages[0])
-        self.assertIn("primary", messages[0])
-        self.assertIn("380 blocks since last set", messages[0])
-        self.assertNotIn("late auditor", messages[0])
-        self.assertEqual(state[LAST_ALERT_EPOCH_KEY], 24_169)
+        self.assertIn("official epoch 24172 completed", messages[0])
+        self.assertIn("checked at epoch 24173, block 14/360", messages[0])
+        self.assertIn("primary (Leadpoet)", messages[0])
+        self.assertIn("auditor (TAO.com)", messages[0])
+        self.assertIn("426 blocks since last set", messages[0])
+        self.assertIn("427 blocks since last set", messages[0])
+        self.assertEqual(state[LAST_ALERT_EPOCH_KEY], 24_172)
 
     def test_identity_name_replaces_fallback_for_verified_coldkey(self):
         identity = types.SimpleNamespace(name="Rizzo (Insured)")
@@ -204,7 +244,8 @@ class WeightsAlertIncidentStateTest(unittest.TestCase):
             self.assertEqual(weights_alert.main(), 0)
 
         self.assertEqual(len(messages), 1)
-        self.assertIn("404 blocks since last set", messages[0])
+        self.assertIn("official epoch 24090 completed", messages[0])
+        self.assertIn("430 blocks since last set", messages[0])
         self.assertIn("primary (Leadpoet)", messages[0])
         self.assertEqual(
             state["leadpoet-primary"],

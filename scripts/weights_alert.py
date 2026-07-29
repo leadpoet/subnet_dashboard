@@ -7,12 +7,14 @@ Checks the primary validator and the audit validators against the official
 subnet epoch authority — ``SubnetEpochIndex`` anchored by ``LastEpochBlock``
 with the on-chain ``Tempo`` — the same authority the dashboard uses, NOT the
 legacy ``block // 360`` bucket. A validator is stale when its ``last_update``
-is at least one full tempo (plus a submission grace) behind the chain head.
+predates the start of the most recently completed official epoch. The worker
+waits for the epoch boundary before deciding that the epoch was missed.
 
-Posts at most one combined message to the Discord webhook in an official epoch.
-Persistent problems are deduped in STATE_FILE until they recover; crossing an
-epoch boundary alone never re-pages the same incident. Webhook URL lives in
-WEBHOOK_FILE (one line); empty/missing file = log-only mode.
+Posts at most one combined message to the Discord webhook for a completed
+official epoch. Persistent problems are deduped in STATE_FILE until they
+recover; crossing another epoch boundary alone never re-pages the same
+incident. Webhook URL lives in WEBHOOK_FILE (one line); empty/missing file =
+log-only mode.
 
 Usage: weights_alert.py [--test]   (--test posts a labeled test message)
 """
@@ -80,13 +82,11 @@ def display_label(role: str, fallback_label: str, identity_name: str) -> str:
 
 
 NETUID = 71
-# A validator that submits every epoch is at most tempo + a few submission
-# blocks behind the head. The grace mirrors the dashboard's weights watch.
-SUBMISSION_GRACE_BLOCKS = 20
 WEBHOOK_FILE = os.path.expanduser("~/.config/leadpoet/weights_alert_webhook")
 STATE_FILE = os.path.expanduser("~/.config/leadpoet/weights_alert_state.json")
 LOG_FILE = os.path.expanduser("~/weights_alert.log")
 LAST_ALERT_EPOCH_KEY = "__last_alert_epoch__"
+EPOCH_OBSERVATION_KEY = "__epoch_observation__"
 
 
 def log(msg: str) -> None:
@@ -149,6 +149,41 @@ def claim_epoch_alert(state: dict, epoch_index: int, has_new_incidents: bool) ->
         return False
     state[LAST_ALERT_EPOCH_KEY] = epoch_index
     return True
+
+
+def observe_completed_epoch(
+    state: dict, epoch_index: int, last_epoch_block: int, tempo: int
+) -> tuple:
+    """Return the completed epoch and its exact observed start block.
+
+    Persisting the live epoch start lets the next pass handle owner-triggered
+    early rollovers without assuming every epoch lasted exactly ``tempo``.
+    The tempo fallback covers the first pass after deploying this state format.
+    """
+    completed_epoch_index = epoch_index - 1
+    completed_epoch_start = max(0, last_epoch_block - tempo)
+    previous = state.get(EPOCH_OBSERVATION_KEY)
+    if isinstance(previous, dict):
+        if (
+            previous.get("epoch_index") == epoch_index
+            and previous.get("completed_epoch_index") == completed_epoch_index
+            and isinstance(previous.get("completed_epoch_start"), int)
+        ):
+            completed_epoch_start = previous["completed_epoch_start"]
+        elif (
+            previous.get("epoch_index") == completed_epoch_index
+            and isinstance(previous.get("start_block"), int)
+            and 0 <= previous["start_block"] < last_epoch_block
+        ):
+            completed_epoch_start = previous["start_block"]
+
+    state[EPOCH_OBSERVATION_KEY] = {
+        "epoch_index": epoch_index,
+        "start_block": last_epoch_block,
+        "completed_epoch_index": completed_epoch_index,
+        "completed_epoch_start": completed_epoch_start,
+    }
+    return completed_epoch_index, completed_epoch_start
 
 
 def webhook_url() -> str:
@@ -245,8 +280,18 @@ def main() -> int:
         log("no validator registry found (skipping this pass)")
         return 0
 
+    if epoch_index <= 0 or last_epoch_block <= 0:
+        log(
+            "invalid completed epoch boundary "
+            f"(epoch={epoch_index}, last_epoch_block={last_epoch_block}, tempo={tempo}); "
+            "skipping this pass"
+        )
+        return 0
+
     state = load_state()
-    stale_blocks = tempo + SUBMISSION_GRACE_BLOCKS
+    completed_epoch_index, completed_epoch_start = observe_completed_epoch(
+        state, epoch_index, last_epoch_block, tempo
+    )
     hotkeys = list(mg.hotkeys)
     hotkey_to_uid = {hk: i for i, hk in enumerate(hotkeys)}
     misses = []
@@ -286,9 +331,13 @@ def main() -> int:
                 incident_keys.append("validator_inactive")
             last_set_block = int(mg.last_update[uid])
             blocks_since = block - last_set_block
-            if blocks_since >= stale_blocks:
+            # Do not page while the official epoch is still in progress. Once
+            # it rolls over, a last_update older than that completed epoch's
+            # start proves the validator did not submit anywhere in the epoch.
+            if last_set_block < completed_epoch_start:
                 problems.append(
-                    f"weight update stale ({blocks_since} blocks since last set)"
+                    f"weight update missed completed epoch {completed_epoch_index} "
+                    f"({blocks_since} blocks since last set)"
                 )
                 incident_keys.append(f"weight_update_stale:{last_set_block}")
         if uid is None:
@@ -300,11 +349,12 @@ def main() -> int:
             has_new_incidents = True
             misses.append((vid, label, uid, last_set_block, blocks_since, problems))
 
-    if claim_epoch_alert(state, epoch_index, has_new_incidents):
+    if claim_epoch_alert(state, completed_epoch_index, has_new_incidents):
         epoch_block = max(0, block - last_epoch_block)
         lines = [
             f"🚨 **SN71 missed weight set** "
-            f"(official epoch {epoch_index}, block {epoch_block}/{tempo} into it)"
+            f"(official epoch {completed_epoch_index} completed; checked at "
+            f"epoch {epoch_index}, block {epoch_block}/{tempo})"
         ]
         for vid, label, uid, last_set_block, behind, problems in misses:
             uid_text = f"current UID {uid}" if uid is not None else "not registered"
@@ -321,7 +371,8 @@ def main() -> int:
         log(f"ALERTED: {[(m[0], m[5]) for m in misses]}")
     elif has_new_incidents:
         log(
-            f"SUPPRESSED: official epoch {epoch_index} already alerted; "
+            f"SUPPRESSED: completed official epoch {completed_epoch_index} "
+            "already alerted; "
             f"new incidents: {[(m[0], m[5]) for m in misses]}"
         )
     save_state(state)
