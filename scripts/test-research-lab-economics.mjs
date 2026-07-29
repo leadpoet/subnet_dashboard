@@ -94,6 +94,31 @@ try {
   assert.match(componentSource, /Candidate improvement pipeline[\s\S]*separate from the emission-capacity queue/, 'candidate and capacity queues should be distinguished')
   assert.match(componentSource, /no matching published weight record/, 'missing weight epochs should warn operators')
   assert.match(routeSource, /Legacy publication only — no V2 finalization evidence/, 'legacy publication must not claim chain finalization')
+  assert.match(
+    routeSource,
+    /WEIGHT_BUNDLE_SELECT\s*=\s*[\s\S]*?'bundle_hash,epoch_id,netuid,block,validator_hotkey,weights_hash,created_at'/,
+    'weight health should select only the lightweight bundle identity fields',
+  )
+  assert.match(
+    routeSource,
+    /\.from\('research_lab_attested_weight_bundles_v2'\)[\s\S]*?\.select\(WEIGHT_BUNDLE_SELECT\)[\s\S]*?\.eq\('netuid', NETUID\)/,
+    'weight bundle evidence should be bounded to the configured subnet',
+  )
+  assert.match(
+    routeSource,
+    /WEIGHT_FINALIZATION_SELECT\s*=\s*[\s\S]*?'bundle_hash,extrinsic_hash,finalized_block,created_at'/,
+    'weight health should not transfer finalization documents',
+  )
+  assert.match(
+    routeSource,
+    /attachFinalizationEpochs\(v2Finalizations, v2Bundles\)/,
+    'lightweight finalization rows should retain their bundle epoch association',
+  )
+  assert.doesNotMatch(
+    routeSource,
+    /\.from\('research_lab_attested_weight_(?:bundles|finalizations)_v2'\)[\s\S]{0,160}?\.select\('\*'\)/,
+    'admin economics must never fetch complete attestation documents',
+  )
   assert.doesNotMatch(componentSource, /private_model_manifest|image_digest|patch_payload|proxy|credential/i, 'client output must not expose private fields')
 
   console.log('research-lab-economics: allocation, reward, queue, reimbursement, scoring, weight, pagination, and sanitization checks passed')

@@ -30,6 +30,10 @@ const PAGE_SIZE_DEFAULT = 25
 const PAGE_SIZE_MAX = 100
 const DATABASE_PAGE_SIZE = 500
 const NETUID = 71
+const WEIGHT_BUNDLE_SELECT =
+  'bundle_hash,epoch_id,netuid,block,validator_hotkey,weights_hash,created_at'
+const WEIGHT_FINALIZATION_SELECT =
+  'bundle_hash,extrinsic_hash,finalized_block,created_at'
 
 type Row = Record<string, unknown>
 type QueryError = { message: string; code?: string }
@@ -133,9 +137,10 @@ async function buildEconomicsPayload({
         .range(from, Math.min(to, 199)),
       200,
     ),
-    fetchOptionalRows(supabase, 'research_lab_attested_weight_bundles_v2', errorTag),
-    fetchOptionalRows(supabase, 'research_lab_attested_weight_finalizations_v2', errorTag),
+    fetchOptionalWeightBundles(supabase, errorTag),
+    fetchOptionalWeightFinalizations(supabase, errorTag),
   ])
+  const v2FinalizationsWithEpoch = attachFinalizationEpochs(v2Finalizations, v2Bundles)
 
   const allocationDoc = record(selectedAllocation.allocation_doc)
   const fullyFundedEntries = records(allocationDoc?.champion_allocations)
@@ -212,9 +217,9 @@ async function buildEconomicsPayload({
     allocation,
     publishedRows,
     v2Bundles,
-    v2Finalizations,
+    v2Finalizations: v2FinalizationsWithEpoch,
   })
-  const history = buildHistory(allocationRows, publishedRows, v2Finalizations)
+  const history = buildHistory(allocationRows, publishedRows, v2FinalizationsWithEpoch)
 
   return {
     allocation,
@@ -351,14 +356,45 @@ async function fetchPagedRows(
   return rows
 }
 
-async function fetchOptionalRows(
+async function fetchOptionalWeightBundles(
   supabase: ReturnType<typeof getAdminSupabase>,
-  table: string,
   errorTag: string,
 ): Promise<Row[]> {
-  const { data, error } = await supabase.from(table).select('*').limit(200)
+  // bundle_doc contains the complete attested workflow and is intentionally
+  // large. The admin economics view only needs publication identity fields;
+  // selecting the document made this small view transfer hundreds of MB.
+  const { data, error } = await supabase
+    .from('research_lab_attested_weight_bundles_v2')
+    .select(WEIGHT_BUNDLE_SELECT)
+    .eq('netuid', NETUID)
+    .order('epoch_id', { ascending: false })
+    .limit(200)
   if (error) {
-    console.warn(`[${errorTag}:${table}] Optional weight evidence source unavailable`, error.message)
+    console.warn(
+      `[${errorTag}:research_lab_attested_weight_bundles_v2] Optional weight evidence source unavailable`,
+      error.message,
+    )
+    return []
+  }
+  return (data ?? []) as Row[]
+}
+
+async function fetchOptionalWeightFinalizations(
+  supabase: ReturnType<typeof getAdminSupabase>,
+  errorTag: string,
+): Promise<Row[]> {
+  // finalization_doc is not rendered. bundle_hash links each lightweight
+  // finalization row to the already-fetched bundle epoch.
+  const { data, error } = await supabase
+    .from('research_lab_attested_weight_finalizations_v2')
+    .select(WEIGHT_FINALIZATION_SELECT)
+    .order('created_at', { ascending: false })
+    .limit(200)
+  if (error) {
+    console.warn(
+      `[${errorTag}:research_lab_attested_weight_finalizations_v2] Optional weight evidence source unavailable`,
+      error.message,
+    )
     return []
   }
   return (data ?? []) as Row[]
@@ -725,6 +761,20 @@ function latestRow(rows: Row[]): Row | undefined {
 
 function rowEpoch(row: Row | undefined): number | null {
   return finiteNumber(row?.epoch ?? row?.epoch_id ?? row?.allocation_epoch ?? row?.bundle_epoch)
+}
+
+function attachFinalizationEpochs(finalizations: Row[], bundles: Row[]): Row[] {
+  const epochByBundleHash = new Map<string, number>()
+  for (const bundle of bundles) {
+    const bundleHash = text(bundle.bundle_hash)
+    const epoch = rowEpoch(bundle)
+    if (bundleHash && epoch !== null) epochByBundleHash.set(bundleHash, epoch)
+  }
+  return finalizations.map((finalization) => {
+    const bundleHash = text(finalization.bundle_hash)
+    const epoch = bundleHash ? epochByBundleHash.get(bundleHash) : undefined
+    return epoch === undefined ? finalization : { ...finalization, epoch_id: epoch }
+  })
 }
 
 function pagination(page: number, pageSize: number, total: number): EconomicsPagination {
