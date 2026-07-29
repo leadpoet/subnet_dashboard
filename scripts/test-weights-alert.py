@@ -8,6 +8,8 @@ from unittest.mock import patch
 
 import weights_alert
 from weights_alert import (
+    LAST_ALERT_EPOCH_KEY,
+    claim_epoch_alert,
     display_label,
     query_identity_name,
     safe_identity_name,
@@ -16,6 +18,96 @@ from weights_alert import (
 
 
 class WeightsAlertIncidentStateTest(unittest.TestCase):
+    def test_epoch_alert_can_only_be_claimed_once(self):
+        state = {}
+
+        self.assertTrue(claim_epoch_alert(state, 24_169, True))
+        self.assertFalse(claim_epoch_alert(state, 24_169, True))
+        self.assertEqual(state[LAST_ALERT_EPOCH_KEY], 24_169)
+
+    def test_main_combines_validators_at_cutoff_and_posts_once_in_epoch(self):
+        class Metagraph:
+            hotkeys = ["hotkey-auditor", "hotkey-primary", "hotkey-late"]
+            coldkeys = ["coldkey-auditor", "coldkey-primary", "coldkey-late"]
+            validator_permit = [True, True, True]
+            active = [True, True, True]
+            last_update = [1000, 1024, 1049]
+
+        class Subtensor:
+            def __init__(self, network):
+                self.network = network
+
+            def metagraph(self, netuid):
+                return Metagraph()
+
+            def query_identity(self, coldkey):
+                return types.SimpleNamespace(name="")
+
+        state = {}
+        messages = []
+        registry = [
+            {
+                "id": "auditor",
+                "role": "auditor",
+                "label": "auditor",
+                "hotkey": "hotkey-auditor",
+                "expectedColdkey": "coldkey-auditor",
+            },
+            {
+                "id": "leadpoet-primary",
+                "role": "primary",
+                "label": "primary",
+                "hotkey": "hotkey-primary",
+                "expectedColdkey": "coldkey-primary",
+            },
+            {
+                "id": "late-auditor",
+                "role": "auditor",
+                "label": "late auditor",
+                "hotkey": "hotkey-late",
+                "expectedColdkey": "coldkey-late",
+            },
+        ]
+        epoch_snapshots = [
+            (24_169, 1075, 360, 1404),
+            (24_169, 1075, 360, 1430),
+        ]
+        fake_bittensor = types.SimpleNamespace(Subtensor=Subtensor)
+
+        with ExitStack() as stack:
+            stack.enter_context(patch.dict(sys.modules, {"bittensor": fake_bittensor}))
+            stack.enter_context(
+                patch.object(
+                    weights_alert,
+                    "official_epoch_state",
+                    side_effect=epoch_snapshots,
+                )
+            )
+            stack.enter_context(
+                patch.object(weights_alert, "load_registry", return_value=registry)
+            )
+            stack.enter_context(
+                patch.object(weights_alert, "load_state", return_value=state)
+            )
+            stack.enter_context(patch.object(weights_alert, "save_state"))
+            stack.enter_context(
+                patch.object(
+                    weights_alert,
+                    "post_discord",
+                    side_effect=lambda content: messages.append(content) or True,
+                )
+            )
+            stack.enter_context(patch.object(weights_alert, "log"))
+            self.assertEqual(weights_alert.main(), 0)
+            self.assertEqual(weights_alert.main(), 0)
+
+        self.assertEqual(len(messages), 1)
+        self.assertIn("auditor", messages[0])
+        self.assertIn("primary", messages[0])
+        self.assertIn("380 blocks since last set", messages[0])
+        self.assertNotIn("late auditor", messages[0])
+        self.assertEqual(state[LAST_ALERT_EPOCH_KEY], 24_169)
+
     def test_identity_name_replaces_fallback_for_verified_coldkey(self):
         identity = types.SimpleNamespace(name="Rizzo (Insured)")
         subtensor = types.SimpleNamespace(query_identity=lambda coldkey: identity)

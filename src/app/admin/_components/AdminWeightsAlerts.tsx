@@ -83,7 +83,7 @@ function buildRows(data: MetagraphPayload | null): WatchRow[] {
     }
     row.lastSetBlock = lastUpdate
     row.blocksSince = block - lastUpdate
-    row.stale = staleBlocks !== null && row.blocksSince > staleBlocks
+    row.stale = staleBlocks !== null && row.blocksSince >= staleBlocks
     return row
   })
 }

@@ -497,6 +497,7 @@ class Subtensor:
   assert.match(weightsAlertsSource, /payload\.tempo === null/)
   assert.match(weightsAlertsSource, /const epoch = data\?\.subnetEpochIndex \?\? null/)
   assert.match(weightsAlertsSource, /data\.tempo \+ WEIGHT_SUBMISSION_GRACE_BLOCKS/)
+  assert.match(weightsAlertsSource, /row\.blocksSince >= staleBlocks/)
   assert.doesNotMatch(weightsAlertsSource, /Math\.floor\(.*\/ EPOCH_LENGTH\)/)
   assert.doesNotMatch(weightsAlertsSource, /lastSetEpoch/)
   assert.doesNotMatch(weightsAlertsSource, /epoch - 1/)
