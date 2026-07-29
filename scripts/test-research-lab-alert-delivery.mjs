@@ -85,7 +85,6 @@ try {
       alertFixture,
       'open',
       DASHBOARD_URL,
-      { username: 'Research Lab Ops' },
     ),
     email: buildResearchLabResendEmailPayload(
       alertFixture,
@@ -101,7 +100,6 @@ try {
   }
 
   assert.deepEqual(payloadFixtures.discord, {
-    username: 'Research Lab Ops',
     allowed_mentions: { parse: [] },
     embeds: [{
       title: 'OPEN · CRITICAL · Validator validator-7 PCR0 mismatch',
@@ -187,7 +185,6 @@ try {
     RESEARCH_LAB_ALERT_DASHBOARD_URL: DASHBOARD_URL,
     RESEARCH_LAB_ALERT_TIMEOUT_MS: '2750',
     RESEARCH_LAB_ALERT_DISCORD_WEBHOOK_URL: DISCORD_WEBHOOK,
-    RESEARCH_LAB_ALERT_DISCORD_USERNAME: 'Research Lab Ops',
     RESEARCH_LAB_ALERT_RESEND_API_KEY: RESEND_API_KEY,
     RESEARCH_LAB_ALERT_EMAIL_FROM: 'Research Lab <alerts@example.com>',
     RESEARCH_LAB_ALERT_EMAIL_TO: 'ops@example.com, team@example.com;OPS@example.com',
@@ -195,7 +192,6 @@ try {
   })
   assert.equal(parsedConfig.timeoutMs, 2_750)
   assert.equal(parsedConfig.discord.webhookUrl, DISCORD_WEBHOOK)
-  assert.equal(parsedConfig.discord.username, 'Research Lab Ops')
   assert.deepEqual(parsedConfig.email.to, ['ops@example.com', 'team@example.com'])
   assert.equal(parsedConfig.email.apiKey, RESEND_API_KEY)
   assert.equal(parsedConfig.dashboardUrl, DASHBOARD_URL)
@@ -227,13 +223,6 @@ try {
     }),
     /requires RESEARCH_LAB_ALERT_DASHBOARD_URL/,
   )
-  assert.throws(
-    () => parseResearchLabAlertDeliveryConfig({
-      RESEARCH_LAB_ALERT_DISCORD_USERNAME: 'Research Lab Ops',
-    }),
-    /require RESEARCH_LAB_ALERT_DISCORD_WEBHOOK_URL/,
-  )
-
   let noOpFetchCalls = 0
   const noOpResult = await deliverResearchLabAlert(
     { alert: alertFixture, transition: 'open', config: {} },
@@ -279,7 +268,6 @@ try {
     alertFixture,
     'open',
     DASHBOARD_URL,
-    { username: 'Research Lab Ops' },
   ))
   assert.equal(successCalls[1].init.headers.Authorization, `Bearer ${RESEND_API_KEY}`)
   assert.equal(successCalls[1].init.headers['Idempotency-Key'], 'incident-1:open:email')
