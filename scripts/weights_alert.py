@@ -7,13 +7,12 @@ Checks the primary validator and the audit validators against the official
 subnet epoch authority — ``SubnetEpochIndex`` anchored by ``LastEpochBlock``
 with the on-chain ``Tempo`` — the same authority the dashboard uses, NOT the
 legacy ``block // 360`` bucket. A validator is stale when its ``last_update``
-is more than one full tempo (plus a submission grace) behind the chain head.
+is at least one full tempo (plus a submission grace) behind the chain head.
 
-Posts one combined message to the Discord webhook for each newly observed
-validator problem. Persistent problems are deduped in STATE_FILE until they
-recover; crossing an epoch boundary alone never re-pages the same incident.
-Webhook URL lives in WEBHOOK_FILE (one line); empty/missing file = log-only
-mode.
+Posts at most one combined message to the Discord webhook in an official epoch.
+Persistent problems are deduped in STATE_FILE until they recover; crossing an
+epoch boundary alone never re-pages the same incident. Webhook URL lives in
+WEBHOOK_FILE (one line); empty/missing file = log-only mode.
 
 Usage: weights_alert.py [--test]   (--test posts a labeled test message)
 """
@@ -87,6 +86,7 @@ SUBMISSION_GRACE_BLOCKS = 20
 WEBHOOK_FILE = os.path.expanduser("~/.config/leadpoet/weights_alert_webhook")
 STATE_FILE = os.path.expanduser("~/.config/leadpoet/weights_alert_state.json")
 LOG_FILE = os.path.expanduser("~/weights_alert.log")
+LAST_ALERT_EPOCH_KEY = "__last_alert_epoch__"
 
 
 def log(msg: str) -> None:
@@ -141,6 +141,14 @@ def update_incident_state(
 
     state[validator_id] = current
     return should_alert
+
+
+def claim_epoch_alert(state: dict, epoch_index: int, has_new_incidents: bool) -> bool:
+    """Return whether this pass may post, enforcing one alert per epoch."""
+    if not has_new_incidents or state.get(LAST_ALERT_EPOCH_KEY) == epoch_index:
+        return False
+    state[LAST_ALERT_EPOCH_KEY] = epoch_index
+    return True
 
 
 def webhook_url() -> str:
@@ -242,6 +250,7 @@ def main() -> int:
     hotkeys = list(mg.hotkeys)
     hotkey_to_uid = {hk: i for i, hk in enumerate(hotkeys)}
     misses = []
+    has_new_incidents = False
     for validator in validators:
         vid = str(validator.get("id") or validator.get("hotkey") or "")[:64]
         fallback_label = str(validator.get("label") or vid)
@@ -277,7 +286,7 @@ def main() -> int:
                 incident_keys.append("validator_inactive")
             last_set_block = int(mg.last_update[uid])
             blocks_since = block - last_set_block
-            if blocks_since > stale_blocks:
+            if blocks_since >= stale_blocks:
                 problems.append(
                     f"weight update stale ({blocks_since} blocks since last set)"
                 )
@@ -288,9 +297,10 @@ def main() -> int:
         # by epoch or UID. Resolved incidents are removed from state so a later
         # recurrence can alert again.
         if update_incident_state(state, vid, incident_keys):
+            has_new_incidents = True
             misses.append((vid, label, uid, last_set_block, blocks_since, problems))
 
-    if misses:
+    if claim_epoch_alert(state, epoch_index, has_new_incidents):
         epoch_block = max(0, block - last_epoch_block)
         lines = [
             f"🚨 **SN71 missed weight set** "
@@ -309,6 +319,11 @@ def main() -> int:
             )
         post_discord("\n".join(lines))
         log(f"ALERTED: {[(m[0], m[5]) for m in misses]}")
+    elif has_new_incidents:
+        log(
+            f"SUPPRESSED: official epoch {epoch_index} already alerted; "
+            f"new incidents: {[(m[0], m[5]) for m in misses]}"
+        )
     save_state(state)
     return 0
 
