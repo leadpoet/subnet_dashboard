@@ -428,6 +428,14 @@ jobs:
               exit 1
             fi
 
+            # The missed-weight cron runs standalone copies from $HOME. Refresh
+            # them only after the release is healthy, using atomic renames so a
+            # cron tick can never observe a partially written script or registry.
+            install -m 0755 "$APP_ROOT/scripts/weights_alert.py" "$HOME/weights_alert.py.next"
+            mv "$HOME/weights_alert.py.next" "$HOME/weights_alert.py"
+            install -m 0644 "$APP_ROOT/validator_registry.json" "$HOME/validator_registry.json.next"
+            mv "$HOME/validator_registry.json.next" "$HOME/validator_registry.json"
+
             # Record the slot only after the production health check succeeds.
             printf '%s\n' "$CANDIDATE_SLOT" > "$ACTIVE_SLOT_FILE.tmp"
             mv "$ACTIVE_SLOT_FILE.tmp" "$ACTIVE_SLOT_FILE"

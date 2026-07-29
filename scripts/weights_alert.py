@@ -24,11 +24,11 @@ import sys
 import time
 import urllib.request
 
-# Watched validators are identified by hotkey (the stable identity) in
-# validator_registry.json, shared with the dashboard UI. UIDs are resolved
-# live from the metagraph each pass, so a re-registration that moves a
-# validator to a new UID is followed automatically; a hotkey rotation is a
-# deliberate reviewed edit to the registry, never an automatic follow.
+# Watched validators are pinned to reviewed hotkey/coldkey pairs in
+# validator_registry.json, shared with the dashboard UI. UIDs and on-chain
+# display names resolve live, but a display name is used only while the
+# current coldkey matches the expected coldkey. A key rotation remains a
+# deliberate reviewed registry edit.
 REGISTRY_ENV = "WEIGHTS_ALERT_REGISTRY"
 REGISTRY_CANDIDATES = (
     os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "validator_registry.json"),
@@ -50,6 +50,34 @@ def load_registry() -> list:
         except Exception:
             continue
     return []
+
+
+def safe_identity_name(value) -> str:
+    """Return a bounded, single-line identity name safe for Discord text."""
+    name = " ".join(str(value or "").split())
+    # Prevent an on-chain display name from creating a Discord mention.
+    return name[:80].replace("@", "@\u200b")
+
+
+def query_identity_name(subtensor, coldkey: str) -> str:
+    """Best-effort on-chain name lookup with a static-label fallback."""
+    if not coldkey:
+        return ""
+    try:
+        query_identity = getattr(subtensor, "query_identity", None)
+        if not callable(query_identity):
+            return ""
+        identity = query_identity(coldkey)
+        if isinstance(identity, dict):
+            return safe_identity_name(identity.get("name"))
+        return safe_identity_name(getattr(identity, "name", ""))
+    except Exception:
+        return ""
+
+
+def display_label(role: str, fallback_label: str, identity_name: str) -> str:
+    role = " ".join(str(role or "").split())[:32]
+    return f"{role} ({identity_name})" if role and identity_name else fallback_label
 
 
 NETUID = 71
@@ -216,7 +244,8 @@ def main() -> int:
     misses = []
     for validator in validators:
         vid = str(validator.get("id") or validator.get("hotkey") or "")[:64]
-        label = str(validator.get("label") or vid)
+        fallback_label = str(validator.get("label") or vid)
+        role = str(validator.get("role") or "")
         hotkey = str(validator.get("hotkey") or "")
         expected_coldkey = str(validator.get("expectedColdkey") or "")
         if not vid or not hotkey:
@@ -231,9 +260,15 @@ def main() -> int:
             incident_keys.append("hotkey_not_registered")
         else:
             coldkey = str(mg.coldkeys[uid])
-            if expected_coldkey and coldkey != expected_coldkey:
+            coldkey_mismatch = bool(expected_coldkey and coldkey != expected_coldkey)
+            coldkey_verified = bool(expected_coldkey and coldkey == expected_coldkey)
+            if coldkey_mismatch:
                 problems.append("unexpected coldkey")
                 incident_keys.append("unexpected_coldkey")
+            identity_name = (
+                query_identity_name(st, coldkey) if coldkey_verified else ""
+            )
+            label = display_label(role, fallback_label, identity_name)
             if not bool(mg.validator_permit[uid]):
                 problems.append("validator permit lost")
                 incident_keys.append("validator_permit_lost")
@@ -247,6 +282,8 @@ def main() -> int:
                     f"weight update stale ({blocks_since} blocks since last set)"
                 )
                 incident_keys.append(f"weight_update_stale:{last_set_block}")
+        if uid is None:
+            label = fallback_label
         # Deduplicate by stable validator identity and incident evidence, never
         # by epoch or UID. Resolved incidents are removed from state so a later
         # recurrence can alert again.

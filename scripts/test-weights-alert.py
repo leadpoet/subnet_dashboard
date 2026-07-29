@@ -7,10 +7,47 @@ from contextlib import ExitStack
 from unittest.mock import patch
 
 import weights_alert
-from weights_alert import update_incident_state
+from weights_alert import (
+    display_label,
+    query_identity_name,
+    safe_identity_name,
+    update_incident_state,
+)
 
 
 class WeightsAlertIncidentStateTest(unittest.TestCase):
+    def test_identity_name_replaces_fallback_for_verified_coldkey(self):
+        identity = types.SimpleNamespace(name="Rizzo (Insured)")
+        subtensor = types.SimpleNamespace(query_identity=lambda coldkey: identity)
+
+        name = query_identity_name(subtensor, "coldkey-rizzo")
+
+        self.assertEqual(
+            display_label("auditor", "auditor (Rizzo)", name),
+            "auditor (Rizzo (Insured))",
+        )
+
+    def test_identity_lookup_failure_keeps_trusted_fallback(self):
+        def unavailable(_coldkey):
+            raise RuntimeError("RPC unavailable")
+
+        subtensor = types.SimpleNamespace(query_identity=unavailable)
+
+        self.assertEqual(query_identity_name(subtensor, "coldkey-rizzo"), "")
+        self.assertEqual(
+            display_label("auditor", "auditor (Rizzo)", ""),
+            "auditor (Rizzo)",
+        )
+
+    def test_identity_name_is_bounded_single_line_and_cannot_mention(self):
+        unsafe = "  @everyone\n" + ("x" * 100)
+
+        name = safe_identity_name(unsafe)
+
+        self.assertNotIn("\n", name)
+        self.assertNotIn("@everyone", name)
+        self.assertLessEqual(len(name), 81)
+
     def test_main_does_not_realert_404_to_430_block_epoch_transition(self):
         class Metagraph:
             hotkeys = ["hotkey-primary"]
@@ -27,11 +64,15 @@ class WeightsAlertIncidentStateTest(unittest.TestCase):
                 self.netuid = netuid
                 return Metagraph()
 
+            def query_identity(self, coldkey):
+                return types.SimpleNamespace(name="Leadpoet")
+
         state = {}
         messages = []
         registry = [
             {
                 "id": "leadpoet-primary",
+                "role": "primary",
                 "label": "primary (Leadpoet)",
                 "hotkey": "hotkey-primary",
                 "expectedColdkey": "coldkey-primary",
@@ -72,10 +113,76 @@ class WeightsAlertIncidentStateTest(unittest.TestCase):
 
         self.assertEqual(len(messages), 1)
         self.assertIn("404 blocks since last set", messages[0])
+        self.assertIn("primary (Leadpoet)", messages[0])
         self.assertEqual(
             state["leadpoet-primary"],
             ["weight_update_stale:1000"],
         )
+
+    def test_main_does_not_trust_identity_when_coldkey_changes(self):
+        class Metagraph:
+            hotkeys = ["hotkey-rizzo"]
+            coldkeys = ["coldkey-unrelated"]
+            validator_permit = [True]
+            active = [True]
+            last_update = [1000]
+
+        queried_coldkeys = []
+
+        class Subtensor:
+            def __init__(self, network):
+                self.network = network
+
+            def metagraph(self, netuid):
+                return Metagraph()
+
+            def query_identity(self, coldkey):
+                queried_coldkeys.append(coldkey)
+                return types.SimpleNamespace(name="Spoofed Rizzo")
+
+        registry = [
+            {
+                "id": "rizzo",
+                "role": "auditor",
+                "label": "auditor (Rizzo)",
+                "hotkey": "hotkey-rizzo",
+                "expectedColdkey": "coldkey-rizzo",
+            }
+        ]
+        messages = []
+        fake_bittensor = types.SimpleNamespace(Subtensor=Subtensor)
+
+        with ExitStack() as stack:
+            stack.enter_context(patch.dict(sys.modules, {"bittensor": fake_bittensor}))
+            stack.enter_context(
+                patch.object(
+                    weights_alert,
+                    "official_epoch_state",
+                    return_value=(24091, 1049, 360, 1404),
+                )
+            )
+            stack.enter_context(
+                patch.object(weights_alert, "load_registry", return_value=registry)
+            )
+            stack.enter_context(
+                patch.object(weights_alert, "load_state", return_value={})
+            )
+            stack.enter_context(patch.object(weights_alert, "save_state"))
+            stack.enter_context(
+                patch.object(
+                    weights_alert,
+                    "post_discord",
+                    side_effect=lambda content: messages.append(content) or True,
+                )
+            )
+            stack.enter_context(patch.object(weights_alert, "log"))
+            self.assertEqual(weights_alert.main(), 0)
+
+        self.assertEqual(queried_coldkeys, [])
+        self.assertEqual(len(messages), 1)
+        self.assertIn("auditor (Rizzo)", messages[0])
+        self.assertNotIn("Spoofed Rizzo", messages[0])
+        self.assertIn("unexpected coldkey", messages[0])
 
     def test_stale_update_does_not_realert_after_epoch_boundary(self):
         state = {}

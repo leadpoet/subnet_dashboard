@@ -11,13 +11,13 @@ const REFRESH_INTERVAL_MS = 30_000
 const CONSECUTIVE_FAILURES_BEFORE_ALERT = 2
 const WEIGHT_SUBMISSION_GRACE_BLOCKS = 20
 
-// Watched validators are identified by hotkey (the stable identity) and
-// their UIDs are resolved live from the metagraph, so a re-registration
-// that moves a validator to a new UID is followed automatically. A hotkey
-// rotation is a deliberate operator event handled by a reviewed edit to
-// validator_registry.json — never by silently following names or coldkeys.
+// Watched validators are pinned to reviewed hotkey/coldkey pairs. UIDs and
+// human-readable on-chain names resolve live; the name is trusted only while
+// the current coldkey still matches the registry. A key rotation remains a
+// deliberate reviewed edit to validator_registry.json.
 interface WatchedValidator {
   id: string
+  role: string
   label: string
   hotkey: string
   expectedColdkey: string
@@ -48,8 +48,17 @@ function buildRows(data: MetagraphPayload | null): WatchRow[] {
   const staleBlocks = data.tempo !== null && Number.isSafeInteger(data.tempo) && data.tempo > 0
     ? data.tempo + WEIGHT_SUBMISSION_GRACE_BLOCKS
     : null
-  return WATCHED_VALIDATORS.map(({ id, label, hotkey, expectedColdkey }) => {
+  return WATCHED_VALIDATORS.map(({ id, role, label: fallbackLabel, hotkey, expectedColdkey }) => {
     const uid = data.hotkeyToUid?.[hotkey]
+    const coldkey = uid === undefined ? undefined : data.hotkeyToColdkey?.[hotkey]
+    const coldkeyMismatch = (
+      coldkey !== undefined &&
+      Boolean(expectedColdkey) &&
+      coldkey !== expectedColdkey
+    )
+    const coldkeyVerified = Boolean(expectedColdkey && coldkey === expectedColdkey)
+    const identityName = coldkeyVerified ? data.names?.[hotkey]?.trim().slice(0, 80) : ''
+    const label = identityName ? `${role} (${identityName})` : fallbackLabel
     const row: WatchRow = {
       id,
       label,
@@ -59,14 +68,12 @@ function buildRows(data: MetagraphPayload | null): WatchRow[] {
       blocksSince: null,
       notRegistered: uid === undefined,
       permitLost: false,
-      coldkeyMismatch: false,
+      coldkeyMismatch,
       inactive: false,
       stale: false,
       unavailable: false,
     }
     if (uid === undefined) return row
-    const coldkey = data.hotkeyToColdkey?.[hotkey]
-    row.coldkeyMismatch = coldkey !== undefined && coldkey !== expectedColdkey
     row.permitLost = data.isValidator?.[hotkey] === false
     row.inactive = data.active?.[hotkey] === false
     const lastUpdate = data.lastUpdates?.[hotkey]

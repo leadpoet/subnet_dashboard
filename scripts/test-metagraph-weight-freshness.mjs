@@ -501,6 +501,43 @@ class Subtensor:
   assert.doesNotMatch(weightsAlertsSource, /lastSetEpoch/)
   assert.doesNotMatch(weightsAlertsSource, /epoch - 1/)
   assert.match(weightsAlertsSource, /consecutiveFailures >= CONSECUTIVE_FAILURES_BEFORE_ALERT/)
+  assert.match(weightsAlertsSource, /data\.names\?\.\[hotkey\]\?\.trim\(\)\.slice\(0, 80\)/)
+  assert.match(
+    weightsAlertsSource,
+    /const coldkeyVerified = Boolean\(expectedColdkey && coldkey === expectedColdkey\)/,
+  )
+  assert.match(weightsAlertsSource, /const identityName = coldkeyVerified/)
+  assert.match(weightsAlertsSource, /identityName \? `\$\{role\} \(\$\{identityName\}\)` : fallbackLabel/)
+
+  const validatorRegistry = JSON.parse(
+    await readFile(resolve('validator_registry.json'), 'utf8'),
+  )
+  assert.ok(
+    validatorRegistry.validators.every((validator) => (
+      typeof validator.role === 'string' && validator.role.length > 0
+    )),
+    'every watched validator should have a role for dynamic identity labels',
+  )
+  const rizzo = validatorRegistry.validators.find(
+    (validator) => validator.hotkey === '5GeEtY7Ars1FbSKhueoffzLHrYgw3rxn7eF6egicCbWmNs71',
+  )
+  assert.equal(rizzo?.role, 'auditor')
+  assert.equal(rizzo?.label, 'auditor (Rizzo)')
+
+  const deploySource = await readFile(resolve('.github/workflows/deploy.yml'), 'utf8')
+  assert.match(
+    deploySource,
+    /install -m 0755 "\$APP_ROOT\/scripts\/weights_alert\.py" "\$HOME\/weights_alert\.py\.next"/,
+  )
+  assert.match(
+    deploySource,
+    /install -m 0644 "\$APP_ROOT\/validator_registry\.json" "\$HOME\/validator_registry\.json\.next"/,
+  )
+  assert.match(deploySource, /mv "\$HOME\/weights_alert\.py\.next" "\$HOME\/weights_alert\.py"/)
+  assert.match(
+    deploySource,
+    /mv "\$HOME\/validator_registry\.json\.next" "\$HOME\/validator_registry\.json"/,
+  )
   const officialEpochCard = metagraphUiSource.indexOf('label="Official SN71 Epoch"')
   const blocksCard = metagraphUiSource.indexOf('label="Epoch Blocks Remaining"')
   const timeCard = metagraphUiSource.indexOf('label="Time Until Next Epoch"')
