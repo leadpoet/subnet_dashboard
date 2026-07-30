@@ -426,9 +426,8 @@ jobs:
               exit 1
             fi
 
-            # The missed-weight cron runs standalone copies from $HOME. Refresh
-            # them only after the release is healthy, using atomic renames so a
-            # cron tick can never observe a partially written script or registry.
+            # Keep dashboard-host recovery copies current. The active cron runs
+            # on the validator host and is deployed by deploy-weights-alert.
             install -m 0755 "$APP_ROOT/scripts/weights_alert.py" "$HOME/weights_alert.py.next"
             mv "$HOME/weights_alert.py.next" "$HOME/weights_alert.py"
             install -m 0644 "$APP_ROOT/validator_registry.json" "$HOME/validator_registry.json.next"
@@ -456,3 +455,92 @@ jobs:
             https://subnet71.com/api/health/ready > /dev/null
           curl --fail --silent --show-error --connect-timeout 5 --max-time 20 \
             https://subnet71.com/ > /dev/null
+
+  deploy-weights-alert:
+    name: Deploy weights alert to validator
+    needs: deploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out release source
+        uses: actions/checkout@v4
+
+      - name: Package weights alert release
+        run: |
+          set -euo pipefail
+          tar -czf "weights-alert-${GITHUB_SHA}.tgz" \
+            scripts/weights_alert.py \
+            validator_registry.json
+
+      - name: Copy weights alert release to validator
+        uses: appleboy/scp-action@v1.0.0
+        with:
+          host: 172.31.29.188
+          username: ec2-user
+          key: ${{ secrets.EC2_SSH_KEY }}
+          proxy_host: ${{ secrets.EC2_HOST }}
+          proxy_username: ec2-user
+          proxy_key: ${{ secrets.EC2_SSH_KEY }}
+          timeout: 45s
+          command_timeout: 2m
+          source: weights-alert-${{ github.sha }}.tgz
+          target: /home/ec2-user
+          overwrite: true
+
+      - name: Activate and verify validator weights alert
+        uses: appleboy/ssh-action@v1.2.0
+        timeout-minutes: 3
+        with:
+          host: 172.31.29.188
+          username: ec2-user
+          key: ${{ secrets.EC2_SSH_KEY }}
+          proxy_host: ${{ secrets.EC2_HOST }}
+          proxy_username: ec2-user
+          proxy_key: ${{ secrets.EC2_SSH_KEY }}
+          timeout: 45s
+          command_timeout: 2m
+          script: |
+            set -euo pipefail
+
+            DEPLOY_SHA="${{ github.sha }}"
+            ARCHIVE="$HOME/weights-alert-$DEPLOY_SHA.tgz"
+            STAGING="$(mktemp -d "$HOME/.weights-alert-deploy.XXXXXX")"
+            cleanup_weights_alert_release() {
+              rm -rf "$STAGING"
+              rm -f "$ARCHIVE"
+            }
+            trap cleanup_weights_alert_release EXIT
+
+            tar -xzf "$ARCHIVE" -C "$STAGING"
+            STAGED_SCRIPT="$STAGING/scripts/weights_alert.py"
+            STAGED_REGISTRY="$STAGING/validator_registry.json"
+            ALERT_PYTHON="$HOME/alert_venv/bin/python"
+            ACTIVE_SCRIPT="$HOME/weights_alert.py"
+            ACTIVE_REGISTRY="$HOME/validator_registry.json"
+
+            test -x "$ALERT_PYTHON"
+            "$ALERT_PYTHON" -m py_compile "$STAGED_SCRIPT"
+            "$ALERT_PYTHON" -c \
+              'import json,sys; doc=json.load(open(sys.argv[1])); validators=doc["validators"]; assert any(v.get("label") == "auditor (Rizzo)" and v.get("hotkey") == "5GeEtY7Ars1FbSKhueoffzLHrYgw3rxn7eF6egicCbWmNs71" for v in validators)' \
+              "$STAGED_REGISTRY"
+
+            EXPECTED_SCRIPT_SHA="$(sha256sum "$STAGED_SCRIPT" | cut -d ' ' -f 1)"
+            EXPECTED_REGISTRY_SHA="$(sha256sum "$STAGED_REGISTRY" | cut -d ' ' -f 1)"
+            install -m 0644 "$STAGED_REGISTRY" "$ACTIVE_REGISTRY.$DEPLOY_SHA.next"
+            install -m 0755 "$STAGED_SCRIPT" "$ACTIVE_SCRIPT.$DEPLOY_SHA.next"
+
+            # Registry first is safe with either worker version; the inverse can
+            # briefly reintroduce a stale fallback label during a cron tick.
+            mv "$ACTIVE_REGISTRY.$DEPLOY_SHA.next" "$ACTIVE_REGISTRY"
+            mv "$ACTIVE_SCRIPT.$DEPLOY_SHA.next" "$ACTIVE_SCRIPT"
+            printf '%s\n' "$DEPLOY_SHA" > "$HOME/weights_alert_deploy_sha.next"
+            mv "$HOME/weights_alert_deploy_sha.next" "$HOME/weights_alert_deploy_sha"
+
+            test "$(sha256sum "$ACTIVE_SCRIPT" | cut -d ' ' -f 1)" = "$EXPECTED_SCRIPT_SHA"
+            test "$(sha256sum "$ACTIVE_REGISTRY" | cut -d ' ' -f 1)" = "$EXPECTED_REGISTRY_SHA"
+            crontab -l | grep -Fq \
+              "$HOME/alert_venv/bin/python $HOME/weights_alert.py"
+            grep -Fq '"label": "auditor (Rizzo)"' "$ACTIVE_REGISTRY"
+            grep -Fq 'completed; checked at' "$ACTIVE_SCRIPT"
+
+            echo "Validator weights alert deployed and verified at $DEPLOY_SHA"

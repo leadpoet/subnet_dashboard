@@ -549,6 +549,29 @@ class Subtensor:
     deploySource,
     /mv "\$HOME\/validator_registry\.json\.next" "\$HOME\/validator_registry\.json"/,
   )
+  const validatorWeightsDeploy = deploySource.slice(
+    deploySource.indexOf('  deploy-weights-alert:'),
+  )
+  assert.match(validatorWeightsDeploy, /needs: deploy/)
+  assert.match(validatorWeightsDeploy, /host: 172\.31\.29\.188/)
+  assert.equal(
+    (validatorWeightsDeploy.match(/key: \$\{\{ secrets\.EC2_SSH_KEY \}\}/g) ?? []).length,
+    4,
+    'validator target and dashboard proxy should reuse the existing rotated SSH key',
+  )
+  assert.match(validatorWeightsDeploy, /proxy_host: \$\{\{ secrets\.EC2_HOST \}\}/)
+  assert.match(validatorWeightsDeploy, /proxy_key: \$\{\{ secrets\.EC2_SSH_KEY \}\}/)
+  assert.match(
+    validatorWeightsDeploy,
+    /mv "\$ACTIVE_REGISTRY\.\$DEPLOY_SHA\.next" "\$ACTIVE_REGISTRY"\s+mv "\$ACTIVE_SCRIPT\.\$DEPLOY_SHA\.next" "\$ACTIVE_SCRIPT"/,
+    'validator deploy should activate the trusted registry before the worker',
+  )
+  assert.match(
+    validatorWeightsDeploy,
+    /crontab -l \| grep -Fq[\s\S]*"\$HOME\/alert_venv\/bin\/python \$HOME\/weights_alert\.py"/,
+  )
+  assert.match(validatorWeightsDeploy, /grep -Fq '"label": "auditor \(Rizzo\)"'/)
+  assert.match(validatorWeightsDeploy, /grep -Fq 'completed; checked at'/)
   const officialEpochCard = metagraphUiSource.indexOf('label="Official SN71 Epoch"')
   const blocksCard = metagraphUiSource.indexOf('label="Epoch Blocks Remaining"')
   const timeCard = metagraphUiSource.indexOf('label="Time Until Next Epoch"')
