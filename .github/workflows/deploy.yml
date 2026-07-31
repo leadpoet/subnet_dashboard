@@ -149,6 +149,7 @@ jobs:
             CLEANUP_STAMP="$(date -u +%Y%m%d%H%M%S)"
             CLEANUP_LOG="$HOME/subnet-dashboard-disk-cleanup.log"
             REQUIRED_FREE_KB=1250000
+            PRE_DEPLOY_SHA="$(git -C "$APP_ROOT" rev-parse HEAD)"
 
             ACTIVE_SLOT="$(cat "$ACTIVE_SLOT_FILE" 2>/dev/null || true)"
             if [ "$ACTIVE_SLOT" = ".next-blue" ]; then
@@ -296,9 +297,15 @@ jobs:
               exit 1
             fi
 
-            # Runtime dependencies remain on EC2, but compilation happened on the
-            # GitHub runner so it cannot starve the live production worker.
-            npm ci --omit=dev --no-audit --no-fund
+            # `npm ci` removes node_modules before reinstalling it. Do not do
+            # that beneath the live worker when this release did not change its
+            # dependency manifest and the installed production tree is valid.
+            if git diff --quiet "$PRE_DEPLOY_SHA" "$DEPLOY_SHA" -- package.json package-lock.json && \
+              npm ls --omit=dev --depth=0 >/dev/null 2>&1; then
+              echo "Production dependencies are unchanged and valid; skipping npm ci"
+            else
+              npm ci --omit=dev --no-audit --no-fund
+            fi
 
             rm -rf "$STAGED_BUILD"
             tar -xzf "$ARTIFACT" -C "$APP_ROOT"
@@ -374,18 +381,37 @@ jobs:
 
             # A single successful request is not enough: the previous 700 MB
             # watchdog failure appeared about 30 seconds after boot. Require the
-            # same production PID to remain healthy beyond that interval.
+            # same production PID to remain healthy beyond that interval. The
+            # readiness endpoint includes a live database probe, so tolerate an
+            # isolated timeout while rejecting a restart or sustained failures.
             production_pid="$(pm2 pid subnet-dashboard)"
             production_stable=true
+            readiness_successes=0
+            consecutive_readiness_failures=0
             for attempt in $(seq 1 15); do
               sleep 3
               current_pid="$(pm2 pid subnet-dashboard)"
-              if [ -z "$current_pid" ] || [ "$current_pid" != "$production_pid" ] || \
-                ! curl --fail --silent --show-error --max-time 10 http://127.0.0.1:3000/api/health/ready > /dev/null; then
+              if [ -z "$current_pid" ] || [ "$current_pid" != "$production_pid" ]; then
                 production_stable=false
                 break
               fi
+              if curl --fail --silent --show-error --max-time 10 http://127.0.0.1:3000/api/health/ready > /dev/null; then
+                readiness_successes=$((readiness_successes + 1))
+                consecutive_readiness_failures=0
+              else
+                consecutive_readiness_failures=$((consecutive_readiness_failures + 1))
+                echo "Readiness sample $attempt failed ($consecutive_readiness_failures consecutive)"
+                curl --silent --show-error --max-time 10 http://127.0.0.1:3000/api/health/ready || true
+                echo
+                if [ "$consecutive_readiness_failures" -ge 3 ]; then
+                  production_stable=false
+                  break
+                fi
+              fi
             done
+            if [ "$readiness_successes" -lt 12 ]; then
+              production_stable=false
+            fi
 
             if [ "$production_stable" != true ]; then
               echo "Production worker restarted or became unhealthy during the stability window"
@@ -459,6 +485,9 @@ jobs:
   deploy-weights-alert:
     name: Deploy weights alert to validator
     needs: deploy
+    # The alert worker is an independent release artifact. A dashboard rollback
+    # must not suppress its deployment; the bastion remains usable in that case.
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

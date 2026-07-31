@@ -538,6 +538,14 @@ class Subtensor:
   const deploySource = await readFile(resolve('.github/workflows/deploy.yml'), 'utf8')
   assert.match(
     deploySource,
+    /git diff --quiet "\$PRE_DEPLOY_SHA" "\$DEPLOY_SHA" -- package\.json package-lock\.json/,
+    'unchanged valid dependencies should not be reinstalled beneath the live worker',
+  )
+  assert.match(deploySource, /npm ls --omit=dev --depth=0/)
+  assert.match(deploySource, /consecutive_readiness_failures" -ge 3/)
+  assert.match(deploySource, /readiness_successes" -lt 12/)
+  assert.match(
+    deploySource,
     /install -m 0755 "\$APP_ROOT\/scripts\/weights_alert\.py" "\$HOME\/weights_alert\.py\.next"/,
   )
   assert.match(
@@ -553,6 +561,11 @@ class Subtensor:
     deploySource.indexOf('  deploy-weights-alert:'),
   )
   assert.match(validatorWeightsDeploy, /needs: deploy/)
+  assert.match(
+    validatorWeightsDeploy,
+    /if: \$\{\{ !cancelled\(\) \}\}/,
+    'dashboard rollback should not suppress deployment of the independent alert worker',
+  )
   assert.match(validatorWeightsDeploy, /host: 172\.31\.29\.188/)
   assert.equal(
     (validatorWeightsDeploy.match(/key: \$\{\{ secrets\.EC2_SSH_KEY \}\}/g) ?? []).length,
