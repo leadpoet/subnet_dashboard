@@ -10,11 +10,13 @@ legacy ``block // 360`` bucket. A validator is stale when its ``last_update``
 predates the start of the most recently completed official epoch. The worker
 waits for the epoch boundary before deciding that the epoch was missed.
 
-Posts at most one combined message to the Discord webhook for a completed
-official epoch. Persistent problems are deduped in STATE_FILE until they
-recover; crossing another epoch boundary alone never re-pages the same
-incident. Webhook URL lives in WEBHOOK_FILE (one line); empty/missing file =
-log-only mode.
+Posts one combined message when a problem is first observed, then one reminder
+for every newly completed official epoch until it recovers. Notification state
+advances only after Discord confirms delivery, so webhook failures remain
+eligible for retry. Late problems discovered after an epoch's combined message
+can still page without re-sending incidents already delivered in that epoch.
+Webhook URL lives in WEBHOOK_FILE (one line); empty/missing file = retryable
+delivery failure.
 
 Usage: weights_alert.py [--test]   (--test posts a labeled test message)
 """
@@ -87,6 +89,10 @@ STATE_FILE = os.path.expanduser("~/.config/leadpoet/weights_alert_state.json")
 LOG_FILE = os.path.expanduser("~/weights_alert.log")
 LAST_ALERT_EPOCH_KEY = "__last_alert_epoch__"
 EPOCH_OBSERVATION_KEY = "__epoch_observation__"
+INCIDENT_DELIVERY_EPOCHS_KEY = "__incident_delivery_epochs__"
+HEARTBEAT_KEY = "__heartbeat__"
+STATE_SCHEMA_VERSION_KEY = "__schema_version__"
+STATE_SCHEMA_VERSION = 2
 
 
 def log(msg: str) -> None:
@@ -98,7 +104,8 @@ def log(msg: str) -> None:
 def load_state() -> dict:
     try:
         with open(STATE_FILE) as handle:
-            return json.load(handle)
+            state = json.load(handle)
+        return state if isinstance(state, dict) else {}
     except Exception:
         return {}
 
@@ -118,8 +125,8 @@ def update_incident_state(
 
     Incident keys contain stable evidence, never the current epoch or changing
     block age. For example, a stale-weight incident is anchored to the
-    validator's unchanged last-set block, so it survives an epoch boundary
-    without paging twice.
+    validator's unchanged last-set block. The delivery-state layer separately
+    decides whether that active incident needs an epoch reminder.
 
     The previous state format stored an integer epoch per validator. Treat that
     as an already-alerted condition on the first upgraded pass and replace it
@@ -143,12 +150,151 @@ def update_incident_state(
     return should_alert
 
 
-def claim_epoch_alert(state: dict, epoch_index: int, has_new_incidents: bool) -> bool:
-    """Return whether this pass may post, enforcing one alert per epoch."""
-    if not has_new_incidents or state.get(LAST_ALERT_EPOCH_KEY) == epoch_index:
+def claim_epoch_alert(state: dict, epoch_index: int, delivery_succeeded: bool) -> bool:
+    """Record a successful epoch delivery for legacy state compatibility.
+
+    Per-incident delivery epochs decide whether a message is due. This global
+    marker remains in the state file so older deployed copies can read the
+    upgraded state without replaying the latest successful notification.
+    """
+    if not delivery_succeeded or state.get(LAST_ALERT_EPOCH_KEY) == epoch_index:
         return False
     state[LAST_ALERT_EPOCH_KEY] = epoch_index
     return True
+
+
+def incident_delivery_epochs(state: dict) -> dict:
+    """Return sanitized per-incident successful-delivery epochs.
+
+    State written before schema v2 only had active incident keys and one global
+    last-alert epoch. Seed those active keys with the legacy epoch so deploying
+    this version does not immediately replay a message already delivered in the
+    same completed epoch.
+    """
+    raw = state.get(INCIDENT_DELIVERY_EPOCHS_KEY)
+    deliveries = {}
+    if isinstance(raw, dict):
+        for validator_id, incident_epochs in raw.items():
+            if not isinstance(validator_id, str) or not isinstance(incident_epochs, dict):
+                continue
+            valid = {
+                key: epoch
+                for key, epoch in incident_epochs.items()
+                if (
+                    isinstance(key, str)
+                    and isinstance(epoch, int)
+                    and not isinstance(epoch, bool)
+                )
+            }
+            if valid:
+                deliveries[validator_id] = valid
+    else:
+        legacy_epoch = state.get(LAST_ALERT_EPOCH_KEY)
+        if isinstance(legacy_epoch, int) and not isinstance(legacy_epoch, bool):
+            for validator_id, incident_keys in state.items():
+                if not isinstance(validator_id, str) or validator_id.startswith("__"):
+                    continue
+                if isinstance(incident_keys, list):
+                    valid_keys = [key for key in incident_keys if isinstance(key, str)]
+                    if valid_keys:
+                        deliveries[validator_id] = {
+                            key: legacy_epoch for key in valid_keys
+                        }
+
+    state[INCIDENT_DELIVERY_EPOCHS_KEY] = deliveries
+    state[STATE_SCHEMA_VERSION_KEY] = STATE_SCHEMA_VERSION
+    return deliveries
+
+
+def sync_incident_delivery_epochs(
+    deliveries: dict,
+    validator_id: str,
+    incident_keys: list,
+    legacy_validator_epoch=None,
+) -> None:
+    """Prune recovered incidents and seed the pre-v2 per-validator format."""
+    current = {key for key in incident_keys if isinstance(key, str)}
+    if not current:
+        deliveries.pop(validator_id, None)
+        return
+
+    validator_deliveries = deliveries.get(validator_id)
+    if not isinstance(validator_deliveries, dict):
+        validator_deliveries = {}
+    validator_deliveries = {
+        key: epoch
+        for key, epoch in validator_deliveries.items()
+        if key in current and isinstance(epoch, int) and not isinstance(epoch, bool)
+    }
+    if (
+        isinstance(legacy_validator_epoch, int)
+        and not isinstance(legacy_validator_epoch, bool)
+    ):
+        for key in current:
+            validator_deliveries.setdefault(key, legacy_validator_epoch)
+    deliveries[validator_id] = validator_deliveries
+
+
+def incident_keys_due_for_epoch(
+    deliveries: dict, validator_id: str, incident_keys: list, epoch_index: int
+) -> list:
+    """Return active incident keys lacking successful delivery for this epoch."""
+    validator_deliveries = deliveries.get(validator_id)
+    if not isinstance(validator_deliveries, dict):
+        validator_deliveries = {}
+    return [
+        key
+        for key in incident_keys
+        if (
+            not isinstance(validator_deliveries.get(key), int)
+            or isinstance(validator_deliveries.get(key), bool)
+            or validator_deliveries[key] < epoch_index
+        )
+    ]
+
+
+def incidents_due_for_epoch(
+    deliveries: dict, validator_id: str, incident_keys: list, epoch_index: int
+) -> bool:
+    """Return whether any active incident lacks delivery for this epoch."""
+    return bool(
+        incident_keys_due_for_epoch(
+            deliveries, validator_id, incident_keys, epoch_index
+        )
+    )
+
+
+def mark_incidents_delivered(
+    deliveries: dict, validator_id: str, incident_keys: list, epoch_index: int
+) -> None:
+    validator_deliveries = deliveries.setdefault(validator_id, {})
+    for key in incident_keys:
+        if isinstance(key, str):
+            validator_deliveries[key] = epoch_index
+
+
+def heartbeat_timestamp() -> str:
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+def record_heartbeat(state: dict, status: str, **details) -> None:
+    """Persist a bounded operational summary for external freshness checks."""
+    previous = state.get(HEARTBEAT_KEY)
+    heartbeat = {
+        "last_run_at": heartbeat_timestamp(),
+        "status": status,
+        **details,
+    }
+    if isinstance(previous, dict):
+        for key in ("last_successful_delivery_at", "last_successful_delivery_epoch"):
+            if key in previous:
+                heartbeat[key] = previous[key]
+    if status == "alert_delivered":
+        heartbeat["last_successful_delivery_at"] = heartbeat["last_run_at"]
+        heartbeat["last_successful_delivery_epoch"] = details.get(
+            "completed_epoch_index"
+        )
+    state[HEARTBEAT_KEY] = heartbeat
 
 
 def observe_completed_epoch(
@@ -214,8 +360,8 @@ def post_discord(content: str) -> bool:
         with urllib.request.urlopen(request, timeout=15) as response:
             return 200 <= response.status < 300
     except Exception as exc:
-        # A dead webhook must not crash the pass: alert state still saves so
-        # a later repaired webhook does not replay every old miss at once.
+        # A dead webhook must not crash the pass. The caller retains the
+        # incident's previous delivery epoch so the next cron tick retries it.
         log(f"discord post failed: {exc}")
         return False
 
@@ -259,6 +405,8 @@ def main() -> int:
         print("test message sent" if sent else "log-only (no webhook configured)")
         return 0
 
+    state = load_state()
+    deliveries = incident_delivery_epochs(state)
     try:
         import bittensor as bt
 
@@ -268,16 +416,54 @@ def main() -> int:
     except Exception as exc:
         # A flaky chain endpoint must not produce false pages; the next cron
         # run retries in five minutes.
-        log(f"chain query failed (skipping this pass): {exc}")
+        error = " ".join(str(exc).split())[:240]
+        log(f"chain query failed (skipping this pass): {error}")
+        record_heartbeat(
+            state,
+            "chain_query_failed",
+            chain_read_ok=False,
+            error=error,
+            active_incident_count=None,
+            due_validator_count=None,
+            delivery_attempted=False,
+            delivery_succeeded=None,
+        )
+        save_state(state)
         return 0
 
     if tempo <= 0:
         log(f"invalid tempo {tempo} (skipping this pass)")
+        record_heartbeat(
+            state,
+            "invalid_tempo",
+            chain_read_ok=True,
+            official_epoch_index=epoch_index,
+            current_block=block,
+            tempo=tempo,
+            active_incident_count=None,
+            due_validator_count=None,
+            delivery_attempted=False,
+            delivery_succeeded=None,
+        )
+        save_state(state)
         return 0
 
     validators = load_registry()
     if not validators:
         log("no validator registry found (skipping this pass)")
+        record_heartbeat(
+            state,
+            "registry_unavailable",
+            chain_read_ok=True,
+            official_epoch_index=epoch_index,
+            current_block=block,
+            tempo=tempo,
+            active_incident_count=None,
+            due_validator_count=None,
+            delivery_attempted=False,
+            delivery_succeeded=None,
+        )
+        save_state(state)
         return 0
 
     if epoch_index <= 0 or last_epoch_block <= 0:
@@ -286,16 +472,29 @@ def main() -> int:
             f"(epoch={epoch_index}, last_epoch_block={last_epoch_block}, tempo={tempo}); "
             "skipping this pass"
         )
+        record_heartbeat(
+            state,
+            "invalid_epoch_boundary",
+            chain_read_ok=True,
+            official_epoch_index=epoch_index,
+            current_block=block,
+            last_epoch_block=last_epoch_block,
+            tempo=tempo,
+            active_incident_count=None,
+            due_validator_count=None,
+            delivery_attempted=False,
+            delivery_succeeded=None,
+        )
+        save_state(state)
         return 0
 
-    state = load_state()
     completed_epoch_index, completed_epoch_start = observe_completed_epoch(
         state, epoch_index, last_epoch_block, tempo
     )
     hotkeys = list(mg.hotkeys)
     hotkey_to_uid = {hk: i for i, hk in enumerate(hotkeys)}
     misses = []
-    has_new_incidents = False
+    active_incident_count = 0
     for validator in validators:
         vid = str(validator.get("id") or validator.get("hotkey") or "")[:64]
         fallback_label = str(validator.get("label") or vid)
@@ -304,6 +503,7 @@ def main() -> int:
         expected_coldkey = str(validator.get("expectedColdkey") or "")
         if not vid or not hotkey:
             continue
+        previous_validator_state = state.get(vid)
         problems = []
         incident_keys = []
         uid = hotkey_to_uid.get(hotkey)
@@ -345,18 +545,72 @@ def main() -> int:
         # Deduplicate by stable validator identity and incident evidence, never
         # by epoch or UID. Resolved incidents are removed from state so a later
         # recurrence can alert again.
-        if update_incident_state(state, vid, incident_keys):
-            has_new_incidents = True
-            misses.append((vid, label, uid, last_set_block, blocks_since, problems))
+        update_incident_state(state, vid, incident_keys)
+        legacy_validator_epoch = (
+            previous_validator_state
+            if (
+                isinstance(previous_validator_state, int)
+                and not isinstance(previous_validator_state, bool)
+            )
+            else None
+        )
+        sync_incident_delivery_epochs(
+            deliveries,
+            vid,
+            incident_keys,
+            legacy_validator_epoch=legacy_validator_epoch,
+        )
+        active_incident_count += len(set(incident_keys))
+        due_incident_keys = incident_keys_due_for_epoch(
+            deliveries, vid, incident_keys, completed_epoch_index
+        )
+        if due_incident_keys:
+            due_key_set = set(due_incident_keys)
+            due_problems = [
+                problem
+                for problem, incident_key in zip(problems, incident_keys)
+                if incident_key in due_key_set
+            ]
+            misses.append(
+                (
+                    vid,
+                    label,
+                    uid,
+                    last_set_block,
+                    blocks_since,
+                    due_problems,
+                    due_incident_keys,
+                )
+            )
 
-    if claim_epoch_alert(state, completed_epoch_index, has_new_incidents):
-        epoch_block = max(0, block - last_epoch_block)
+    epoch_block = max(0, block - last_epoch_block)
+    delivery_attempted = bool(misses)
+    delivery_succeeded = None
+    status = "healthy" if active_incident_count == 0 else "unresolved_already_delivered"
+    if delivery_attempted:
+        is_reminder = any(
+            any(
+                isinstance(deliveries.get(vid, {}).get(key), int)
+                and not isinstance(deliveries.get(vid, {}).get(key), bool)
+                for key in incident_keys
+            )
+            for vid, *_, incident_keys in misses
+        )
+        alert_label = "missed weight set reminder" if is_reminder else "missed weight set"
         lines = [
-            f"🚨 **SN71 missed weight set** "
+            f"🚨 **SN71 {alert_label}** "
             f"(official epoch {completed_epoch_index} completed; checked at "
             f"epoch {epoch_index}, block {epoch_block}/{tempo})"
         ]
-        for vid, label, uid, last_set_block, behind, problems in misses:
+        for (
+            vid,
+            label,
+            uid,
+            last_set_block,
+            behind,
+            problems,
+            _incident_keys,
+        ) in misses:
             uid_text = f"current UID {uid}" if uid is not None else "not registered"
             set_text = (
                 f", last set {behind} blocks ago" if behind is not None else ""
@@ -367,14 +621,38 @@ def main() -> int:
                 "Primary miss ⇒ auditors have no bundle to copy; check gateway "
                 "/weights/submit responses and the validator log."
             )
-        post_discord("\n".join(lines))
-        log(f"ALERTED: {[(m[0], m[5]) for m in misses]}")
-    elif has_new_incidents:
-        log(
-            f"SUPPRESSED: completed official epoch {completed_epoch_index} "
-            "already alerted; "
-            f"new incidents: {[(m[0], m[5]) for m in misses]}"
-        )
+        delivery_succeeded = post_discord("\n".join(lines))
+        if delivery_succeeded:
+            for vid, *_, incident_keys in misses:
+                mark_incidents_delivered(
+                    deliveries, vid, incident_keys, completed_epoch_index
+                )
+            claim_epoch_alert(state, completed_epoch_index, True)
+            status = "alert_delivered"
+            log(f"ALERTED: {[(m[0], m[5]) for m in misses]}")
+        else:
+            status = "delivery_failed"
+            log(
+                f"DELIVERY_FAILED: completed official epoch {completed_epoch_index}; "
+                f"pending incidents: {[(m[0], m[5]) for m in misses]}"
+            )
+
+    record_heartbeat(
+        state,
+        status,
+        chain_read_ok=True,
+        official_epoch_index=epoch_index,
+        completed_epoch_index=completed_epoch_index,
+        current_block=block,
+        last_epoch_block=last_epoch_block,
+        completed_epoch_start=completed_epoch_start,
+        epoch_block=epoch_block,
+        tempo=tempo,
+        active_incident_count=active_incident_count,
+        due_validator_count=len(misses),
+        delivery_attempted=delivery_attempted,
+        delivery_succeeded=delivery_succeeded,
+    )
     save_state(state)
     return 0
 

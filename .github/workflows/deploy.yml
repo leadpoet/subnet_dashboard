@@ -542,5 +542,8 @@ jobs:
               "$HOME/alert_venv/bin/python $HOME/weights_alert.py"
             grep -Fq '"label": "auditor (Rizzo)"' "$ACTIVE_REGISTRY"
             grep -Fq 'completed; checked at' "$ACTIVE_SCRIPT"
+            grep -Fq '__incident_delivery_epochs__' "$ACTIVE_SCRIPT"
+            grep -Fq '"delivery_failed"' "$ACTIVE_SCRIPT"
+            grep -Fq '__heartbeat__' "$ACTIVE_SCRIPT"
 
             echo "Validator weights alert deployed and verified at $DEPLOY_SHA"
