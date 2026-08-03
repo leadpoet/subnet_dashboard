@@ -124,10 +124,56 @@ export type ResearchLabBenchmarkAlertObservation = {
   validatorId?: string | null
   source?: string | null
   status: string
+  /** The caller may lower a correlated retry failure to a warning. */
+  failureSeverity?: ResearchLabAlertSeverity
+  /** A verified official stale benchmark is immediately critical. */
+  stalledSeverity?: ResearchLabAlertSeverity
+  /**
+   * Exact execution/publication evidence from the admin route. The evaluator
+   * reclassifies it rather than trusting a caller-provided severity alone.
+   */
+  classification?: ResearchLabBenchmarkAlertClassificationInput
   startedAt?: ResearchLabAlertTimestamp | null
   lastActivityAt?: ResearchLabAlertTimestamp | null
   failedAt?: ResearchLabAlertTimestamp | null
   error?: string | null
+}
+
+/**
+ * Small, serializable evidence surface for the one benchmark-alert classifier.
+ * It intentionally contains IDs and state only: it never depends on a new
+ * database transition, status, or message body.
+ */
+export type ResearchLabBenchmarkAlertClassificationInput = {
+  /** A pre-resolved identity shared by daily telemetry and raw execution evidence. */
+  benchmarkIdentity?: string | null
+  benchmarkDate?: string | null
+  benchmarkBundleId?: string | null
+  rollingWindowHash?: string | null
+  status: string
+  currentExecutionId?: string | null
+  currentExecutionCorrelation?: string | null
+  currentExecutionLineageMatched?: boolean
+  currentExecutionTerminal?: boolean
+  rawLinkedFailedExecutionIds?: readonly string[]
+  exactPublishedSuccess?: boolean
+}
+
+export type ResearchLabBenchmarkAlertClassification = {
+  benchmarkId: string
+  failureSeverity: ResearchLabAlertSeverity | null
+  stalledSeverity: ResearchLabAlertSeverity | null
+  canResolve: boolean
+}
+
+export type ResearchLabBenchmarkAlertIdentityInput = {
+  /** The date carried by the run itself, if it is a valid UTC calendar date. */
+  runBenchmarkDate?: string | null
+  /** Values below are usable only for a durable exact run-to-bundle correlation. */
+  exactBundleBenchmarkDate?: string | null
+  exactBundleId?: string | null
+  exactRollingWindowHash?: string | null
+  correlation?: string | null
 }
 
 export type ResearchLabActiveRunAlertObservation = {
@@ -295,6 +341,153 @@ export function shouldSuppressResearchLabExecutionAlert(input: {
   const operationalText = `${input.status ?? ''} ${input.detail ?? ''}`.toLowerCase()
   return /(?:maintenance|gateway[_\s-]*restart)/.test(operationalText) &&
     /(?:pause|paused|checkpoint)/.test(operationalText)
+}
+
+/**
+ * A daily benchmark is one logical operation even when its worker retries.
+ * Attempt numbers are execution diagnostics, not incident identities.
+ *
+ * The raw execution row and daily telemetry must call this exact resolver with
+ * the same exact-correlation context. In particular, an unrelated latest
+ * publication must never select an identity for a currently observed run.
+ */
+export function resolveResearchLabBenchmarkAlertIdentity(
+  input: ResearchLabBenchmarkAlertIdentityInput,
+): string {
+  const runBenchmarkDate = validBenchmarkDate(input.runBenchmarkDate)
+  if (runBenchmarkDate) return runBenchmarkDate
+
+  const exactCorrelation = normalizedStatus(input.correlation ?? '')
+  if (exactCorrelation !== 'event_bundle_id' && exactCorrelation !== 'exact_artifacts') {
+    return 'daily-benchmark'
+  }
+
+  return validBenchmarkDate(input.exactBundleBenchmarkDate)
+    ?? nonEmptyString(input.exactBundleId)
+    ?? nonEmptyString(input.exactRollingWindowHash)
+    ?? 'daily-benchmark'
+}
+
+/**
+ * Compatibility wrapper for callers that already have a vetted benchmark
+ * identity surface. New route code should use the correlation-aware resolver.
+ */
+export function buildResearchLabDailyBenchmarkAlertEntityId(input: {
+  benchmarkDate?: string | null
+  benchmarkBundleId?: string | null
+  rollingWindowHash?: string | null
+}): string {
+  return resolveResearchLabBenchmarkAlertIdentity({
+    runBenchmarkDate: input.benchmarkDate,
+    exactBundleId: input.benchmarkBundleId,
+    exactRollingWindowHash: input.rollingWindowHash,
+    correlation: 'event_bundle_id',
+  })
+}
+
+/**
+ * Benchmark failures and stalled executions share the same strict closure
+ * rule. Keep this small predicate in the alert domain so lifecycle and
+ * delivery handling cannot drift from the evaluated signal family.
+ */
+export function isResearchLabBenchmarkAlertFamily(input: {
+  signal?: string | null
+  scope?: string | null
+}): boolean {
+  return input.scope?.trim() === 'benchmark' && (
+    input.signal?.trim() === 'benchmark_failed' ||
+    input.signal?.trim() === 'benchmark_stalled'
+  )
+}
+
+export const MIN_LINKED_BENCHMARK_FAILURES_FOR_WARNING = 2
+
+/**
+ * Classify one official benchmark from exact current execution evidence. A
+ * retry is diagnostic until two distinct, linked failed execution IDs exist;
+ * an explicitly terminal official failure or verified stale execution is
+ * critical. A publication can clear an incident only when it is already known
+ * to be exact for that same current execution and lineage.
+ */
+export function classifyResearchLabBenchmarkAlert(
+  input: ResearchLabBenchmarkAlertClassificationInput,
+): ResearchLabBenchmarkAlertClassification {
+  const benchmarkId = nonEmptyString(input.benchmarkIdentity)
+    ?? resolveResearchLabBenchmarkAlertIdentity({
+      runBenchmarkDate: input.benchmarkDate,
+      exactBundleId: input.benchmarkBundleId,
+      exactRollingWindowHash: input.rollingWindowHash,
+      correlation: input.currentExecutionCorrelation,
+    })
+  const status = normalizedStatus(input.status)
+  const currentExecutionId = nonEmptyString(input.currentExecutionId)
+  const currentExact = Boolean(
+    currentExecutionId &&
+    normalizedStatus(input.currentExecutionCorrelation ?? '') !== 'unlinked' &&
+    input.currentExecutionLineageMatched === true,
+  )
+  const linkedFailedExecutionIds = new Set(
+    (input.rawLinkedFailedExecutionIds ?? [])
+      .map((value) => nonEmptyString(value))
+      .filter((value): value is string => value !== null),
+  )
+  const failed = FAILED_STATUSES.has(status)
+  const stalled = status === 'stalled'
+  const failureSeverity = !failed || !currentExact
+    ? null
+    : input.currentExecutionTerminal === true
+      ? 'critical'
+      : linkedFailedExecutionIds.size >= MIN_LINKED_BENCHMARK_FAILURES_FOR_WARNING
+        ? 'warning'
+        : null
+  const stalledSeverity = stalled && currentExact ? 'critical' : null
+
+  return {
+    benchmarkId,
+    failureSeverity,
+    stalledSeverity,
+    canResolve: input.exactPublishedSuccess === true && currentExact,
+  }
+}
+
+/**
+ * Exact published success closes both persistent benchmark signals for the
+ * same canonical identity. The lifecycle still requires a fingerprint match,
+ * so a failed-only resolution cannot close a stalled incident by accident.
+ */
+export function buildResearchLabBenchmarkSuccessResolutions(input: {
+  classification: ResearchLabBenchmarkAlertClassification
+  observedAt: string | null
+}): ResearchLabAlertResolution[] {
+  if (!input.classification.canResolve) return []
+  return (['benchmark_failed', 'benchmark_stalled'] as const).map((signal) => ({
+    fingerprint: buildResearchLabAlertFingerprint(
+      signal,
+      'benchmark',
+      input.classification.benchmarkId,
+    ),
+    title: `Benchmark ${input.classification.benchmarkId} published successfully`,
+    detail: 'The exact latest benchmark execution and model lineage are linked to the published report. The prior benchmark incident is closed.',
+    observedAt: input.observedAt,
+    metadata: {
+      kind: 'terminal',
+      outcome: 'completed',
+      label: 'Published benchmark linked to latest execution',
+    },
+  }))
+}
+
+/**
+ * A failed execution without a durable run-to-bundle correlation is useful
+ * dashboard telemetry, but it is not evidence that the official benchmark
+ * failed. Paging it creates a distinct incident for every retry.
+ */
+export function shouldSuppressResearchLabUnlinkedBenchmarkFailure(input: {
+  status?: string | null
+  correlation?: string | null
+}): boolean {
+  return FAILED_STATUSES.has(normalizedStatus(input.status ?? '')) &&
+    normalizedStatus(input.correlation ?? '') === 'unlinked'
 }
 
 export const DEFAULT_RESEARCH_LAB_ALERT_THRESHOLDS: Readonly<ResearchLabAlertThresholds> =
@@ -580,12 +773,17 @@ function evaluateBenchmarkObservation(
   thresholds: ResearchLabAlertThresholds,
   candidates: AlertCandidate[],
 ): void {
-  const benchmarkId = requiredId(observation.benchmarkId, 'benchmarkId')
+  const classification = observation.classification
+    ? classifyResearchLabBenchmarkAlert(observation.classification)
+    : null
+  const benchmarkId = requiredId(classification?.benchmarkId ?? observation.benchmarkId, 'benchmarkId')
   const validatorId = optionalId(observation.validatorId)
   const source = sourceLabel(observation.source, 'benchmark telemetry')
   const status = normalizedStatus(observation.status)
 
   if (FAILED_STATUSES.has(status)) {
+    const failureSeverity = classification?.failureSeverity ?? observation.failureSeverity
+    if (classification && !failureSeverity) return
     const failedAtMs = firstTimestamp(observation.failedAt, observation.lastActivityAt, observation.startedAt)
     candidates.push(immediateCandidate({
       signal: 'benchmark_failed',
@@ -597,6 +795,7 @@ function evaluateBenchmarkObservation(
       observedAtMs: failedAtMs,
       nowMs,
       source,
+      severity: failureSeverity,
     }))
   }
 
@@ -614,6 +813,7 @@ function evaluateBenchmarkObservation(
       nowMs,
       threshold: thresholds.benchmarkStalled,
       source,
+      severity: classification?.stalledSeverity ?? observation.stalledSeverity,
     })
     if (stale) candidates.push(stale)
   }
@@ -788,6 +988,7 @@ function staleCandidate(input: {
   nowMs: number
   threshold: ResearchLabAlertAgeThreshold
   source: string
+  severity?: ResearchLabAlertSeverity
 }): AlertCandidate | null {
   if (input.observedAtMs === null) {
     return candidate({
@@ -799,7 +1000,7 @@ function staleCandidate(input: {
   }
 
   const ageMs = Math.max(0, input.nowMs - input.observedAtMs)
-  const severity = severityAtAge(ageMs, input.threshold)
+  const severity = input.severity ?? severityAtAge(ageMs, input.threshold)
   if (!severity) return null
   return candidate({
     ...input,
@@ -841,10 +1042,11 @@ function immediateCandidate(input: {
   observedAtMs: number | null
   nowMs: number
   source: string
+  severity?: ResearchLabAlertSeverity
 }): AlertCandidate {
   return candidate({
     ...input,
-    severity: 'critical',
+    severity: input.severity ?? 'critical',
     ageMs: input.observedAtMs === null ? null : Math.max(0, input.nowMs - input.observedAtMs),
   })
 }
@@ -1005,6 +1207,15 @@ function optionalId(value: string | null | undefined): string | null {
 
 function nonEmptyString(value: string | null | undefined): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null
+}
+
+function validBenchmarkDate(value: string | null | undefined): string | null {
+  const candidate = nonEmptyString(value)
+  if (!candidate || !/^\d{4}-\d{2}-\d{2}$/.test(candidate)) return null
+  const parsed = new Date(`${candidate}T00:00:00.000Z`)
+  return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === candidate
+    ? candidate
+    : null
 }
 
 function sourceLabel(value: string | null | undefined, fallback: string): string {

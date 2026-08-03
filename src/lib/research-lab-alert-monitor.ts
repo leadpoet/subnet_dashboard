@@ -13,6 +13,7 @@ import {
 } from './research-lab-alert-delivery'
 import {
   planResearchLabAlertLifecycle,
+  shouldSuppressResearchLabBenchmarkRecoveryDelivery,
   type ResearchLabAlertDeliveryAttempt,
   type ResearchLabAlertDeliveryIntent,
   type ResearchLabAlertDestination,
@@ -90,6 +91,7 @@ async function executeMonitor(
   let transitionCount = 0
   let deliveryCount = 0
   let deliveryFailureCount = 0
+  let suppressedBenchmarkRecoveryCount = 0
 
   try {
     const config = parseResearchLabAlertDeliveryConfig(env)
@@ -125,6 +127,7 @@ async function executeMonitor(
     const deliverySummary = await deliverDueIntents(supabase, config, nowIso)
     deliveryCount = deliverySummary.deliveryCount
     deliveryFailureCount = deliverySummary.failureCount
+    suppressedBenchmarkRecoveryCount = deliverySummary.suppressedBenchmarkRecoveryCount
     const completedAt = (dependencies.now?.() ?? new Date()).toISOString()
 
     await updateMonitorHeartbeat(supabase, owner, {
@@ -137,6 +140,7 @@ async function executeMonitor(
       heartbeat_doc: {
         incident_upserts: incidentUpsertCount,
         transitions: transitionCount,
+        suppressed_benchmark_recoveries: suppressedBenchmarkRecoveryCount,
         configured_channels: destinations.map((item) => item.channel),
         configured_signals: enabledSignals
           ? [...enabledSignals].sort()
@@ -165,6 +169,7 @@ async function executeMonitor(
       heartbeat_doc: {
         incident_upserts: incidentUpsertCount,
         transitions: transitionCount,
+        suppressed_benchmark_recoveries: suppressedBenchmarkRecoveryCount,
       },
     }).catch(() => undefined)
     throw error
@@ -302,22 +307,19 @@ async function deliverDueIntents(
   supabase: SupabaseClient,
   config: ResearchLabAlertChannelConfig,
   nowIso: string,
-): Promise<{ deliveryCount: number; failureCount: number }> {
-  const { data, error } = await supabase
-    .from('ops_alert_delivery_events')
-    .select('*')
-    .eq('status', 'pending')
-    .lte('due_at', nowIso)
-    .order('due_at', { ascending: true })
-    .limit(DELIVERY_BATCH_SIZE)
-  if (error) throw new Error(`Could not read due alert deliveries: ${error.message}`)
-
-  const intents = ((data ?? []) as Array<Record<string, unknown>>)
-    .map(parseDeliveryIntentRow)
-    .filter((intent): intent is ResearchLabAlertDeliveryIntent => intent !== null)
-  const plan = planResearchLabAlertDeliveryBatches(intents, new Date(nowIso))
+): Promise<{
+  deliveryCount: number
+  failureCount: number
+  suppressedBenchmarkRecoveryCount: number
+}> {
+  const scanned = await readDueDeliverableIntents(supabase, nowIso)
+  const plan = planResearchLabAlertDeliveryBatches(
+    scanned.deliverableIntents,
+    new Date(nowIso),
+  )
   let deliveryCount = 0
   let failureCount = 0
+  const suppressedBenchmarkRecoveryCount = scanned.suppressedBenchmarkRecoveryCount
   for (const batch of plan.batches) {
     const intent = batch.intents[0]
     const attemptedAt = new Date().toISOString()
@@ -337,6 +339,10 @@ async function deliverDueIntents(
       continue
     }
 
+    // This is the authoritative guard for old pending rows. Keep it directly
+    // adjacent to the provider call so no Discord CLEARED card can escape if a
+    // future batching or parser change bypasses the initial partition.
+    if (batch.intents.some(isSuppressedBenchmarkRecoveryIntent)) continue
     const result = await deliverResearchLabAlert({
       alert: batch.alert,
       transition: intent.transition,
@@ -357,7 +363,84 @@ async function deliverDueIntents(
     deliveryCount += batch.intents.length
     if (!succeeded) failureCount += batch.intents.length
   }
-  return { deliveryCount, failureCount }
+  return { deliveryCount, failureCount, suppressedBenchmarkRecoveryCount }
+}
+
+/**
+ * Scan due pending rows in deterministic raw pages. Suppressed legacy
+ * benchmark recoveries remain pending, but they must not consume the finite
+ * delivery budget or permanently starve later actionable rows.
+ */
+async function readDueDeliverableIntents(
+  supabase: SupabaseClient,
+  nowIso: string,
+): Promise<{
+  deliverableIntents: ResearchLabAlertDeliveryIntent[]
+  suppressedBenchmarkRecoveryCount: number
+}> {
+  const deliverableIntents: ResearchLabAlertDeliveryIntent[] = []
+  let suppressedBenchmarkRecoveryCount = 0
+  let offset = 0
+
+  while (deliverableIntents.length < DELIVERY_BATCH_SIZE) {
+    const { data, error } = await supabase
+      .from('ops_alert_delivery_events')
+      .select('*')
+      .eq('status', 'pending')
+      .lte('due_at', nowIso)
+      .order('due_at', { ascending: true })
+      .order('intent_id', { ascending: true })
+      .range(offset, offset + DELIVERY_BATCH_SIZE - 1)
+    if (error) throw new Error(`Could not read due alert deliveries: ${error.message}`)
+
+    const rows = (data ?? []) as Array<Record<string, unknown>>
+    if (rows.length === 0) break
+    const intents = rows
+      .map(parseDeliveryIntentRow)
+      .filter((intent): intent is ResearchLabAlertDeliveryIntent => intent !== null)
+    const partitioned = partitionResearchLabAlertDeliveryIntents(intents)
+    suppressedBenchmarkRecoveryCount += partitioned.suppressedBenchmarkRecoveryCount
+    const remaining = DELIVERY_BATCH_SIZE - deliverableIntents.length
+    deliverableIntents.push(...partitioned.deliverableIntents.slice(0, remaining))
+    offset += rows.length
+    if (rows.length < DELIVERY_BATCH_SIZE) break
+  }
+
+  return { deliverableIntents, suppressedBenchmarkRecoveryCount }
+}
+
+/**
+ * Pending rows can predate the source guard. Do not mutate them into an
+ * unsupported status on the old schema; leave them pending and expose only a
+ * bounded count in the monitor heartbeat for later, authorized cleanup.
+ */
+export function partitionResearchLabAlertDeliveryIntents(
+  intents: readonly ResearchLabAlertDeliveryIntent[],
+): {
+  deliverableIntents: ResearchLabAlertDeliveryIntent[]
+  suppressedBenchmarkRecoveryCount: number
+} {
+  const deliverableIntents: ResearchLabAlertDeliveryIntent[] = []
+  let suppressedBenchmarkRecoveryCount = 0
+  for (const intent of intents) {
+    if (isSuppressedBenchmarkRecoveryIntent(intent)) {
+      suppressedBenchmarkRecoveryCount += 1
+      continue
+    }
+    deliverableIntents.push(intent)
+  }
+  return { deliverableIntents, suppressedBenchmarkRecoveryCount }
+}
+
+function isSuppressedBenchmarkRecoveryIntent(
+  intent: Pick<ResearchLabAlertDeliveryIntent, 'transition' | 'fingerprint' | 'payload'>,
+): boolean {
+  return shouldSuppressResearchLabBenchmarkRecoveryDelivery({
+    transition: intent.transition,
+    signal: intent.payload.alert.signal,
+    scope: intent.payload.alert.scope,
+    fingerprint: intent.fingerprint,
+  })
 }
 
 function batchDeliveryIdempotencyKey(

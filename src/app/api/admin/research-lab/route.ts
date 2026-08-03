@@ -40,9 +40,14 @@ import {
 import { fetchMetagraph } from '@/lib/metagraph'
 import {
   buildResearchLabAlertFingerprint,
+  buildResearchLabBenchmarkSuccessResolutions,
+  classifyResearchLabBenchmarkAlert,
   evaluateResearchLabAlerts,
   isExpectedResearchLabBaselineWait,
+  resolveResearchLabBenchmarkAlertIdentity,
+  shouldSuppressResearchLabUnlinkedBenchmarkFailure,
   shouldSuppressResearchLabExecutionAlert,
+  type ResearchLabBenchmarkAlertClassificationInput,
   type ResearchLabAlertObservations,
   type ResearchLabAlertResolution,
   type ResearchLabEvaluatedAlert,
@@ -1328,7 +1333,7 @@ async function fetchAdminLabOps(
   ])
 
   const dataFreshness = buildDataFreshness(loops)
-  const { dailyBenchmark, benchmarkRuns } = benchmarkTelemetry
+  const { dailyBenchmark, benchmarkRuns, benchmarkAlertExecutions } = benchmarkTelemetry
   const activeRuns = buildActiveRuns(loops, scoreMetrics.byTicket)
   const alertNow = Date.now()
   const pipeline = buildPipelineStages(loops)
@@ -1343,6 +1348,7 @@ async function fetchAdminLabOps(
       loops,
       activeRuns,
       benchmark: dailyBenchmark,
+      benchmarkAlertExecutions,
       baseAlerts,
       attestation,
       dataFreshness,
@@ -1352,7 +1358,10 @@ async function fetchAdminLabOps(
     }),
     { now: alertNow },
   )
-  const alertResolutions = buildRunAlertResolutions(loops, alertNow)
+  const alertResolutions = [
+    ...buildRunAlertResolutions(loops, alertNow),
+    ...buildBenchmarkAlertResolutions(dailyBenchmark, benchmarkAlertExecutions),
+  ]
   const alerts = mergeEvaluatedAlertSummary(baseAlerts, evaluatedAlerts)
   const validatorDeployment = await buildValidatorDeploymentSummary(
     supabase,
@@ -1465,6 +1474,7 @@ function buildCanonicalAlertObservations(input: {
   loops: AdminLabLoopSummary[]
   activeRuns: AdminLabActiveRun[]
   benchmark: AdminLabDailyBenchmark
+  benchmarkAlertExecutions: readonly BenchmarkAlertExecutionEvidence[]
   baseAlerts: AdminLabAlertSummary
   attestation: AdminLabAttestationSummary
   dataFreshness: AdminLabDataFreshness
@@ -1528,21 +1538,40 @@ function buildCanonicalAlertObservations(input: {
     }
   })
 
-  const suppressBenchmarkAlert = input.benchmark.state !== 'failed' &&
-    shouldSuppressResearchLabExecutionAlert({
-      now: input.now,
-      controls: [input.controls.scoring],
-      status: input.benchmark.state,
-      detail: input.benchmark.detail,
-    })
+  const benchmarkClassificationInput = buildBenchmarkAlertClassificationInput({
+    benchmark: input.benchmark,
+    executions: input.benchmarkAlertExecutions,
+  })
+  const benchmarkClassification = classifyResearchLabBenchmarkAlert(benchmarkClassificationInput)
+  const suppressBenchmarkAlert = input.benchmark.state === 'failed'
+    ? benchmarkClassification.failureSeverity === null || shouldSuppressResearchLabUnlinkedBenchmarkFailure({
+        status: input.benchmark.state,
+        correlation: input.benchmark.executionCorrelation,
+      })
+    : input.benchmark.state === 'stalled'
+      ? benchmarkClassification.stalledSeverity === null ||
+        shouldSuppressResearchLabExecutionAlert({
+          now: input.now,
+          controls: [input.controls.scoring],
+          status: input.benchmark.state,
+          detail: input.benchmark.detail,
+        })
+    : input.benchmark.executionCorrelation === 'unlinked' ||
+      shouldSuppressResearchLabExecutionAlert({
+        now: input.now,
+        controls: [input.controls.scoring],
+        status: input.benchmark.state,
+        detail: input.benchmark.detail,
+      })
   const benchmarks: ResearchLabAlertObservations['benchmarks'] =
     !suppressBenchmarkAlert && (input.benchmark.benchmarkDate || input.benchmark.startedAt)
       ? [{
-          benchmarkId: input.benchmark.benchmarkDate
-            ? `${input.benchmark.benchmarkDate}:attempt:${input.benchmark.attempt ?? 0}`
-            : input.benchmark.rollingWindowHash ?? 'daily-benchmark',
+          benchmarkId: benchmarkClassification.benchmarkId,
           source: 'daily benchmark telemetry',
           status: input.benchmark.state === 'stalled' ? 'running' : input.benchmark.state,
+          failureSeverity: benchmarkClassification.failureSeverity ?? undefined,
+          stalledSeverity: benchmarkClassification.stalledSeverity ?? undefined,
+          classification: benchmarkClassificationInput,
           startedAt: input.benchmark.startedAt,
           lastActivityAt: input.benchmark.lastActivityAt,
           failedAt: input.benchmark.state === 'failed' ? input.benchmark.completedAt : null,
@@ -1641,6 +1670,88 @@ function shouldSuppressRunAlert(
   })
 }
 
+/**
+ * Build the one pure classifier input from raw executions, never from the
+ * dashboard's scoring-id groups (which intentionally collapse retries). A
+ * failure only counts when it has the current official bundle and an exact
+ * run-to-bundle/model-lineage correlation.
+ */
+function buildBenchmarkAlertClassificationInput(input: {
+  benchmark: AdminLabDailyBenchmark
+  executions: readonly BenchmarkAlertExecutionEvidence[]
+}): ResearchLabBenchmarkAlertClassificationInput {
+  const benchmarkId = input.benchmark.alertIdentity
+  const currentExecution = input.benchmark.scoringRunId
+    ? input.executions.find((execution) => execution.scoringRunId === input.benchmark.scoringRunId) ?? null
+    : null
+  const currentBundleId = input.benchmark.executionBenchmarkBundleId
+  const currentExecutionExact = Boolean(
+    currentExecution &&
+    currentExecution.benchmarkId === benchmarkId &&
+    currentExecution.correlation !== 'unlinked' &&
+    currentBundleId &&
+    currentExecution.benchmarkBundleId === currentBundleId &&
+    input.benchmark.executionCorrelation !== 'unlinked',
+  )
+  const rawLinkedFailedExecutionIds = currentBundleId
+    ? input.executions
+      .filter((execution) => (
+        execution.benchmarkId === benchmarkId &&
+        execution.benchmarkBundleId === currentBundleId &&
+        execution.correlation !== 'unlinked' &&
+        isFailedBenchmarkStatus(execution.executionStatus)
+      ))
+      .map((execution) => execution.scoringRunId)
+    : []
+  const currentExecutionTerminal = Boolean(
+    currentExecutionExact &&
+    isFailedBenchmarkStatus(input.benchmark.executionStatus) &&
+    (
+      currentExecution?.retryable === false ||
+      isFailedBenchmarkStatus(input.benchmark.publicationStatus)
+    ),
+  )
+  const exactPublishedSuccess = Boolean(
+    currentExecutionExact &&
+    input.benchmark.state === 'completed' &&
+    !input.benchmark.telemetryDegraded &&
+    isCompletedBenchmarkStatus(input.benchmark.executionStatus) &&
+    input.benchmark.publicationStatus.trim().toLowerCase() === 'published' &&
+    input.benchmark.correlation !== 'unlinked' &&
+    input.benchmark.executionBenchmarkBundleId &&
+    input.benchmark.executionBenchmarkBundleId === input.benchmark.publishedBenchmarkBundleId,
+  )
+
+  return {
+    benchmarkIdentity: benchmarkId,
+    benchmarkDate: benchmarkDateOrNull(input.benchmark.benchmarkDate),
+    benchmarkBundleId: currentBundleId ?? input.benchmark.publishedBenchmarkBundleId,
+    rollingWindowHash: input.benchmark.rollingWindowHash,
+    status: input.benchmark.state,
+    currentExecutionId: input.benchmark.scoringRunId,
+    currentExecutionCorrelation: currentExecutionExact
+      ? input.benchmark.executionCorrelation
+      : 'unlinked',
+    currentExecutionLineageMatched: currentExecutionExact,
+    currentExecutionTerminal,
+    rawLinkedFailedExecutionIds,
+    exactPublishedSuccess,
+  }
+}
+
+function isFailedBenchmarkStatus(value: string | null): boolean {
+  return new Set([
+    'failed',
+    'failure',
+    'error',
+    'errored',
+    'cancelled',
+    'canceled',
+    'timeout',
+    'timed_out',
+  ]).has((value ?? '').trim().toLowerCase().replace(/[\s-]+/g, '_'))
+}
+
 function buildRunAlertResolutions(
   loops: AdminLabLoopSummary[],
   now: number,
@@ -1680,6 +1791,30 @@ function buildRunAlertResolutions(
     }
   }
   return resolutions
+}
+
+/**
+ * Close a benchmark incident only when the current execution and published
+ * report are strictly linked to the same durable bundle. In particular, a
+ * newer unlinked retry cannot clear an older official failure.
+ */
+function buildBenchmarkAlertResolutions(
+  benchmark: AdminLabDailyBenchmark,
+  executions: readonly BenchmarkAlertExecutionEvidence[],
+): ResearchLabAlertResolution[] {
+  const classification = classifyResearchLabBenchmarkAlert(
+    buildBenchmarkAlertClassificationInput({ benchmark, executions }),
+  )
+  return buildResearchLabBenchmarkSuccessResolutions({
+    classification,
+    observedAt: benchmark.completedAt ?? benchmark.lastActivityAt,
+  })
+}
+
+function isCompletedBenchmarkStatus(value: string | null): boolean {
+  return ['completed', 'succeeded', 'success'].includes(
+    (value ?? '').trim().toLowerCase().replace(/[\s-]+/g, '_'),
+  )
 }
 
 function configuredValidatorHotkeys(): string[] {
@@ -2001,6 +2136,18 @@ type BenchmarkReportLinkRow = {
 type BenchmarkTelemetryOverview = {
   dailyBenchmark: AdminLabDailyBenchmark
   benchmarkRuns: AdminLabBenchmarkRunSummary[]
+  /** Raw execution rows used only for durable alert evidence, never UI grouping. */
+  benchmarkAlertExecutions: BenchmarkAlertExecutionEvidence[]
+}
+
+type BenchmarkAlertExecutionEvidence = {
+  scoringRunId: string
+  benchmarkId: string
+  benchmarkBundleId: string | null
+  executionStatus: string | null
+  retryable: boolean | null
+  publicationStatus: string
+  correlation: 'event_bundle_id' | 'exact_artifacts' | 'unlinked'
 }
 
 async function fetchBenchmarkTelemetryOverview(
@@ -2079,6 +2226,12 @@ async function fetchBenchmarkTelemetryOverview(
     reports,
     bundleLinks,
   )
+  const benchmarkAlertExecutions = buildBenchmarkAlertExecutions(
+    runRows,
+    bundles,
+    reports,
+    bundleLinks,
+  )
   const latestPublishedReport = [...reports]
     .filter((row) => (stringOr(row.current_report_status) ?? '').toLowerCase() === 'published')
     .sort((a, b) => timestampOrZero(b.created_at) - timestampOrZero(a.created_at))[0] ?? null
@@ -2114,7 +2267,7 @@ async function fetchBenchmarkTelemetryOverview(
     bundleLinks,
     latestPublishedReport,
   })
-  return { dailyBenchmark, benchmarkRuns }
+  return { dailyBenchmark, benchmarkRuns, benchmarkAlertExecutions }
 }
 
 async function fetchBenchmarkTelemetryForRunIds(
@@ -2178,7 +2331,7 @@ function buildHistoricalBenchmarkRuns(
     const scoringId = stringOr(latestRun?.scoring_id)
     const scoringRunId = stringOr(latestRun?.scoring_run_id)
     if (!latestRun || !execution || !scoringId || !scoringRunId) return []
-    const linked = correlateResearchLabBenchmarkRun(runGroup, bundles, bundleLinks)
+    const linked = correlateExactResearchLabBenchmarkRun(latestRun, bundles, bundleLinks)
     const benchmarkBundleId = stringOr(linked.bundle?.benchmark_bundle_id) ?? null
     const report = benchmarkBundleId
       ? reports.find((row) => stringOr(row.benchmark_bundle_id) === benchmarkBundleId)
@@ -2222,6 +2375,63 @@ function buildHistoricalBenchmarkRuns(
   })
 }
 
+/**
+ * Alert evidence is deliberately raw per `scoring_run_id`: UI summaries group
+ * retries by `scoring_id`, which is useful for display but cannot prove that
+ * two distinct executions failed. Duplicate projection rows are reduced to
+ * their newest state before classification.
+ */
+function buildBenchmarkAlertExecutions(
+  rows: readonly ResearchLabScoringRunRow[],
+  bundles: readonly ResearchLabBenchmarkBundleRow[],
+  reports: readonly BenchmarkReportLinkRow[],
+  bundleLinks: ReadonlyMap<string, string>,
+): BenchmarkAlertExecutionEvidence[] {
+  const byRunId = new Map<string, ResearchLabScoringRunRow>()
+  for (const row of rows) {
+    const scoringRunId = stringOr(row.scoring_run_id)
+    if (!scoringRunId) continue
+    const previous = byRunId.get(scoringRunId)
+    if (!previous || compareScoringRunRowsNewestFirst(row, previous) < 0) {
+      byRunId.set(scoringRunId, row)
+    }
+  }
+  return [...byRunId.values()]
+    .map((row): BenchmarkAlertExecutionEvidence | null => {
+      const scoringRunId = stringOr(row.scoring_run_id)
+      if (!scoringRunId) return null
+      const linked = correlateExactResearchLabBenchmarkRun(row, bundles, bundleLinks)
+      const benchmarkBundleId = stringOr(linked.bundle?.benchmark_bundle_id) ?? null
+      const benchmarkId = resolveResearchLabBenchmarkAlertIdentity({
+        runBenchmarkDate: benchmarkDateOrNull(row.benchmark_date),
+        exactBundleBenchmarkDate: benchmarkDateOrNull(linked.bundle?.benchmark_date),
+        exactBundleId: benchmarkBundleId,
+        exactRollingWindowHash:
+          stringOr(linked.bundle?.rolling_window_hash)
+          ?? stringOr(row.rolling_window_hash),
+        correlation: linked.correlation,
+      })
+      const report = benchmarkBundleId
+        ? reports.find((candidate) => stringOr(candidate.benchmark_bundle_id) === benchmarkBundleId)
+        : undefined
+      return {
+        scoringRunId,
+        benchmarkId,
+        benchmarkBundleId,
+        executionStatus: stringOr(row.current_run_status) ?? null,
+        retryable: booleanOr(row.current_retryable) ?? null,
+        publicationStatus:
+          stringOr(report?.current_report_status)
+          ?? stringOr(linked.bundle?.current_benchmark_status)
+          ?? stringOr(linked.bundle?.current_event_type)
+          ?? 'unavailable',
+        correlation: linked.correlation,
+      }
+    })
+    .filter((value): value is BenchmarkAlertExecutionEvidence => value !== null)
+    .sort((left, right) => left.scoringRunId.localeCompare(right.scoringRunId))
+}
+
 async function buildDailyBenchmarkTelemetry(input: {
   supabase: ReturnType<typeof getAdminSupabase>
   metadata: IcpMetadataSnapshot
@@ -2236,9 +2446,22 @@ async function buildDailyBenchmarkTelemetry(input: {
   const latestRun = [...input.runGroup].sort(compareScoringRunRowsNewestFirst)[0]
   const execution = input.execution
   const latestPublishedReport = input.latestPublishedReport
+  // The dashboard may show a grouped retry history, but alerts and closure
+  // evidence must bind the *latest execution* to a bundle. Reusing a link from
+  // an older attempt would turn an unlinked retry into a false official page.
   const linked = latestRun
-    ? correlateResearchLabBenchmarkRun(input.runGroup, input.bundles, input.bundleLinks)
+    ? correlateExactResearchLabBenchmarkRun(latestRun, input.bundles, input.bundleLinks)
     : { correlation: 'unlinked' as const, bundle: null }
+  const executionBundleId = stringOr(linked.bundle?.benchmark_bundle_id) ?? null
+  const alertIdentity = resolveResearchLabBenchmarkAlertIdentity({
+    runBenchmarkDate: benchmarkDateOrNull(latestRun?.benchmark_date),
+    exactBundleBenchmarkDate: benchmarkDateOrNull(linked.bundle?.benchmark_date),
+    exactBundleId: executionBundleId,
+    exactRollingWindowHash:
+      stringOr(linked.bundle?.rolling_window_hash)
+      ?? stringOr(latestRun?.rolling_window_hash),
+    correlation: linked.correlation,
+  })
   if (!execution && !latestPublishedReport) {
     return emptyDailyBenchmark('No V2 benchmark execution or canonical publication is available yet.')
   }
@@ -2251,8 +2474,11 @@ async function buildDailyBenchmarkTelemetry(input: {
     ?? stringOr(publishedBundle?.current_benchmark_status)
     ?? stringOr(publishedBundle?.current_event_type)
     ?? 'unavailable'
-  const benchmarkDate = stringOr(latestRun?.benchmark_date)
-    ?? stringOr(latestPublishedReport?.benchmark_date)
+  const benchmarkDate = benchmarkDateOrNull(latestRun?.benchmark_date)
+    ?? (linked.correlation === 'unlinked'
+      ? null
+      : benchmarkDateOrNull(linked.bundle?.benchmark_date))
+    ?? benchmarkDateOrNull(latestPublishedReport?.benchmark_date)
     ?? null
   const attempt = latestRun
     ? Math.max(0, Math.round(numberOr(latestRun.run_attempt, 0)))
@@ -2317,7 +2543,6 @@ async function buildDailyBenchmarkTelemetry(input: {
     ?? execution?.lastHeartbeatAt
     ?? isoStringOr(latestRun?.current_status_at)
     ?? null
-  const executionBundleId = stringOr(linked.bundle?.benchmark_bundle_id) ?? null
   const publicationCorrelation = publishedBundleId && executionBundleId === publishedBundleId
     ? linked.correlation
     : 'unlinked'
@@ -2333,6 +2558,7 @@ async function buildDailyBenchmarkTelemetry(input: {
     }),
     publicationStatus,
     executionStatus: execution?.executionStatus ?? null,
+    executionCorrelation: linked.correlation,
     correlation: publicationCorrelation,
     telemetryMode: execution?.telemetryMode ?? 'missing',
     telemetryDegraded: execution?.telemetryDegraded ?? true,
@@ -2341,6 +2567,7 @@ async function buildDailyBenchmarkTelemetry(input: {
     publishedBenchmarkBundleId: publishedBundleId,
     executionBenchmarkBundleId: executionBundleId,
     reportId: stringOr(latestPublishedReport?.report_id) ?? null,
+    alertIdentity,
     benchmarkDate,
     attempt,
     rollingWindowHash:
@@ -2391,8 +2618,14 @@ function benchmarkExecutionState(
     return { state: 'unknown', label: 'Telemetry degraded' }
   }
   if (status === 'completed') return { state: 'completed', label: 'Execution completed' }
-  if (status === 'failed') return { state: 'failed', label: 'Execution failed' }
-  if (status === 'cancelled') return { state: 'failed', label: 'Execution cancelled' }
+  if (isFailedBenchmarkStatus(status)) {
+    return {
+      state: 'failed',
+      label: status === 'cancelled' || status === 'canceled'
+        ? 'Execution cancelled'
+        : 'Execution failed',
+    }
+  }
   if (['assigned', 'started', 'heartbeat', 'paused', 'resumed', 'restarted'].includes(status)) {
     const heartbeat = execution?.lastHeartbeatAt ?? execution?.startedAt
     if (heartbeat && Date.now() - timestampOrZero(heartbeat) > LIVE_BENCHMARK_STALE_MS) {
@@ -2484,6 +2717,56 @@ async function fetchBenchmarkBundleLinks(
     }
   }
   return links
+}
+
+/**
+ * A durable bundle event is necessary but not by itself enough when the row
+ * also exposes contradictory date/window/model lineage. Treat any conflict as
+ * unlinked rather than inferring a relationship from timestamps or an older
+ * retry. Missing optional old-schema lineage fields remain compatible.
+ */
+function correlateExactResearchLabBenchmarkRun(
+  run: ResearchLabScoringRunRow,
+  bundles: readonly ResearchLabBenchmarkBundleRow[],
+  bundleLinks: ReadonlyMap<string, string>,
+) {
+  const linked = correlateResearchLabBenchmarkRun([run], bundles as ResearchLabBenchmarkBundleRow[], bundleLinks)
+  if (linked.correlation === 'unlinked' || !linked.bundle) return linked
+  const runId = stringOr(run.scoring_run_id)
+  const eventBundleId = runId ? bundleLinks.get(runId) ?? null : null
+  const rowBundleId = stringOr(run.benchmark_bundle_id)
+  const bundleId = stringOr(linked.bundle.benchmark_bundle_id)
+  const compatible =
+    sameWhenPresent(eventBundleId, rowBundleId) &&
+    sameWhenPresent(bundleId, eventBundleId) &&
+    sameWhenPresent(bundleId, rowBundleId) &&
+    sameWhenPresent(
+      benchmarkDateOrNull(run.benchmark_date),
+      benchmarkDateOrNull(linked.bundle.benchmark_date),
+    ) &&
+    sameWhenPresent(
+      stringOr(run.rolling_window_hash),
+      stringOr(linked.bundle.rolling_window_hash),
+    ) &&
+    sameWhenPresent(
+      stringOr(run.reference_artifact_hash),
+      stringOr(linked.bundle.private_model_artifact_hash),
+    )
+  return compatible
+    ? linked
+    : { correlation: 'unlinked' as const, bundle: null }
+}
+
+function sameWhenPresent(
+  left: string | null | undefined,
+  right: string | null | undefined,
+): boolean {
+  return !left || !right || left === right
+}
+
+function benchmarkDateOrNull(value: unknown): string | null {
+  const date = stringOr(value)?.slice(0, 10) ?? null
+  return date && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : null
 }
 
 async function fetchBenchmarkBundlesByIds(
@@ -2607,6 +2890,7 @@ function emptyDailyBenchmark(detail: string): AdminLabDailyBenchmark {
     detail,
     publicationStatus: 'unavailable',
     executionStatus: null,
+    executionCorrelation: 'unlinked',
     correlation: 'unlinked',
     telemetryMode: 'missing',
     telemetryDegraded: true,
@@ -2615,6 +2899,7 @@ function emptyDailyBenchmark(detail: string): AdminLabDailyBenchmark {
     publishedBenchmarkBundleId: null,
     executionBenchmarkBundleId: null,
     reportId: null,
+    alertIdentity: 'daily-benchmark',
     benchmarkDate: null,
     attempt: null,
     rollingWindowHash: null,
