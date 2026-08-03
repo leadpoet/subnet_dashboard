@@ -769,6 +769,9 @@ export type AdminLabDailyBenchmark = {
   detail: string
   publicationStatus: string
   executionStatus: string | null
+  /** Strict correlation of the latest execution to a durable benchmark bundle. */
+  executionCorrelation: ResearchLabBenchmarkCorrelation
+  /** Strict correlation of the latest execution to the displayed publication. */
   correlation: ResearchLabBenchmarkCorrelation
   telemetryMode: ResearchLabScoringExecutionSummary['telemetryMode']
   telemetryDegraded: boolean
@@ -777,6 +780,8 @@ export type AdminLabDailyBenchmark = {
   publishedBenchmarkBundleId: string | null
   executionBenchmarkBundleId: string | null
   reportId: string | null
+  /** Canonical correlation-aware alert identity for the latest execution. */
+  alertIdentity: string
   benchmarkDate: string | null
   attempt: number | null
   rollingWindowHash: string | null

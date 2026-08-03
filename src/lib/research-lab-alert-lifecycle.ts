@@ -1,7 +1,8 @@
-import type {
-  ResearchLabAlertResolution,
-  ResearchLabAlertSeverity,
-  ResearchLabEvaluatedAlert,
+import {
+  isResearchLabBenchmarkAlertFamily,
+  type ResearchLabAlertResolution,
+  type ResearchLabAlertSeverity,
+  type ResearchLabEvaluatedAlert,
 } from './research-lab-alerts'
 
 export type ResearchLabAlertLifecycleTimestamp = string | number | Date
@@ -139,7 +140,7 @@ export type ResearchLabAlertDeliverySuppression = {
   transitionId: string
   channel: ResearchLabAlertDeliveryChannel
   destinationHash: string
-  reason: 'cooldown' | 'minimum_severity' | 'transition_filtered'
+  reason: 'benchmark_recovery' | 'cooldown' | 'minimum_severity' | 'transition_filtered'
   eligibleAt: string | null
 }
 
@@ -337,8 +338,16 @@ export function planResearchLabAlertLifecycle(
 
   for (const [fingerprint, previous] of sortedEntries(previousIncidents)) {
     if (currentAlerts.has(fingerprint) || previous.status === 'resolved') continue
-    const transition = previous.status === 'open' ? 'recover' : 'debounce_cancel'
     const resolution = resolutions.get(fingerprint)
+    if (isResearchLabBenchmarkAlertFamily(previous.alert) && !resolution) {
+      // Absence is not a successful benchmark result. Preserve both pending
+      // and open failures/stalls until an exact fingerprint-matched published
+      // success is supplied by the admin route. This also leaves legacy
+      // attempt-key rows auditable without inventing a schema transition.
+      incidentUpserts.push(copyIncident(previous))
+      continue
+    }
+    const transition = previous.status === 'open' ? 'recover' : 'debounce_cancel'
     const resolved = transitionIncident({
       incident: {
         ...copyIncident(previous),
@@ -437,6 +446,27 @@ export function buildResearchLabAlertDeliveryIdempotencyKey(
   destinationHash: string,
 ): string {
   return `${requiredText(transitionId, 'transitionId')}:delivery:${channel}:${requiredText(destinationHash, 'destinationHash')}`
+}
+
+/**
+ * Discord has no stored message/thread identifier, so a standalone benchmark
+ * recovery would create an unrelated green card. Prefer structured alert data;
+ * only old rows that omit it may use the canonical alert-fingerprint fallback.
+ * This deliberately never inspects a title or detail string.
+ */
+export function shouldSuppressResearchLabBenchmarkRecoveryDelivery(input: {
+  transition?: string | null
+  signal?: string | null
+  scope?: string | null
+  fingerprint?: string | null
+}): boolean {
+  if (input.transition !== 'recover') return false
+  const signal = nonEmptyNullableText(input.signal)
+  const scope = nonEmptyNullableText(input.scope)
+  if (signal !== null || scope !== null) {
+    return isResearchLabBenchmarkAlertFamily({ signal, scope })
+  }
+  return isCanonicalBenchmarkAlertFingerprint(input.fingerprint)
 }
 
 export function researchLabAlertRetryDelayMs(
@@ -565,6 +595,28 @@ function planDeliveries({
 
   for (const event of transitionEvents) {
     if (!isDeliverableTransition(event.transition)) continue
+    if (shouldSuppressResearchLabBenchmarkRecoveryDelivery({
+      transition: event.transition,
+      signal: event.alert.signal,
+      scope: event.alert.scope,
+      fingerprint: event.fingerprint,
+    })) {
+      for (const destination of destinations) {
+        const idempotencyKey = buildResearchLabAlertDeliveryIdempotencyKey(
+          event.transitionId,
+          destination.channel,
+          destination.destinationHash,
+        )
+        deliverySuppressions.push(suppression(
+          idempotencyKey,
+          event,
+          destination,
+          'benchmark_recovery',
+          null,
+        ))
+      }
+      continue
+    }
     const payload = deliveryPayload(event)
     for (const destination of destinations) {
       if (
@@ -625,6 +677,12 @@ function planDeliveries({
   // state change. This prevents an old open/escalation page after recovery.
   for (const group of attempts.values()) {
     if (!isRetryStillRelevant(group.latest, finalIncidents)) continue
+    if (shouldSuppressResearchLabBenchmarkRecoveryDelivery({
+      transition: group.latest.transition,
+      signal: group.latest.payload.alert.signal,
+      scope: group.latest.payload.alert.scope,
+      fingerprint: group.latest.fingerprint,
+    })) continue
     const destination = destinations.find((candidate) => (
       candidate.channel === group.latest.channel &&
       candidate.destinationHash === group.latest.destinationHash
@@ -655,6 +713,12 @@ function planDeliveries({
         group.succeeded ||
         group.latest.status !== 'failed' ||
         !isRetryStillRelevant(group.latest, finalIncidents) ||
+        shouldSuppressResearchLabBenchmarkRecoveryDelivery({
+          transition: group.latest.transition,
+          signal: group.latest.payload.alert.signal,
+          scope: group.latest.payload.alert.scope,
+          fingerprint: group.latest.fingerprint,
+        }) ||
         !shouldActivateFallback(group, policy.retry.maxAttempts) ||
         !destination.transitions.has(group.latest.transition) ||
         severityRank(group.latest.payload.severity) < severityRank(destination.minimumSeverity)
@@ -1119,6 +1183,23 @@ function copyIncident(incident: ResearchLabAlertIncident): ResearchLabAlertIncid
   return { ...incident, alert: copyAlert(incident.alert) }
 }
 
+function isCanonicalBenchmarkAlertFingerprint(value: string | null | undefined): boolean {
+  const fingerprint = nonEmptyNullableText(value)
+  if (!fingerprint) return false
+  const match = /^research-lab:v1:(?:benchmark_failed|benchmark_stalled):benchmark:([^:]+)$/.exec(fingerprint)
+  if (!match) return false
+  try {
+    return encodeURIComponent(decodeURIComponent(match[1])) === match[1]
+  } catch {
+    return false
+  }
+}
+
+function nonEmptyNullableText(value: string | null | undefined): string | null {
+  const normalized = value?.trim()
+  return normalized ? normalized : null
+}
+
 function copyAlert(alert: ResearchLabEvaluatedAlert): ResearchLabEvaluatedAlert {
   return {
     ...alert,
@@ -1214,7 +1295,10 @@ function isResolvedTransition(
 ): event is ResearchLabAlertResolvedTransition {
   return (
     event.toStatus === 'resolved' &&
-    (event.transition === 'recover' || event.transition === 'debounce_cancel')
+    (
+      event.transition === 'recover' ||
+      event.transition === 'debounce_cancel'
+    )
   )
 }
 

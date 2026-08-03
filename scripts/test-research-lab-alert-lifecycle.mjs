@@ -28,6 +28,7 @@ try {
     hashResearchLabAlertDestination,
     planResearchLabAlertLifecycle,
     researchLabAlertRetryDelayMs,
+    shouldSuppressResearchLabBenchmarkRecoveryDelivery,
   } = require(join(outDir, 'research-lab-alert-lifecycle.js'))
 
   const START_MS = Date.parse('2026-07-10T12:00:00.000Z')
@@ -280,6 +281,221 @@ try {
   })
   assert.equal(cancelledPending.resolvedTransitions[0].transition, 'debounce_cancel')
   assert.equal(cancelledPending.deliveryIntents.length, 0)
+
+  // A benchmark failure is not cleared merely because its next snapshot is
+  // absent. It remains open until the admin route supplies a strict linked
+  // terminal resolution, and the temporary Discord policy emits no standalone
+  // green closure card.
+  const benchmarkFingerprint = 'research-lab:v1:benchmark_failed:benchmark:2026-08-03'
+  const benchmarkFailure = {
+    ...alert(benchmarkFingerprint, 'warning'),
+    signal: 'benchmark_failed',
+    scope: 'benchmark',
+    entityId: '2026-08-03',
+  }
+  const benchmarkOpened = planResearchLabAlertLifecycle({
+    now: at(10_000),
+    evaluatedAlerts: [benchmarkFailure],
+    destinations: [emailDestination],
+    policy: policy(),
+  })
+  const benchmarkAbsentWithoutResolution = planResearchLabAlertLifecycle({
+    now: at(11_000),
+    previousIncidents: benchmarkOpened.incidentUpserts,
+    evaluatedAlerts: [],
+    destinations: [emailDestination],
+    policy: policy(),
+  })
+  assert.equal(benchmarkAbsentWithoutResolution.incidentUpserts[0].status, 'open')
+  assert.equal(benchmarkAbsentWithoutResolution.transitionEvents.length, 0)
+  assert.equal(benchmarkAbsentWithoutResolution.deliveryIntents.length, 0)
+
+  const benchmarkClosedWithLinkedPublication = planResearchLabAlertLifecycle({
+    now: at(12_000),
+    previousIncidents: benchmarkOpened.incidentUpserts,
+    evaluatedAlerts: [],
+    resolutions: [{
+      fingerprint: benchmarkFingerprint,
+      title: 'Benchmark 2026-08-03 published successfully',
+      detail: 'The exact benchmark execution is linked to the published report.',
+      observedAt: at(11_900),
+      metadata: {
+        kind: 'terminal',
+        outcome: 'completed',
+        label: 'Published benchmark linked to execution',
+      },
+    }],
+    destinations: [emailDestination],
+    policy: policy(),
+  })
+  assert.equal(benchmarkClosedWithLinkedPublication.transitionEvents[0].transition, 'recover')
+  assert.equal(benchmarkClosedWithLinkedPublication.incidentUpserts[0].status, 'resolved')
+  assert.equal(
+    benchmarkClosedWithLinkedPublication.deliveryIntents.length,
+    0,
+    'benchmark closure stays in the dashboard while Discord cards cannot be threaded',
+  )
+  assert.equal(
+    benchmarkClosedWithLinkedPublication.deliverySuppressions[0].reason,
+    'benchmark_recovery',
+  )
+
+  // A verified stalled benchmark belongs to the same strict closure family as
+  // a failed benchmark. It cannot disappear by absence, and a failed-only
+  // resolution must not close its distinct fingerprint.
+  const benchmarkStalledFingerprint = 'research-lab:v1:benchmark_stalled:benchmark:2026-08-03'
+  const benchmarkStalled = {
+    ...benchmarkFailure,
+    fingerprint: benchmarkStalledFingerprint,
+    signal: 'benchmark_stalled',
+  }
+  const benchmarkStalledOpened = planResearchLabAlertLifecycle({
+    now: at(12_100),
+    evaluatedAlerts: [benchmarkStalled],
+    destinations: [emailDestination],
+    policy: policy(),
+  })
+  const benchmarkStalledAbsent = planResearchLabAlertLifecycle({
+    now: at(12_200),
+    previousIncidents: benchmarkStalledOpened.incidentUpserts,
+    evaluatedAlerts: [],
+    destinations: [emailDestination],
+    policy: policy(),
+  })
+  assert.equal(benchmarkStalledAbsent.incidentUpserts[0].status, 'open')
+  assert.equal(benchmarkStalledAbsent.transitionEvents.length, 0,
+    'a stalled benchmark remains open when its observation is merely absent')
+
+  const failedOnlyResolution = {
+    fingerprint: benchmarkFingerprint,
+    title: 'Benchmark 2026-08-03 published successfully',
+    detail: 'The exact benchmark execution is linked to the published report.',
+    observedAt: at(12_250),
+    metadata: {
+      kind: 'terminal',
+      outcome: 'completed',
+      label: 'Published benchmark linked to execution',
+    },
+  }
+  const stalledWithFailedOnlyResolution = planResearchLabAlertLifecycle({
+    now: at(12_300),
+    previousIncidents: benchmarkStalledOpened.incidentUpserts,
+    evaluatedAlerts: [],
+    resolutions: [failedOnlyResolution],
+    destinations: [emailDestination],
+    policy: policy(),
+  })
+  assert.equal(stalledWithFailedOnlyResolution.incidentUpserts[0].status, 'open')
+  assert.equal(stalledWithFailedOnlyResolution.transitionEvents.length, 0,
+    'a benchmark_failed resolution cannot close benchmark_stalled')
+
+  const benchmarkFamilyResolved = planResearchLabAlertLifecycle({
+    now: at(12_400),
+    previousIncidents: [
+      ...benchmarkOpened.incidentUpserts,
+      ...benchmarkStalledOpened.incidentUpserts,
+    ],
+    evaluatedAlerts: [],
+    resolutions: [
+      failedOnlyResolution,
+      {
+        ...failedOnlyResolution,
+        fingerprint: benchmarkStalledFingerprint,
+      },
+    ],
+    destinations: [emailDestination],
+    policy: policy(),
+  })
+  assert.deepEqual(
+    benchmarkFamilyResolved.incidentUpserts.map((incident) => incident.status),
+    ['resolved', 'resolved'],
+  )
+  assert.deepEqual(
+    benchmarkFamilyResolved.transitionEvents.map((event) => event.transition),
+    ['recover', 'recover'],
+  )
+  assert.equal(benchmarkFamilyResolved.deliveryIntents.length, 0,
+    'exact benchmark resolutions never create standalone recovery cards')
+  assert.equal(benchmarkFamilyResolved.deliverySuppressions.length, 2)
+
+  const benchmarkPending = planResearchLabAlertLifecycle({
+    now: at(12_500),
+    evaluatedAlerts: [benchmarkStalled],
+    destinations: [emailDestination],
+    policy: policy({ debounceMs: { warning: 1_000, critical: 0 } }),
+  })
+  const benchmarkPendingAbsent = planResearchLabAlertLifecycle({
+    now: at(12_600),
+    previousIncidents: benchmarkPending.incidentUpserts,
+    evaluatedAlerts: [],
+    destinations: [emailDestination],
+    policy: policy({ debounceMs: { warning: 1_000, critical: 0 } }),
+  })
+  assert.equal(benchmarkPendingAbsent.incidentUpserts[0].status, 'pending',
+    'benchmark family incidents remain pending until an exact resolution arrives')
+
+  assert.equal(
+    shouldSuppressResearchLabBenchmarkRecoveryDelivery({
+      transition: 'recover',
+      signal: 'benchmark_stalled',
+      scope: 'benchmark',
+      fingerprint: 'research-lab:v1:benchmark_stalled:benchmark:2026-08-03',
+    }),
+    true,
+    'structured benchmark recoveries are suppressed for every benchmark family signal',
+  )
+  assert.equal(
+    shouldSuppressResearchLabBenchmarkRecoveryDelivery({
+      transition: 'recover',
+      fingerprint: 'research-lab:v1:benchmark_failed:benchmark:2026-08-03%3Aattempt%3A349',
+    }),
+    true,
+    'old rows without structured payload data use only the exact canonical benchmark fingerprint fallback',
+  )
+  assert.equal(
+    shouldSuppressResearchLabBenchmarkRecoveryDelivery({
+      transition: 'recover',
+      signal: 'data_freshness',
+      scope: 'data',
+      fingerprint: 'research-lab:v1:benchmark_failed:benchmark:2026-08-03',
+    }),
+    false,
+    'structured non-benchmark evidence never falls back to a similarly shaped string',
+  )
+  assert.equal(
+    shouldSuppressResearchLabBenchmarkRecoveryDelivery({
+      transition: 'open',
+      signal: 'benchmark_failed',
+      scope: 'benchmark',
+    }),
+    false,
+    'benchmark open notifications remain deliverable',
+  )
+
+  // Existing rows keyed by attempt remain auditable until a separately
+  // authorized cleanup migration; source behavior must not emit a new
+  // transition rejected by the old production check constraint.
+  const legacyBenchmarkFingerprint = 'research-lab:v1:benchmark_failed:benchmark:2026-08-03%3Aattempt%3A349'
+  const legacyBenchmarkOpened = planResearchLabAlertLifecycle({
+    now: at(13_000),
+    evaluatedAlerts: [{
+      ...benchmarkFailure,
+      fingerprint: legacyBenchmarkFingerprint,
+      entityId: '2026-08-03:attempt:349',
+    }],
+    destinations: [emailDestination],
+    policy: policy(),
+  })
+  const legacyBenchmarkAbsentWithoutResolution = planResearchLabAlertLifecycle({
+    now: at(14_000),
+    previousIncidents: legacyBenchmarkOpened.incidentUpserts,
+    evaluatedAlerts: [],
+    destinations: [emailDestination],
+    policy: policy(),
+  })
+  assert.equal(legacyBenchmarkAbsentWithoutResolution.transitionEvents.length, 0)
+  assert.equal(legacyBenchmarkAbsentWithoutResolution.incidentUpserts[0].status, 'open')
+  assert.equal(legacyBenchmarkAbsentWithoutResolution.deliveryIntents.length, 0)
 
   // Failed deliveries retain one idempotency key across bounded, exponentially
   // delayed attempts. Future `dueAt` is planned deterministically; the planner

@@ -25,12 +25,19 @@ try {
   const require = createRequire(import.meta.url)
   const {
     DEFAULT_RESEARCH_LAB_ALERT_THRESHOLDS,
+    MIN_LINKED_BENCHMARK_FAILURES_FOR_WARNING,
     RESEARCH_LAB_ALERT_SIGNALS,
+    buildResearchLabDailyBenchmarkAlertEntityId,
     buildResearchLabAlertFingerprint,
+    buildResearchLabBenchmarkSuccessResolutions,
+    classifyResearchLabBenchmarkAlert,
     evaluateResearchLabAlerts,
     isExpectedResearchLabBaselineWait,
+    isResearchLabBenchmarkAlertFamily,
     parseResearchLabAlertSignalAllowlist,
+    resolveResearchLabBenchmarkAlertIdentity,
     resolveResearchLabAlertThresholds,
+    shouldSuppressResearchLabUnlinkedBenchmarkFailure,
     shouldSuppressResearchLabExecutionAlert,
   } = require(join(outDir, 'research-lab-alerts.js'))
 
@@ -40,6 +47,173 @@ try {
   assert.equal(isExpectedResearchLabBaselineWait('blocked', 'OpenRouter credits exhausted'), false)
   assert.equal(parseResearchLabAlertSignalAllowlist(undefined), null)
   assert.equal(parseResearchLabAlertSignalAllowlist('  '), null)
+  assert.equal(
+    buildResearchLabDailyBenchmarkAlertEntityId({
+      benchmarkDate: '2026-08-03',
+      rollingWindowHash: 'window-ignored-when-dated',
+    }),
+    '2026-08-03',
+    'daily benchmark incident identity never contains an execution attempt',
+  )
+  assert.equal(
+    buildResearchLabDailyBenchmarkAlertEntityId({ rollingWindowHash: 'window-42' }),
+    'window-42',
+  )
+  assert.equal(
+    buildResearchLabDailyBenchmarkAlertEntityId({ benchmarkBundleId: 'bundle-immutable-42' }),
+    'bundle-immutable-42',
+    'an immutable bundle is a stable fallback when an official date is unavailable',
+  )
+  assert.equal(MIN_LINKED_BENCHMARK_FAILURES_FOR_WARNING, 2)
+  assert.equal(
+    isResearchLabBenchmarkAlertFamily({ signal: 'benchmark_failed', scope: 'benchmark' }),
+    true,
+  )
+  assert.equal(
+    isResearchLabBenchmarkAlertFamily({ signal: 'benchmark_stalled', scope: 'benchmark' }),
+    true,
+  )
+  assert.equal(
+    isResearchLabBenchmarkAlertFamily({ signal: 'benchmark_failed', scope: 'run' }),
+    false,
+  )
+  const missingRunDateExactBundle = {
+    runBenchmarkDate: null,
+    exactBundleBenchmarkDate: '2026-08-03',
+    exactBundleId: 'bundle-exact-2026-08-03',
+    exactRollingWindowHash: 'window-exact-2026-08-03',
+    correlation: 'event_bundle_id',
+  }
+  const dailyTelemetryIdentity = resolveResearchLabBenchmarkAlertIdentity(missingRunDateExactBundle)
+  const rawExecutionIdentity = resolveResearchLabBenchmarkAlertIdentity({
+    ...missingRunDateExactBundle,
+    runBenchmarkDate: 'not-a-date',
+  })
+  assert.equal(dailyTelemetryIdentity, '2026-08-03')
+  assert.equal(rawExecutionIdentity, dailyTelemetryIdentity,
+    'a missing run date resolves from the exact linked bundle identically for daily and raw evidence')
+  assert.equal(
+    resolveResearchLabBenchmarkAlertIdentity({
+      ...missingRunDateExactBundle,
+      exactBundleBenchmarkDate: null,
+      correlation: 'unlinked',
+    }),
+    'daily-benchmark',
+    'unlinked bundle fields cannot select an alert identity',
+  )
+  const exactBundleClassification = classifyResearchLabBenchmarkAlert({
+    benchmarkIdentity: rawExecutionIdentity,
+    status: 'failed',
+    currentExecutionId: 'run-exact-bundle-date',
+    currentExecutionCorrelation: 'event_bundle_id',
+    currentExecutionLineageMatched: true,
+    currentExecutionTerminal: true,
+  })
+  assert.equal(exactBundleClassification.benchmarkId, dailyTelemetryIdentity)
+  assert.equal(
+    buildResearchLabAlertFingerprint('benchmark_failed', 'benchmark', exactBundleClassification.benchmarkId),
+    'research-lab:v1:benchmark_failed:benchmark:2026-08-03',
+    'the classifier and fingerprint retain the exact bundle date identity',
+  )
+  assert.deepEqual(
+    buildResearchLabBenchmarkSuccessResolutions({
+      classification: {
+        ...exactBundleClassification,
+        canResolve: true,
+      },
+      observedAt: '2026-08-03T12:00:00.000Z',
+    }).map((resolution) => resolution.fingerprint),
+    [
+      'research-lab:v1:benchmark_failed:benchmark:2026-08-03',
+      'research-lab:v1:benchmark_stalled:benchmark:2026-08-03',
+    ],
+    'an exact published success emits both canonical benchmark resolution fingerprints',
+  )
+  assert.deepEqual(
+    buildResearchLabBenchmarkSuccessResolutions({
+      classification: exactBundleClassification,
+      observedAt: '2026-08-03T12:00:00.000Z',
+    }),
+    [],
+    'an incomplete classifier result cannot synthesize a benchmark resolution',
+  )
+  assert.equal(
+    shouldSuppressResearchLabUnlinkedBenchmarkFailure({
+      status: 'failed',
+      correlation: 'unlinked',
+    }),
+    true,
+    'an unlinked worker failure remains dashboard telemetry instead of a page',
+  )
+  assert.equal(
+    shouldSuppressResearchLabUnlinkedBenchmarkFailure({
+      status: 'failed',
+      correlation: 'event_bundle_id',
+    }),
+    false,
+    'a durable run-to-bundle correlation preserves the official failure signal',
+  )
+  const oneLinkedRetry = classifyResearchLabBenchmarkAlert({
+    benchmarkDate: '2026-08-03',
+    status: 'failed',
+    currentExecutionId: 'run-1',
+    currentExecutionCorrelation: 'event_bundle_id',
+    currentExecutionLineageMatched: true,
+    currentExecutionTerminal: false,
+    rawLinkedFailedExecutionIds: ['run-1'],
+  })
+  assert.equal(oneLinkedRetry.failureSeverity, null, 'one linked retry is diagnostic only')
+  const twoLinkedRetries = classifyResearchLabBenchmarkAlert({
+    benchmarkDate: '2026-08-03',
+    status: 'failed',
+    currentExecutionId: 'run-2',
+    currentExecutionCorrelation: 'exact_artifacts',
+    currentExecutionLineageMatched: true,
+    currentExecutionTerminal: false,
+    rawLinkedFailedExecutionIds: ['run-1', 'run-2', 'run-1'],
+  })
+  assert.equal(twoLinkedRetries.failureSeverity, 'warning', 'only distinct linked execution IDs reach warning')
+  assert.equal(classifyResearchLabBenchmarkAlert({
+    benchmarkDate: '2026-08-03',
+    status: 'failed',
+    currentExecutionId: 'run-terminal',
+    currentExecutionCorrelation: 'event_bundle_id',
+    currentExecutionLineageMatched: true,
+    currentExecutionTerminal: true,
+    rawLinkedFailedExecutionIds: ['run-terminal'],
+  }).failureSeverity, 'critical', 'an exact official terminal failure is immediately critical')
+  assert.equal(classifyResearchLabBenchmarkAlert({
+    benchmarkDate: '2026-08-03',
+    status: 'failed',
+    currentExecutionId: 'run-unlinked',
+    currentExecutionCorrelation: 'unlinked',
+    currentExecutionLineageMatched: false,
+    currentExecutionTerminal: true,
+    rawLinkedFailedExecutionIds: ['run-old', 'run-unlinked'],
+  }).failureSeverity, null, 'unlinked or ambiguous execution evidence cannot page')
+  assert.equal(classifyResearchLabBenchmarkAlert({
+    benchmarkDate: '2026-08-03',
+    status: 'stalled',
+    currentExecutionId: 'run-stalled',
+    currentExecutionCorrelation: 'event_bundle_id',
+    currentExecutionLineageMatched: true,
+  }).stalledSeverity, 'critical', 'a verified official stale benchmark is critical')
+  assert.equal(classifyResearchLabBenchmarkAlert({
+    benchmarkDate: '2026-08-03',
+    status: 'completed',
+    currentExecutionId: 'run-success',
+    currentExecutionCorrelation: 'event_bundle_id',
+    currentExecutionLineageMatched: true,
+    exactPublishedSuccess: true,
+  }).canResolve, true, 'only exact linked publication evidence closes a benchmark incident')
+  assert.equal(classifyResearchLabBenchmarkAlert({
+    benchmarkDate: '2026-08-03',
+    status: 'completed',
+    currentExecutionId: 'run-nearby',
+    currentExecutionCorrelation: 'unlinked',
+    currentExecutionLineageMatched: false,
+    exactPublishedSuccess: true,
+  }).canResolve, false, 'timestamp-only publication proximity cannot close an incident')
   assert.deepEqual(
     [...parseResearchLabAlertSignalAllowlist(
       'pcr0_missing, benchmark_failed;PCR0_MISSING',
@@ -202,10 +376,60 @@ try {
     'warning',
     'warning boundary is inclusive',
   )
+  assert.equal(
+    completeByFingerprint.get(fingerprint('benchmark_failed', 'benchmark', 'benchmark-failed')).severity,
+    'critical',
+  )
   assert.match(
     completeByFingerprint.get(fingerprint('benchmark_failed', 'benchmark', 'benchmark-failed')).detail,
     /HTTP 503/,
   )
+  const warningBenchmarkFailure = evaluate({
+    benchmarks: [{
+      benchmarkId: 'benchmark-linked-retry',
+      status: 'failed',
+      failureSeverity: 'warning',
+      failedAt: ago(2),
+    }],
+  })
+  assert.equal(
+    warningBenchmarkFailure[0].severity,
+    'warning',
+    'the caller can defer a correlated retry failure to the warning policy',
+  )
+  const classifiedBenchmarkFailure = evaluate({
+    benchmarks: [{
+      benchmarkId: 'ignored-by-classifier',
+      status: 'failed',
+      failedAt: ago(2),
+      classification: {
+        benchmarkDate: '2026-08-03',
+        status: 'failed',
+        currentExecutionId: 'run-2',
+        currentExecutionCorrelation: 'event_bundle_id',
+        currentExecutionLineageMatched: true,
+        currentExecutionTerminal: false,
+        rawLinkedFailedExecutionIds: ['run-1', 'run-2'],
+      },
+    }],
+  })
+  assert.equal(classifiedBenchmarkFailure[0].entityId, '2026-08-03')
+  assert.equal(classifiedBenchmarkFailure[0].severity, 'warning')
+  assert.deepEqual(evaluate({
+    benchmarks: [{
+      benchmarkId: 'unlinked-benchmark',
+      status: 'failed',
+      failedAt: ago(2),
+      classification: {
+        benchmarkDate: '2026-08-03',
+        status: 'failed',
+        currentExecutionId: 'run-unlinked',
+        currentExecutionCorrelation: 'unlinked',
+        currentExecutionLineageMatched: false,
+        rawLinkedFailedExecutionIds: ['run-1', 'run-unlinked'],
+      },
+    }],
+  }), [], 'the evaluator shares the strict classifier instead of trusting a failed status alone')
   assert.equal(
     completeByFingerprint.get(fingerprint('active_run_blocked', 'run', 'run-blocked-warning')).severity,
     'warning',
