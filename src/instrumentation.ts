@@ -102,6 +102,27 @@ export async function register(): Promise<void> {
       console.error('[Server] Cache module failed to load:', err)
     }
 
+    // Preload the complete Research Lab overview independently from the public
+    // dashboard cache. This is deliberately fire-and-forget: application boot
+    // stays available if an operational source is slow, while normal admin
+    // visits receive the warmed, complete snapshot.
+    void Promise.all([
+      import('./app/api/admin/research-lab/route'),
+      import('next/server'),
+    ])
+      .then(async ([{ GET }, { NextRequest }]) => {
+        const response = await GET(new NextRequest('http://localhost/api/admin/research-lab'))
+        if (!response.ok) {
+          throw new Error(`warm-up returned HTTP ${response.status}`)
+        }
+      })
+      .then(() => {
+        console.log('[admin:research-lab] overview cache warm-up complete')
+      })
+      .catch((error) => {
+        console.warn('[admin:research-lab] overview cache warm-up failed', error)
+      })
+
     // -------------------------------------------------------------
     // 2. Durable Research Lab admission-control alert monitor.
     //    Explicit enablement prevents an application-only rollout from

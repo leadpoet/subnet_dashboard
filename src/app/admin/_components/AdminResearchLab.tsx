@@ -646,10 +646,9 @@ export function AdminResearchLab({
     return () => window.clearTimeout(timeout)
   }, [query])
 
-  // Load the loop index and headline counts separately from the expensive
-  // operational snapshot. Both requests start together and share the same
-  // server-side loop-index load, so useful content arrives while health,
-  // benchmark, repository, and metagraph sources finish in parallel.
+  // The overview is an atomic snapshot: do not paint current headline counts
+  // next to missing operational health. The request index remains lightweight
+  // and can use the shell endpoint because that is its complete initial view.
   useEffect(() => {
     if (payload) {
       setInitialLoading(false)
@@ -659,42 +658,31 @@ export function AdminResearchLab({
     const loadInitial = async () => {
       setInitialLoading(true)
       try {
-        const fullOverviewRequest = viewMode === 'overview'
-          ? fetch('/api/admin/research-lab', {
-              cache: 'no-store',
-              signal: controller.signal,
-            })
-          : null
-        let shellLoaded = false
-        try {
+        if (viewMode === 'requests') {
           const shellRes = await fetch('/api/admin/research-lab?mode=shell', {
             cache: 'no-store',
             signal: controller.signal,
           })
           const shellBody = await shellRes.json().catch(() => ({}))
-          if (shellRes.ok && classifyAdminLabOverviewResponse(shellBody) === 'shell') {
-            setLivePayload(shellBody as AdminResearchLabShellPayload)
-            shellLoaded = true
-          } else {
-            console.warn('[admin:research-lab] fast shell unavailable; waiting for full overview', {
+          if (!shellRes.ok) {
+            throw new Error(shellBody.error || `Initial Lab request load failed with ${shellRes.status}`)
+          }
+          if (classifyAdminLabOverviewResponse(shellBody) !== 'shell') {
+            console.error('[admin:research-lab] invalid request index response', {
               responseView: shellRes.headers.get('X-Admin-Lab-View'),
-              status: shellRes.status,
               keys: adminLabOverviewResponseKeys(shellBody),
             })
+            throw new Error('The server returned an incomplete Lab request index')
           }
-        } catch (shellError) {
-          if (!controller.signal.aborted) {
-            console.warn('[admin:research-lab] fast shell request failed; waiting for full overview', shellError)
-          }
-        }
-
-        if (!fullOverviewRequest) {
-          if (!shellLoaded) throw new Error('The server returned an incomplete Lab request index')
+          setLivePayload(shellBody as AdminResearchLabShellPayload)
           setLiveRefreshError(null)
           return
         }
 
-        const res = await fullOverviewRequest
+        const res = await fetch('/api/admin/research-lab', {
+          cache: 'no-store',
+          signal: controller.signal,
+        })
         const body = await res.json().catch(() => ({}))
         if (!res.ok) throw new Error(body.error || `Initial Lab load failed with ${res.status}`)
         const responseKind = classifyAdminLabOverviewResponse(body)
@@ -1048,11 +1036,9 @@ export function AdminResearchLab({
               }}
             >
               <span className="dot-gold live-pulse h-1.5 w-1.5 rounded-full motion-reduce:animate-none" />
-              {livePayload
-                ? 'Loading operational health...'
-                : slowInitialLoading
-                  ? 'Still loading—this can take a moment.'
-                  : 'Loading latest Lab snapshot...'}
+              {slowInitialLoading
+                ? 'Still loading—this can take a moment.'
+                : 'Loading latest Lab snapshot...'}
             </div>
           ) : livePayload?.fetchedAt ? (
             <div

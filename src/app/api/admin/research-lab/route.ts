@@ -160,7 +160,11 @@ const LIVE_BENCHMARK_STALE_MS = 15 * 60 * 1000
 const ALERT_MONITOR_ID = 'research-lab-alerts:v1'
 const DEFAULT_ALERT_MONITOR_INTERVAL_MS = 60_000
 const ADMIN_LAB_OVERVIEW_CACHE_MS = 45_000
-const ADMIN_LAB_OVERVIEW_STALE_MS = 5 * 60_000
+// The complete overview is expensive because it joins database telemetry with
+// gateway, repository, attestation, and metagraph health. Keep the last known
+// complete snapshot available for a day while refreshing it in the background;
+// a five-minute stale window made the next operator pay the full cold load.
+const ADMIN_LAB_OVERVIEW_STALE_MS = 24 * 60 * 60_000
 const ADMIN_LAB_ACTIVE_DETAIL_CACHE_MS = 5_000
 const ADMIN_LAB_TERMINAL_DETAIL_CACHE_MS = 30_000
 const ADMIN_LAB_DETAIL_CACHE_LIMIT = 200
