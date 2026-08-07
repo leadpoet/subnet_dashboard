@@ -19,7 +19,7 @@ import { cn } from '@/lib/utils'
 
 export const dynamic = 'force-dynamic'
 
-type AdminView = 'lab' | 'economics' | 'fulfillment'
+type AdminView = 'lab' | 'lab-requests' | 'economics' | 'fulfillment'
 type FulfillmentTab = 'requests' | 'submitted-leads'
 
 async function fetchChains(): Promise<AdminRequestsPayload> {
@@ -85,13 +85,14 @@ async function fetchResearchLabEconomics(): Promise<ResearchLabEconomicsPayload>
 function AdminViewTabs({ active }: { active: AdminView }) {
   const tabs: Array<{ key: AdminView; label: string; href: string }> = [
     { key: 'lab', label: 'Lab activity', href: '/admin' },
+    { key: 'lab-requests', label: 'Research Lab requests', href: '/admin?view=lab-requests' },
     { key: 'economics', label: 'Economics & Rewards', href: '/admin?view=economics' },
     { key: 'fulfillment', label: 'Fulfillment', href: '/admin?view=fulfillment' },
   ]
 
   return (
     <div
-      className="flex items-center gap-1 rounded-xl border p-1"
+      className="flex items-center gap-1 overflow-x-auto rounded-xl border p-1 no-scrollbar"
       style={{
         borderColor: 'var(--surface-border)',
         background: 'var(--surface)',
@@ -102,7 +103,7 @@ function AdminViewTabs({ active }: { active: AdminView }) {
           key={tab.key}
           href={tab.href}
           className={cn(
-            'rounded-lg px-3 py-1.5 text-xs font-medium transition-colors',
+            'shrink-0 whitespace-nowrap rounded-lg px-3 py-1.5 text-xs font-medium transition-colors',
             active === tab.key
               ? 'bg-gold-soft text-gold'
               : 'hover-bg-warm text-white/55',
@@ -117,6 +118,7 @@ function AdminViewTabs({ active }: { active: AdminView }) {
 
 function getAdminView(value: string | string[] | undefined): AdminView {
   const view = Array.isArray(value) ? value[0] : value
+  if (view === 'lab-requests') return 'lab-requests'
   if (view === 'economics') return 'economics'
   if (view === 'fulfillment') return 'fulfillment'
   return 'lab'
@@ -186,6 +188,8 @@ export default async function AdminLandingPage({
         ? e.message
         : activeView === 'lab'
           ? 'Unknown error loading Lab activity'
+          : activeView === 'lab-requests'
+            ? 'Unknown error loading Research Lab requests'
           : activeView === 'economics'
             ? 'Unknown error loading Research Lab economics'
           : 'Unknown error loading requests'
@@ -196,7 +200,9 @@ export default async function AdminLandingPage({
       <AdminWeightsAlerts />
       <AdminViewTabs active={activeView} />
       {activeView === 'lab' ? (
-        <AdminResearchLab payload={labPayload} error={error} />
+        <AdminResearchLab key="lab-overview" viewMode="overview" payload={labPayload} error={error} />
+      ) : activeView === 'lab-requests' ? (
+        <AdminResearchLab key="lab-requests" viewMode="requests" payload={labPayload} error={error} />
       ) : activeView === 'economics' ? (
         <AdminResearchLabEconomics payload={economicsPayload} error={error} />
       ) : fulfillmentTab === 'submitted-leads' ? (

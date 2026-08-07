@@ -626,6 +626,10 @@ export type AdminResearchLabPayload = {
   fetchedAt: string
 }
 
+type AdminResearchLabShellPayload = Omit<AdminResearchLabPayload, 'ops'> & {
+  ops: null
+}
+
 export type AdminLabLoopPagination = {
   page: number
   pageSize: number
@@ -705,6 +709,30 @@ export async function GET(request: NextRequest) {
   }
 
   const mode = request.nextUrl.searchParams.get('mode')
+  if (mode === 'shell') {
+    try {
+      const allLoops = await getCachedAdminLabLoopIndex(supabase)
+      const loopPage = buildAdminLabLoopPage(allLoops, { page: 1, query: '', status: 'all' })
+      const shell: AdminResearchLabShellPayload = {
+        loops: loopPage.loops,
+        loopPagination: loopPage.loopPagination,
+        loopStatusOptions: loopPage.loopStatusOptions,
+        ops: null,
+        stats: buildAdminLabAllTimeStats(allLoops),
+        fetchedAt: new Date().toISOString(),
+      }
+      return NextResponse.json(shell, {
+        headers: {
+          'Cache-Control': 'private, no-store',
+          'X-Admin-Lab-View': 'shell',
+        },
+      })
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Unknown Supabase error'
+      return NextResponse.json({ error: msg }, { status: 502 })
+    }
+  }
+
   if (mode === 'loops') {
     const requestedPage = Number(request.nextUrl.searchParams.get('page') ?? 1)
     const page = Number.isSafeInteger(requestedPage) ? Math.max(1, requestedPage) : 1

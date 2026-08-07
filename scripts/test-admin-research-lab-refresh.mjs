@@ -79,6 +79,15 @@ try {
     'the full overview response should be accepted during deployment skew',
   )
   assert.equal(
+    classifyAdminLabOverviewResponse({
+      ...common,
+      ops: null,
+      loops: [],
+    }),
+    'shell',
+    'the fast shell response should be accepted before operational health finishes',
+  )
+  assert.equal(
     classifyAdminLabOverviewResponse({ ...common }),
     'invalid',
     'a successful response without either loop array should be rejected',
@@ -113,6 +122,11 @@ try {
   assert.match(componentSource, /document\.hidden[\s\S]{0,120}controller\?\.abort\(\)/)
   assert.match(componentSource, /else \{\s*void refresh\(\)\s*\}/)
   assert.match(componentSource, /const isInitialOverviewLoading = initialLoading && !livePayload/)
+  assert.match(componentSource, /\/api\/admin\/research-lab\?mode=shell/)
+  assert.match(componentSource, /Loading operational health\.\.\./)
+  assert.match(componentSource, /viewMode === 'overview'/)
+  assert.match(componentSource, /viewMode === 'requests'/)
+  assert.match(componentSource, /view: 'lab-requests', ticketId/)
   assert.match(componentSource, /setSlowInitialLoading\(true\), 5_000/)
   assert.match(componentSource, /Loading latest Lab snapshot\.\.\./)
   assert.match(componentSource, /Still loading—this can take a moment\./)
@@ -120,6 +134,17 @@ try {
   assert.match(componentSource, /<RunInspectorSkeleton \/>/)
   assert.match(componentSource, /disabled=\{isInitialOverviewLoading\}/)
   assert.doesNotMatch(componentSource, /stats\.totalLoops \?\? 0/)
+
+  const adminPageSource = await readFile(resolve('src/app/admin/page.tsx'), 'utf8')
+  const labTab = adminPageSource.indexOf("key: 'lab', label: 'Lab activity'")
+  const requestsTab = adminPageSource.indexOf("key: 'lab-requests', label: 'Research Lab requests'")
+  const economicsTab = adminPageSource.indexOf("key: 'economics', label: 'Economics & Rewards'")
+  assert.ok(
+    labTab >= 0 && labTab < requestsTab && requestsTab < economicsTab,
+    'Research Lab requests should be a top-level tab between Lab activity and Economics & Rewards',
+  )
+  assert.match(adminPageSource, /viewMode="overview"/)
+  assert.match(adminPageSource, /viewMode="requests"/)
 
   console.log('admin-research-lab-refresh: response skew, tab resume, and initial loading guards passed')
 } finally {

@@ -1,4 +1,4 @@
-export type AdminLabOverviewResponseKind = 'refresh' | 'full' | 'invalid'
+export type AdminLabOverviewResponseKind = 'refresh' | 'full' | 'shell' | 'invalid'
 
 /**
  * Explain body-less server failures without claiming every 5xx is a deployment.
@@ -20,12 +20,13 @@ export function adminLabRefreshErrorMessage(
 }
 
 /**
- * Classify the two successful Admin Research Lab overview response shapes.
+ * Classify the successful Admin Research Lab overview response shapes.
  *
- * The endpoint normally returns the compact refresh shape when `mode=refresh`,
- * but a client that remains open across a deployment can briefly receive the
- * full overview shape. Keep this decoder deliberately structural: it protects
- * the client from unsafe array iteration without duplicating the full API type.
+ * The endpoint returns a fast shell, a compact refresh, or the full overview.
+ * A client that remains open across a deployment can briefly receive a
+ * different successful shape. Keep this decoder deliberately structural: it
+ * protects the client from unsafe array iteration without duplicating the full
+ * API type.
  */
 export function classifyAdminLabOverviewResponse(
   value: unknown,
@@ -46,7 +47,8 @@ export function classifyAdminLabOverviewResponse(
     Array.isArray(value.loopStatusOptions) &&
     isRecord(value.loopPagination)
   ) {
-    return 'full'
+    if (isRecord(value.ops)) return 'full'
+    if (value.ops === null) return 'shell'
   }
 
   return 'invalid'
@@ -59,7 +61,6 @@ export function adminLabOverviewResponseKeys(value: unknown): string[] {
 
 function hasCommonOverviewFields(value: Record<string, unknown>): boolean {
   return (
-    isRecord(value.ops) &&
     isRecord(value.stats) &&
     typeof value.fetchedAt === 'string'
   )

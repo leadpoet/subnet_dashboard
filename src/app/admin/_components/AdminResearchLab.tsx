@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
+import { useRouter } from 'next/navigation'
 import {
   Activity,
   AlertTriangle,
@@ -499,6 +500,13 @@ export type AdminResearchLabPayload = {
   fetchedAt: string
 }
 
+type AdminResearchLabShellPayload = Omit<AdminResearchLabPayload, 'ops'> & {
+  ops: null
+}
+
+type AdminResearchLabViewPayload = AdminResearchLabPayload | AdminResearchLabShellPayload
+type AdminResearchLabViewMode = 'overview' | 'requests'
+
 type AdminLabLoopPagination = {
   page: number
   pageSize: number
@@ -583,11 +591,14 @@ type LabTimelinePayload = {
 export function AdminResearchLab({
   payload,
   error,
+  viewMode,
 }: {
   payload: AdminResearchLabPayload | null
   error: string | null
+  viewMode: AdminResearchLabViewMode
 }) {
-  const [livePayload, setLivePayload] = useState(payload)
+  const router = useRouter()
+  const [livePayload, setLivePayload] = useState<AdminResearchLabViewPayload | null>(payload)
   const [initialLoading, setInitialLoading] = useState(!payload)
   const [slowInitialLoading, setSlowInitialLoading] = useState(false)
   const [liveRefreshError, setLiveRefreshError] = useState<string | null>(null)
@@ -611,6 +622,12 @@ export function AdminResearchLab({
   const selectRunForInspection = (ticketId: string, runId?: string | null) => {
     const loop = loops.find((item) => item.ticketId === ticketId)
     const nextRunId = runId === undefined ? loop?.runId ?? null : runId
+    if (viewMode === 'overview') {
+      const params = new URLSearchParams({ view: 'lab-requests', ticketId })
+      if (nextRunId) params.set('runId', nextRunId)
+      router.push(`/admin?${params.toString()}`)
+      return
+    }
     setSelectedTicketId(ticketId)
     setSelectedRunId(nextRunId)
     writeRunSelectionUrl(ticketId, nextRunId)
@@ -629,9 +646,10 @@ export function AdminResearchLab({
     return () => window.clearTimeout(timeout)
   }, [query])
 
-  // Render the admin shell immediately. The large operational snapshot is
-  // loaded client-side so a cold cache can no longer delay the first byte of
-  // the page by several seconds.
+  // Load the loop index and headline counts separately from the expensive
+  // operational snapshot. Both requests start together and share the same
+  // server-side loop-index load, so useful content arrives while health,
+  // benchmark, repository, and metagraph sources finish in parallel.
   useEffect(() => {
     if (payload) {
       setInitialLoading(false)
@@ -641,10 +659,42 @@ export function AdminResearchLab({
     const loadInitial = async () => {
       setInitialLoading(true)
       try {
-        const res = await fetch('/api/admin/research-lab', {
-          cache: 'no-store',
-          signal: controller.signal,
-        })
+        const fullOverviewRequest = viewMode === 'overview'
+          ? fetch('/api/admin/research-lab', {
+              cache: 'no-store',
+              signal: controller.signal,
+            })
+          : null
+        let shellLoaded = false
+        try {
+          const shellRes = await fetch('/api/admin/research-lab?mode=shell', {
+            cache: 'no-store',
+            signal: controller.signal,
+          })
+          const shellBody = await shellRes.json().catch(() => ({}))
+          if (shellRes.ok && classifyAdminLabOverviewResponse(shellBody) === 'shell') {
+            setLivePayload(shellBody as AdminResearchLabShellPayload)
+            shellLoaded = true
+          } else {
+            console.warn('[admin:research-lab] fast shell unavailable; waiting for full overview', {
+              responseView: shellRes.headers.get('X-Admin-Lab-View'),
+              status: shellRes.status,
+              keys: adminLabOverviewResponseKeys(shellBody),
+            })
+          }
+        } catch (shellError) {
+          if (!controller.signal.aborted) {
+            console.warn('[admin:research-lab] fast shell request failed; waiting for full overview', shellError)
+          }
+        }
+
+        if (!fullOverviewRequest) {
+          if (!shellLoaded) throw new Error('The server returned an incomplete Lab request index')
+          setLiveRefreshError(null)
+          return
+        }
+
+        const res = await fullOverviewRequest
         const body = await res.json().catch(() => ({}))
         if (!res.ok) throw new Error(body.error || `Initial Lab load failed with ${res.status}`)
         const responseKind = classifyAdminLabOverviewResponse(body)
@@ -668,7 +718,7 @@ export function AdminResearchLab({
     }
     void loadInitial()
     return () => controller.abort()
-  }, [payload])
+  }, [payload, viewMode])
 
   const isInitialOverviewLoading = initialLoading && !livePayload
 
@@ -708,6 +758,7 @@ export function AdminResearchLab({
   }, [loops])
 
   useEffect(() => {
+    if (viewMode !== 'overview') return
     let cancelled = false
     let inFlight = false
     let timeout: number | null = null
@@ -737,7 +788,7 @@ export function AdminResearchLab({
           throw new Error(adminLabRefreshErrorMessage(res.status, body.error))
         }
         const responseKind = classifyAdminLabOverviewResponse(body)
-        if (responseKind === 'invalid') {
+        if (responseKind === 'invalid' || responseKind === 'shell') {
           console.error('[admin:research-lab] invalid overview refresh response', {
             responseView: res.headers.get('X-Admin-Lab-View'),
             keys: adminLabOverviewResponseKeys(body),
@@ -751,9 +802,9 @@ export function AdminResearchLab({
           ? refreshPayloadFromAdminResearchLabOverview(fullOverview)
           : body as AdminResearchLabRefreshPayload
         if (!cancelled) {
-          setLivePayload((current) => current
+          setLivePayload((current) => current?.ops
             ? mergeAdminResearchLabRefresh(current, refreshPayload)
-            : fullOverview)
+            : fullOverview ?? current)
           setLiveRefreshError(null)
         }
       } catch (e) {
@@ -785,7 +836,7 @@ export function AdminResearchLab({
       document.removeEventListener('visibilitychange', handleVisibility)
       window.removeEventListener('online', handleVisibility)
     }
-  }, [])
+  }, [viewMode])
 
   useEffect(() => {
     if (selectedTicketId || loops.length === 0) return
@@ -889,7 +940,7 @@ export function AdminResearchLab({
   }
 
   useEffect(() => {
-    if (!selectedLoop) return
+    if (viewMode !== 'requests' || !selectedLoop) return
     const ticketId = selectedLoop.ticketId
     const selectionKey = runSelectionKey(ticketId, selectedRunId)
     let cancelled = false
@@ -963,10 +1014,10 @@ export function AdminResearchLab({
     // The selected ticket is the polling scope. Cached payload state is
     // intentionally excluded so a successful refresh does not restart polling.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedLoop?.ticketId, selectedRunId])
+  }, [selectedLoop?.ticketId, selectedRunId, viewMode])
 
   return (
-    <div className="space-y-6" aria-busy={isInitialOverviewLoading}>
+    <div className="space-y-6" aria-busy={initialLoading}>
       <section>
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           <div>
@@ -974,16 +1025,18 @@ export function AdminResearchLab({
               className="text-2xl font-medium tracking-tight"
               style={{ color: 'var(--text-primary)' }}
             >
-              Lab Activity
+              {viewMode === 'overview' ? 'Lab Activity' : 'Research Lab Requests'}
             </h1>
             <p
               className="mt-1 max-w-2xl text-sm"
               style={{ color: 'var(--text-tertiary)' }}
             >
-              Internal Research Lab execution stream with every ticket, queue, auto-research, candidate, scoring, promotion, and public projection event.
+              {viewMode === 'overview'
+                ? 'High-level Research Lab health, throughput, benchmark, and production readiness.'
+                : 'Search individual requests and inspect their queue, research, candidate, scoring, promotion, and publication events.'}
             </p>
           </div>
-          {isInitialOverviewLoading ? (
+          {initialLoading ? (
             <div
               role="status"
               aria-live="polite"
@@ -995,9 +1048,11 @@ export function AdminResearchLab({
               }}
             >
               <span className="dot-gold live-pulse h-1.5 w-1.5 rounded-full motion-reduce:animate-none" />
-              {slowInitialLoading
-                ? 'Still loading—this can take a moment.'
-                : 'Loading latest Lab snapshot...'}
+              {livePayload
+                ? 'Loading operational health...'
+                : slowInitialLoading
+                  ? 'Still loading—this can take a moment.'
+                  : 'Loading latest Lab snapshot...'}
             </div>
           ) : livePayload?.fetchedAt ? (
             <div
@@ -1010,7 +1065,11 @@ export function AdminResearchLab({
             >
               <span className="inline-flex items-center gap-2">
                 <span className={cn('h-1.5 w-1.5 rounded-full', liveRefreshError ? 'bg-[var(--accent-negative)]' : 'bg-[var(--accent-positive)]', liveRefreshing ? 'live-pulse' : '')} />
-                {liveRefreshError ? 'Live refresh degraded' : 'Live · 30s overview · 15s active run'} · {formatDateTime(livePayload.fetchedAt)}
+                {liveRefreshError
+                  ? 'Live refresh degraded'
+                  : viewMode === 'overview'
+                    ? 'Live · 30s overview'
+                    : 'Request index loaded · 15s active run'} · {formatDateTime(livePayload.fetchedAt)}
               </span>
             </div>
           ) : null}
@@ -1029,17 +1088,19 @@ export function AdminResearchLab({
         </div>
       ) : null}
 
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-6">
-        <Stat label="All-time loops" value={livePayload?.stats.totalLoops} loading={isInitialOverviewLoading} />
-        <Stat label="Running" value={livePayload?.stats.runningLoops} loading={isInitialOverviewLoading} />
-        <Stat label="Scored" value={livePayload?.stats.scoredLoops} accent="gold" loading={isInitialOverviewLoading} />
-        <Stat label="Failed" value={livePayload?.stats.failedLoops} loading={isInitialOverviewLoading} />
-        <Stat label="Miners" value={livePayload?.stats.uniqueMiners} loading={isInitialOverviewLoading} />
-        <Stat label="Model improvements" value={livePayload?.stats.modelImprovementLoops} accent="gold" loading={isInitialOverviewLoading} />
-      </div>
-
-      {ops ? (
+      {viewMode === 'overview' ? (
         <>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-6">
+            <Stat label="All-time loops" value={livePayload?.stats.totalLoops} loading={isInitialOverviewLoading} />
+            <Stat label="Running" value={livePayload?.stats.runningLoops} loading={isInitialOverviewLoading} />
+            <Stat label="Scored" value={livePayload?.stats.scoredLoops} accent="gold" loading={isInitialOverviewLoading} />
+            <Stat label="Failed" value={livePayload?.stats.failedLoops} loading={isInitialOverviewLoading} />
+            <Stat label="Miners" value={livePayload?.stats.uniqueMiners} loading={isInitialOverviewLoading} />
+            <Stat label="Model improvements" value={livePayload?.stats.modelImprovementLoops} accent="gold" loading={isInitialOverviewLoading} />
+          </div>
+
+          {ops ? (
+            <>
           <OpsHealthStrip ops={ops} />
 
           <AdminMetagraph />
@@ -1071,10 +1132,13 @@ export function AdminResearchLab({
             <AlertsPanel alerts={ops.alerts} observedNodes={ops.attestation.nodes} />
             <AttestationPanel attestation={ops.attestation} />
           </section>
+            </>
+          ) : null}
         </>
       ) : null}
 
-      <section
+      {viewMode === 'requests' ? (
+        <section
         ref={runInspectorRef}
         id="run-inspector"
         className="grid min-h-[640px] w-full min-w-0 scroll-mt-24 gap-4 xl:grid-cols-[420px_minmax(0,1fr)]"
@@ -1309,7 +1373,8 @@ export function AdminResearchLab({
             </div>
           )}
         </div>
-      </section>
+        </section>
+      ) : null}
     </div>
   )
 }
