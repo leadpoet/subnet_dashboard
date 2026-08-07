@@ -156,6 +156,83 @@ class WeightsAlertIncidentStateTest(unittest.TestCase):
         self.assertIn("427 blocks since last set", messages[0])
         self.assertEqual(state[LAST_ALERT_EPOCH_KEY], 24_172)
 
+    def test_main_ignores_unregistered_validators_and_prunes_prior_incident(self):
+        class Metagraph:
+            hotkeys = ["hotkey-primary"]
+            coldkeys = ["coldkey-primary"]
+            validator_permit = [True]
+            active = [True]
+            last_update = [10_050]
+
+        class Subtensor:
+            def __init__(self, network):
+                self.network = network
+
+            def metagraph(self, netuid):
+                return Metagraph()
+
+            def query_identity(self, coldkey):
+                return types.SimpleNamespace(name="")
+
+        registry = [
+            {
+                "id": "leadpoet-primary",
+                "role": "primary",
+                "label": "primary (Leadpoet)",
+                "hotkey": "hotkey-primary",
+                "expectedColdkey": "coldkey-primary",
+            },
+            {
+                "id": "retired-auditor",
+                "role": "auditor",
+                "label": "auditor (retired)",
+                "hotkey": "hotkey-retired",
+                "expectedColdkey": "coldkey-retired",
+            },
+        ]
+        state = {
+            "retired-auditor": ["hotkey_not_registered"],
+            INCIDENT_DELIVERY_EPOCHS_KEY: {
+                "retired-auditor": {"hotkey_not_registered": 24_171}
+            },
+        }
+        messages = []
+        fake_bittensor = types.SimpleNamespace(Subtensor=Subtensor)
+
+        with ExitStack() as stack:
+            stack.enter_context(patch.dict(sys.modules, {"bittensor": fake_bittensor}))
+            stack.enter_context(
+                patch.object(
+                    weights_alert,
+                    "official_epoch_state",
+                    return_value=(24_173, 10_360, 360, 10_374),
+                )
+            )
+            stack.enter_context(
+                patch.object(weights_alert, "load_registry", return_value=registry)
+            )
+            stack.enter_context(
+                patch.object(weights_alert, "load_state", return_value=state)
+            )
+            stack.enter_context(patch.object(weights_alert, "save_state"))
+            stack.enter_context(
+                patch.object(
+                    weights_alert,
+                    "post_discord",
+                    side_effect=lambda content: messages.append(content) or True,
+                )
+            )
+            stack.enter_context(patch.object(weights_alert, "log"))
+            self.assertEqual(weights_alert.main(), 0)
+
+        self.assertEqual(messages, [])
+        self.assertNotIn("retired-auditor", state)
+        self.assertNotIn(
+            "retired-auditor", state[INCIDENT_DELIVERY_EPOCHS_KEY]
+        )
+        self.assertEqual(state[HEARTBEAT_KEY]["active_incident_count"], 0)
+        self.assertEqual(state[HEARTBEAT_KEY]["due_validator_count"], 0)
+
     def test_identity_name_replaces_fallback_for_verified_coldkey(self):
         identity = types.SimpleNamespace(name="Rizzo (Insured)")
         subtensor = types.SimpleNamespace(query_identity=lambda coldkey: identity)

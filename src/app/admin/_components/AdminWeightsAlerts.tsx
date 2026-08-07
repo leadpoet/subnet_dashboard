@@ -14,7 +14,8 @@ const WEIGHT_SUBMISSION_GRACE_BLOCKS = 20
 // Watched validators are pinned to reviewed hotkey/coldkey pairs. UIDs and
 // human-readable on-chain names resolve live; the name is trusted only while
 // the current coldkey still matches the registry. A key rotation remains a
-// deliberate reviewed edit to validator_registry.json.
+// deliberate reviewed edit to validator_registry.json. Registry entries that
+// are absent from the live metagraph are not eligible for display.
 interface WatchedValidator {
   id: string
   role: string
@@ -34,7 +35,6 @@ interface WatchRow {
   uid: number | null
   lastSetBlock: number | null
   blocksSince: number | null
-  notRegistered: boolean
   permitLost: boolean
   coldkeyMismatch: boolean
   inactive: boolean
@@ -48,9 +48,10 @@ function buildRows(data: MetagraphPayload | null): WatchRow[] {
   const staleBlocks = data.tempo !== null && Number.isSafeInteger(data.tempo) && data.tempo > 0
     ? data.tempo + WEIGHT_SUBMISSION_GRACE_BLOCKS
     : null
-  return WATCHED_VALIDATORS.map(({ id, role, label: fallbackLabel, hotkey, expectedColdkey }) => {
+  return WATCHED_VALIDATORS.flatMap(({ id, role, label: fallbackLabel, hotkey, expectedColdkey }) => {
     const uid = data.hotkeyToUid?.[hotkey]
-    const coldkey = uid === undefined ? undefined : data.hotkeyToColdkey?.[hotkey]
+    if (uid === undefined) return []
+    const coldkey = data.hotkeyToColdkey?.[hotkey]
     const coldkeyMismatch = (
       coldkey !== undefined &&
       Boolean(expectedColdkey) &&
@@ -66,31 +67,28 @@ function buildRows(data: MetagraphPayload | null): WatchRow[] {
       uid: uid ?? null,
       lastSetBlock: null,
       blocksSince: null,
-      notRegistered: uid === undefined,
       permitLost: false,
       coldkeyMismatch,
       inactive: false,
       stale: false,
       unavailable: false,
     }
-    if (uid === undefined) return row
     row.permitLost = data.isValidator?.[hotkey] === false
     row.inactive = data.active?.[hotkey] === false
     const lastUpdate = data.lastUpdates?.[hotkey]
     if (lastUpdate === undefined || !Number.isFinite(lastUpdate)) {
       row.unavailable = true
-      return row
+      return [row]
     }
     row.lastSetBlock = lastUpdate
     row.blocksSince = block - lastUpdate
     row.stale = staleBlocks !== null && row.blocksSince >= staleBlocks
-    return row
+    return [row]
   })
 }
 
 function rowProblems(row: WatchRow): string[] {
   const problems: string[] = []
-  if (row.notRegistered) problems.push('hotkey no longer registered')
   if (row.coldkeyMismatch) problems.push('unexpected coldkey')
   if (row.permitLost) problems.push('validator permit lost')
   if (row.inactive) problems.push('validator inactive')

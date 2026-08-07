@@ -31,7 +31,8 @@ import urllib.request
 # validator_registry.json, shared with the dashboard UI. UIDs and on-chain
 # display names resolve live, but a display name is used only while the
 # current coldkey matches the expected coldkey. A key rotation remains a
-# deliberate reviewed registry edit.
+# deliberate reviewed registry edit. Registry entries absent from the live
+# metagraph are not eligible for alerting.
 REGISTRY_ENV = "WEIGHTS_ALERT_REGISTRY"
 REGISTRY_CANDIDATES = (
     os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "validator_registry.json"),
@@ -510,38 +511,36 @@ def main() -> int:
         last_set_block = None
         blocks_since = None
         if uid is None:
-            problems.append("hotkey no longer registered")
-            incident_keys.append("hotkey_not_registered")
-        else:
-            coldkey = str(mg.coldkeys[uid])
-            coldkey_mismatch = bool(expected_coldkey and coldkey != expected_coldkey)
-            coldkey_verified = bool(expected_coldkey and coldkey == expected_coldkey)
-            if coldkey_mismatch:
-                problems.append("unexpected coldkey")
-                incident_keys.append("unexpected_coldkey")
-            identity_name = (
-                query_identity_name(st, coldkey) if coldkey_verified else ""
+            update_incident_state(state, vid, [])
+            sync_incident_delivery_epochs(deliveries, vid, [])
+            continue
+        coldkey = str(mg.coldkeys[uid])
+        coldkey_mismatch = bool(expected_coldkey and coldkey != expected_coldkey)
+        coldkey_verified = bool(expected_coldkey and coldkey == expected_coldkey)
+        if coldkey_mismatch:
+            problems.append("unexpected coldkey")
+            incident_keys.append("unexpected_coldkey")
+        identity_name = (
+            query_identity_name(st, coldkey) if coldkey_verified else ""
+        )
+        label = display_label(role, fallback_label, identity_name)
+        if not bool(mg.validator_permit[uid]):
+            problems.append("validator permit lost")
+            incident_keys.append("validator_permit_lost")
+        if not bool(mg.active[uid]):
+            problems.append("validator inactive")
+            incident_keys.append("validator_inactive")
+        last_set_block = int(mg.last_update[uid])
+        blocks_since = block - last_set_block
+        # Do not page while the official epoch is still in progress. Once
+        # it rolls over, a last_update older than that completed epoch's
+        # start proves the validator did not submit anywhere in the epoch.
+        if last_set_block < completed_epoch_start:
+            problems.append(
+                f"weight update missed completed epoch {completed_epoch_index} "
+                f"({blocks_since} blocks since last set)"
             )
-            label = display_label(role, fallback_label, identity_name)
-            if not bool(mg.validator_permit[uid]):
-                problems.append("validator permit lost")
-                incident_keys.append("validator_permit_lost")
-            if not bool(mg.active[uid]):
-                problems.append("validator inactive")
-                incident_keys.append("validator_inactive")
-            last_set_block = int(mg.last_update[uid])
-            blocks_since = block - last_set_block
-            # Do not page while the official epoch is still in progress. Once
-            # it rolls over, a last_update older than that completed epoch's
-            # start proves the validator did not submit anywhere in the epoch.
-            if last_set_block < completed_epoch_start:
-                problems.append(
-                    f"weight update missed completed epoch {completed_epoch_index} "
-                    f"({blocks_since} blocks since last set)"
-                )
-                incident_keys.append(f"weight_update_stale:{last_set_block}")
-        if uid is None:
-            label = fallback_label
+            incident_keys.append(f"weight_update_stale:{last_set_block}")
         # Deduplicate by stable validator identity and incident evidence, never
         # by epoch or UID. Resolved incidents are removed from state so a later
         # recurrence can alert again.

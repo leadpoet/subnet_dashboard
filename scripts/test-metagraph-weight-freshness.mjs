@@ -519,9 +519,16 @@ class Subtensor:
     'weight issues should render once in the detailed list without duplicate summary pills',
   )
   assert.doesNotMatch(weightsAlertsSource, /rounded-full border border-red-500\/50/)
+  assert.match(weightsAlertsSource, /if \(uid === undefined\) return \[\]/)
+  assert.doesNotMatch(weightsAlertsSource, /hotkey no longer registered/)
 
   const validatorRegistry = JSON.parse(
     await readFile(resolve('validator_registry.json'), 'utf8'),
+  )
+  assert.equal(
+    validatorRegistry.validators.some((validator) => validator.id === 'tao-com'),
+    false,
+    'retired TAO.com validator should not remain in the watched registry',
   )
   assert.ok(
     validatorRegistry.validators.every((validator) => (
