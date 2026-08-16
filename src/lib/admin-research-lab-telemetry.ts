@@ -729,6 +729,91 @@ export type AdminLabFunnelDetail = {
   scored: number
 }
 
+export type AdminLabPublishedBenchmarkIcpSummary = {
+  icpRef: string
+  icpHash: string | null
+  score: number | null
+  status: string
+  failureReason: string | null
+  hardFailure: boolean
+  funnel: AdminLabFunnelDetail | null
+  companyCount: number
+}
+
+/**
+ * Normalize the authoritative per-ICP rows retained in a published private
+ * benchmark's score_summary_doc. Execution telemetry can be absent for older
+ * or degraded runs, but a published aggregate still has to be traceable to
+ * these stored inputs.
+ */
+export function parseAdminLabPublishedBenchmarkIcpSummaries(
+  value: unknown,
+): AdminLabPublishedBenchmarkIcpSummary[] {
+  const doc = recordOrNull(value)
+  const rawSummaries = field(doc, 'per_icp_summaries', 'perIcpSummaries')
+  if (!Array.isArray(rawSummaries)) return []
+
+  return rawSummaries.flatMap((value) => {
+    const row = recordOrNull(value)
+    const icpRef = stringOrNull(field(row, 'icp_ref', 'icpRef'))
+    if (!row || !icpRef) return []
+
+    const diagnostics = recordOrNull(field(row, 'diagnostics'))
+    const funnel = parsePublishedBenchmarkFunnel(
+      recordOrNull(field(diagnostics, 'funnel')),
+    )
+    const sourcingFailed = booleanOrNull(
+      field(diagnostics, 'sourcing_failed', 'sourcingFailed'),
+    ) === true
+    const failureCategories = uniqueStringsFromUnknown(
+      field(diagnostics, 'failure_categories', 'failureCategories'),
+    )
+    const failureReason =
+      stringOrNull(field(row, 'failure_reason', 'failureReason')) ??
+      (failureCategories.length > 0 ? failureCategories.join(', ') : null) ??
+      (sourcingFailed ? 'Sourcing failed.' : null)
+    const explicitStatus = stringOrNull(field(row, 'status'))?.toLowerCase()
+    const status = explicitStatus
+      ?? (sourcingFailed
+        ? 'failed'
+        : failureReason
+          ? 'completed_with_errors'
+          : 'completed')
+
+    return [{
+      icpRef,
+      icpHash: stringOrNull(field(row, 'icp_hash', 'icpHash')),
+      score: finiteNumberOrNull(
+        field(row, 'score', 'per_icp_score', 'perIcpScore', 'candidate_per_icp_score'),
+      ),
+      status,
+      failureReason,
+      hardFailure:
+        booleanOrNull(field(row, 'hard_failure', 'hardFailure'))
+        ?? (sourcingFailed || status === 'failed'),
+      funnel,
+      companyCount:
+        nonNegativeIntegerOrNull(field(row, 'company_count', 'companyCount'))
+        ?? funnel?.scored
+        ?? 0,
+    }]
+  })
+}
+
+function parsePublishedBenchmarkFunnel(
+  value: Record<string, unknown> | null,
+): AdminLabFunnelDetail | null {
+  if (!value) return null
+  const result: AdminLabFunnelDetail = {
+    sourced: nonNegativeIntegerOrNull(field(value, 'sourced')) ?? 0,
+    fitPass: nonNegativeIntegerOrNull(field(value, 'fit_pass', 'fitPass')) ?? 0,
+    verified: nonNegativeIntegerOrNull(field(value, 'verified')) ?? 0,
+    intentValid: nonNegativeIntegerOrNull(field(value, 'intent_valid', 'intentValid')) ?? 0,
+    scored: nonNegativeIntegerOrNull(field(value, 'scored')) ?? 0,
+  }
+  return result
+}
+
 export type AdminLabIntentSignalDetail = {
   text: string
   category: string | null

@@ -59,6 +59,7 @@ import {
   normalizeAdminLabCompanyIntent,
   normalizeAdminLabGatewayControl,
   parseAdminLabScoreBundleDiagnostics,
+  parseAdminLabPublishedBenchmarkIcpSummaries,
   type AdminLabCandidateArtifactDetail,
   type AdminLabCandidateRunDetail,
   type AdminLabBenchmarkRunSummary,
@@ -69,6 +70,7 @@ import {
   type AdminLabFunnelDetail,
   type AdminLabIcpDetail,
   type AdminLabIntentSignalDetail,
+  type AdminLabPublishedBenchmarkIcpSummary,
   type AdminLabRunDetail,
   type AdminLabScoreBundleDiagnostics,
   type AdminLabTelemetryState,
@@ -2515,61 +2517,95 @@ async function buildDailyBenchmarkTelemetry(input: {
   const attempt = latestRun
     ? Math.max(0, Math.round(numberOr(latestRun.run_attempt, 0)))
     : null
-  const [providerRows, companyRows] = await Promise.all([
+  const [providerRows, companyRows, publishedIcpSummaries] = await Promise.all([
     execution?.relatedScoringRunIds.length
       ? fetchBenchmarkProviderEnrichment(input.supabase, execution.relatedScoringRunIds)
       : Promise.resolve([]),
     benchmarkDate && attempt !== null
       ? fetchBenchmarkCompanyEnrichment(input.supabase, benchmarkDate, attempt)
       : Promise.resolve([]),
+    publishedBundleId
+      ? fetchPublishedBenchmarkIcpSummaries(input.supabase, publishedBundleId)
+      : Promise.resolve([]),
   ])
   const providerByIcp = rollupCostsByIcp(providerRows)
   const companiesByIcp = groupCompaniesByIcp(companyRows)
   const canonicalRows = canonicalizeResearchLabTelemetryRows(input.telemetryRows)
-  const icps = canonicalRows.map((row, index): AdminLabIcpDetail => {
-    const icpRef = stringOr(row.icp_ref) ?? `telemetry-unit-${index + 1}`
+  const telemetryByIcp = new Map(canonicalRows.flatMap((row) => {
+    const icpRef = stringOr(row.icp_ref)
+    return icpRef ? [[icpRef, row] as const] : []
+  }))
+  const publishedByIcp = new Map(publishedIcpSummaries.map((row) => [row.icpRef, row]))
+  const icpRefs = uniqueStrings([
+    ...publishedIcpSummaries.map((row) => row.icpRef),
+    ...canonicalRows.map((row) => stringOr(row.icp_ref) ?? null),
+    ...providerRows.map((row) => stringOr(row.icp_ref) ?? null),
+    ...companyRows.map((row) => stringOr(row.icp_ref) ?? null),
+  ])
+  const icps = icpRefs.map((icpRef): AdminLabIcpDetail => {
+    const row = telemetryByIcp.get(icpRef)
+    const published = publishedByIcp.get(icpRef)
     const metadata = input.metadata.byRef.get(icpRef)
     const provider = providerByIcp.get(icpRef) ?? emptyCostRollup()
     const companies = companiesByIcp.get(icpRef) ?? []
-    const status = (stringOr(row.status) ?? 'unknown').toLowerCase()
-    const runtimeStartedAt = isoStringOr(row.started_at) ?? null
-    const runtimeEndedAt = isoStringOr(row.finished_at) ?? null
-    const runtimeSeconds = finiteNumberOrNull(row.observed_runtime_seconds)
+    const status = (stringOr(row?.status) ?? published?.status ?? 'observed').toLowerCase()
+    const runtimeStartedAt = isoStringOr(row?.started_at) ?? provider.firstActivityAt
+    const runtimeEndedAt = isoStringOr(row?.finished_at) ?? provider.lastActivityAt
+    const runtimeSeconds = finiteNumberOrNull(row?.observed_runtime_seconds)
     return {
       icpRef,
-      icpHash: null,
+      icpHash: published?.icpHash ?? stringOr(providerRows.find((item) => item.icp_ref === icpRef)?.icp_hash) ?? null,
       label: icpLabel(metadata, icpRef),
       industry: metadata?.industry ?? null,
       subIndustry: metadata?.subIndustry ?? null,
       status,
-      score: finiteNumberOrNull(row.score),
+      score: finiteNumberOrNull(row?.score) ?? published?.score ?? null,
       baseScore: null,
       delta: null,
-      spendUsd: finiteNumberOrNull(row.cumulative_spend_usd) ?? 0,
-      budgetUsd: finiteNumberOrNull(row.cap_usd),
+      spendUsd: finiteNumberOrNull(row?.cumulative_spend_usd) ?? provider.spendUsd,
+      budgetUsd: finiteNumberOrNull(row?.cap_usd) ?? provider.budgetUsd,
       providerEventCount: provider.eventCount,
       errorCount: provider.errorCount + (['failed', 'cancelled'].includes(status) ? 1 : 0),
       runtimeStartedAt,
       runtimeEndedAt,
       lastActivityAt:
-        isoStringOr(row.finished_at)
-        ?? isoStringOr(row.last_heartbeat_at)
+        isoStringOr(row?.finished_at)
+        ?? isoStringOr(row?.last_heartbeat_at)
+        ?? provider.lastActivityAt
         ?? runtimeStartedAt,
       runtimeMs: runtimeSeconds === null ? null : Math.max(0, Math.round(runtimeSeconds * 1_000)),
       isInProgress: ['held', 'queued', 'started', 'heartbeat', 'sourcing_completed', 'scoring_started'].includes(status),
-      failureReason: stringOr(row.failure_category) ?? null,
-      hardFailure: ['failed', 'cancelled'].includes(status),
-      funnel: null,
+      failureReason: stringOr(row?.failure_category) ?? published?.failureReason ?? null,
+      hardFailure: ['failed', 'cancelled'].includes(status) || (published?.hardFailure ?? false),
+      funnel: published?.funnel ?? null,
       intentSignals: metadata?.intentSignals ?? [],
-      companyScoreCount:
-        finiteNumberOrNull(row.scored_company_count)
-        ?? companies.length,
+      companyScoreCount: Math.max(
+        finiteNumberOrNull(row?.scored_company_count) ?? 0,
+        published?.companyCount ?? 0,
+        companies.length,
+      ),
       companies,
     }
   })
   const stateInfo = benchmarkExecutionState(execution, publicationStatus)
-  const expectedUnits = execution?.expectedUnits ?? null
-  const resolvedUnits = execution?.resolvedUnits ?? null
+  const publishedStatusCount = (status: string) => publishedIcpSummaries.filter(
+    (row) => row.status === status,
+  ).length
+  const expectedUnits = execution?.expectedUnits ?? (publishedIcpSummaries.length || null)
+  const resolvedUnits = execution?.resolvedUnits ?? (publishedIcpSummaries.length || null)
+  const completedUnits = execution?.completedUnits
+    ?? (publishedIcpSummaries.length
+      ? publishedIcpSummaries.length
+        - publishedStatusCount('failed')
+        - publishedStatusCount('skipped')
+        - publishedStatusCount('cancelled')
+      : null)
+  const skippedUnits = execution?.skippedUnits
+    ?? (publishedIcpSummaries.length ? publishedStatusCount('skipped') : null)
+  const failedUnits = execution?.failedUnits
+    ?? (publishedIcpSummaries.length ? publishedStatusCount('failed') : null)
+  const cancelledUnits = execution?.cancelledUnits
+    ?? (publishedIcpSummaries.length ? publishedStatusCount('cancelled') : null)
   const errors = buildProviderErrors(providerRows)
   const lastActivityAt = execution?.completedAt
     ?? execution?.lastHeartbeatAt
@@ -2617,22 +2653,46 @@ async function buildDailyBenchmarkTelemetry(input: {
       expectedUnits === null || resolvedUnits === null
         ? null
         : Math.max(0, expectedUnits - resolvedUnits),
-    completedIcpCount: execution?.completedUnits ?? null,
-    skippedIcpCount: execution?.skippedUnits ?? null,
-    failedIcpCount: execution?.failedUnits ?? null,
-    cancelledIcpCount: execution?.cancelledUnits ?? null,
-    progressPercent: execution?.progressPercent ?? null,
+    completedIcpCount: completedUnits,
+    skippedIcpCount: skippedUnits,
+    failedIcpCount: failedUnits,
+    cancelledIcpCount: cancelledUnits,
+    progressPercent: execution?.progressPercent
+      ?? (expectedUnits && resolvedUnits !== null
+        ? Math.min(100, roundTelemetry((resolvedUnits / expectedUnits) * 100))
+        : null),
     publishedScore: finiteNumberOrNull(latestPublishedReport?.aggregate_score),
     spendUsd: execution?.spendUsd ?? null,
     budgetUsd: execution?.capUsd ?? null,
     providerEventCount: providerRows.length,
-    companyCount: companyRows.length,
+    companyCount: companyRows.length || publishedIcpSummaries.reduce(
+      (sum, row) => sum + row.companyCount,
+      0,
+    ),
     errorCount: errors.reduce((sum, item) => sum + item.count, 0)
-      + (execution?.failedUnits ?? 0)
-      + (execution?.cancelledUnits ?? 0),
+      + (failedUnits ?? 0)
+      + (cancelledUnits ?? 0),
     icps,
     errors,
   }
+}
+
+async function fetchPublishedBenchmarkIcpSummaries(
+  supabase: ReturnType<typeof getAdminSupabase>,
+  benchmarkBundleId: string,
+): Promise<AdminLabPublishedBenchmarkIcpSummary[]> {
+  const { data, error } = await supabase
+    .from('research_lab_private_model_benchmark_current')
+    .select('score_summary_doc')
+    .eq('benchmark_bundle_id', benchmarkBundleId)
+    .limit(1)
+
+  if (error) {
+    console.warn('[admin:research-lab] published per-ICP benchmark summary unavailable', error.message)
+    return []
+  }
+  const row = ((data ?? []) as Array<Record<string, unknown>>)[0]
+  return parseAdminLabPublishedBenchmarkIcpSummaries(row?.score_summary_doc)
 }
 
 function benchmarkExecutionState(

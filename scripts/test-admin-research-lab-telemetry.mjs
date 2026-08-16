@@ -29,6 +29,7 @@ try {
   const {
     normalizeAdminLabCompanyIntent,
     normalizeAdminLabGatewayControl,
+    parseAdminLabPublishedBenchmarkIcpSummaries,
   } = require(join(outDir, 'admin-research-lab-telemetry.js'))
   assert.deepEqual(
     normalizeAdminLabCompanyIntent({
@@ -81,6 +82,60 @@ try {
     'active',
   )
   assert.equal(normalizeAdminLabGatewayControl(null).state, 'unknown')
+  assert.deepEqual(
+    parseAdminLabPublishedBenchmarkIcpSummaries({
+      per_icp_summaries: [
+        {
+          icp_ref: ' qualification_private_icp_sets:20260816:icp_001 ',
+          icp_hash: 'sha256:one',
+          score: '10.8',
+          company_count: 1,
+          diagnostics: {
+            sourcing_failed: false,
+            funnel: {
+              sourced: 3,
+              fit_pass: 1,
+              verified: 1,
+              intent_valid: 1,
+              scored: 1,
+            },
+          },
+        },
+        {
+          icpRef: 'qualification_private_icp_sets:20260816:icp_002',
+          perIcpScore: 0,
+          diagnostics: {
+            sourcingFailed: true,
+            failureCategories: ['provider_error'],
+          },
+        },
+        { score: 99 },
+        null,
+      ],
+    }),
+    [
+      {
+        icpRef: 'qualification_private_icp_sets:20260816:icp_001',
+        icpHash: 'sha256:one',
+        score: 10.8,
+        status: 'completed',
+        failureReason: null,
+        hardFailure: false,
+        funnel: { sourced: 3, fitPass: 1, verified: 1, intentValid: 1, scored: 1 },
+        companyCount: 1,
+      },
+      {
+        icpRef: 'qualification_private_icp_sets:20260816:icp_002',
+        icpHash: null,
+        score: 0,
+        status: 'failed',
+        failureReason: 'provider_error',
+        hardFailure: true,
+        funnel: null,
+        companyCount: 0,
+      },
+    ],
+  )
 
   const routeSource = await readFile(resolve('src/app/api/admin/research-lab/route.ts'), 'utf8')
   assert.match(routeSource, /'intent_claimed_signal'/)
@@ -95,6 +150,8 @@ try {
   assert.match(routeSource, /normalizeAdminLabCompanyIntent\(row\)/)
   assert.match(routeSource, /research_lab_gateway_control_current/)
   assert.match(routeSource, /research_lab_scoring_run_current/)
+  assert.match(routeSource, /fetchPublishedBenchmarkIcpSummaries/)
+  assert.match(routeSource, /\.select\('score_summary_doc'\)/)
   assert.match(routeSource, /\.eq\('run_type', 'candidate_scoring'\)/)
   assert.match(routeSource, /isoStringOr\(row\.last_heartbeat_at\)/)
   assert.match(routeSource, /latestIso\(loop\.lastActivityAt, scoreMetrics\?\.lastScoringAt\)/)
