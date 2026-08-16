@@ -1,6 +1,7 @@
 import type {
   ResearchLabBenchmarkCorrelation,
   ResearchLabScoringExecutionSummary,
+  ResearchLabScoringTelemetryRow,
 } from './research-lab-scoring-telemetry'
 
 export type AdminLabTelemetryState =
@@ -735,6 +736,7 @@ export type AdminLabPublishedBenchmarkIcpSummary = {
   score: number | null
   spendUsd: number | null
   budgetUsd: number | null
+  failedProviderCallCount: number | null
   status: string
   failureReason: string | null
   hardFailure: boolean
@@ -797,6 +799,9 @@ export function parseAdminLabPublishedBenchmarkIcpSummaries(
       budgetUsd: nonNegativeFiniteNumberOrNull(
         field(providerCostSummary, 'cap_usd', 'capUsd'),
       ),
+      failedProviderCallCount: nonNegativeIntegerOrNull(
+        field(providerCostSummary, 'failed_call_count', 'failedCallCount'),
+      ),
       status,
       failureReason,
       hardFailure:
@@ -853,8 +858,11 @@ export type AdminLabIcpDetail = {
   errorCount: number
   runtimeStartedAt: string | null
   runtimeEndedAt: string | null
+  /** Completion of this ICP in the displayed run, separate from a reused source runtime. */
+  completionAt: string | null
   lastActivityAt: string | null
   runtimeMs: number | null
+  runtimeSource?: 'source_execution' | 'current_execution' | 'checkpoint_reuse' | 'unavailable'
   isInProgress: boolean
   failureReason: string | null
   hardFailure: boolean
@@ -862,6 +870,59 @@ export type AdminLabIcpDetail = {
   intentSignals: AdminLabIntentSignalDetail[]
   companyScoreCount: number
   companies: AdminLabCompanyDetail[]
+}
+
+export function resolveAdminLabBenchmarkSourceRow(
+  currentRow: ResearchLabScoringTelemetryRow,
+  sourceRows: ResearchLabScoringTelemetryRow[],
+  fallbackBenchmarkId: string | null,
+): ResearchLabScoringTelemetryRow {
+  if (stringOrNull(currentRow.execution_kind) !== 'checkpoint_reuse') return currentRow
+  const benchmarkId = stringOrNull(currentRow.benchmark_id) ?? fallbackBenchmarkId
+  const resultRowHash = stringOrNull(currentRow.result_row_hash)
+  const icpRef = stringOrNull(currentRow.icp_ref)
+  if (!benchmarkId || !resultRowHash || !icpRef) return currentRow
+  return sourceRows
+    .filter((row) =>
+      stringOrNull(row.benchmark_id) === benchmarkId
+      && stringOrNull(row.icp_ref) === icpRef
+      && stringOrNull(row.result_row_hash) === resultRowHash
+      && stringOrNull(row.execution_kind) === 'model_invocation'
+      && stringOrNull(row.status)?.toLowerCase() === 'completed',
+    )
+    .sort(compareAdminLabSourceCompletion)[0] ?? currentRow
+}
+
+export function orderAdminLabIcpCompletionEntries<T extends { icpRef: string }>(
+  entries: Array<{ icp: T; completionAt: string | null }>,
+): Array<{ icp: T; completionAt: string | null }> {
+  return [...entries].sort((left, right) => {
+    const leftTime = timestampOrNull(left.completionAt)
+    const rightTime = timestampOrNull(right.completionAt)
+    if (leftTime === null && rightTime !== null) return 1
+    if (leftTime !== null && rightTime === null) return -1
+    if (leftTime !== null && rightTime !== null && leftTime !== rightTime) return leftTime - rightTime
+    return left.icp.icpRef.localeCompare(right.icp.icpRef)
+  })
+}
+
+function compareAdminLabSourceCompletion(
+  left: ResearchLabScoringTelemetryRow,
+  right: ResearchLabScoringTelemetryRow,
+): number {
+  const finishedAt = (timestampOrNull(left.finished_at) ?? 0) - (timestampOrNull(right.finished_at) ?? 0)
+  if (finishedAt !== 0) return finishedAt
+  const createdAt = (timestampOrNull(left.created_at) ?? 0) - (timestampOrNull(right.created_at) ?? 0)
+  if (createdAt !== 0) return createdAt
+  return `${stringOrNull(left.scoring_run_id) ?? ''}\u0000${stringOrNull(left.icp_execution_id) ?? ''}`
+    .localeCompare(`${stringOrNull(right.scoring_run_id) ?? ''}\u0000${stringOrNull(right.icp_execution_id) ?? ''}`)
+}
+
+function timestampOrNull(value: unknown): number | null {
+  const iso = isoStringOrNull(value)
+  if (!iso) return null
+  const timestamp = new Date(iso).getTime()
+  return Number.isFinite(timestamp) ? timestamp : null
 }
 
 export type AdminLabDailyBenchmark = {

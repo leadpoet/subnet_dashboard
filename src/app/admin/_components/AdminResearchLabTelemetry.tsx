@@ -55,7 +55,7 @@ export function DailyBenchmarkTelemetry({
           <TelemetryMetric label="Spend" value={benchmark.spendUsd === null ? '—' : formatUsd(benchmark.spendUsd)} />
           <TelemetryMetric label="Budget" value={benchmark.budgetUsd === null ? '—' : formatUsd(benchmark.budgetUsd)} />
           <TelemetryMetric label="Companies" value={benchmark.companyCount} />
-          <TelemetryMetric label="Provider calls" value={benchmark.providerEventCount} />
+          <TelemetryMetric label="Current execution provider calls" value={benchmark.providerEventCount} />
         </div>
 
         <div className="mt-4">
@@ -103,7 +103,7 @@ export function DailyBenchmarkTelemetry({
                     ICP details and live errors
                   </div>
                   <div className="mt-1 text-[10px]" style={{ color: 'var(--text-tertiary)' }}>
-                    {benchmark.icps.length} ICPs · {benchmark.errorCount.toLocaleString()} error events · collapsed by default
+                    {benchmark.icps.length} ICPs · {benchmark.errorCount.toLocaleString()} published provider failures · raw current-execution errors below
                   </div>
                 </div>
                 <div className="flex shrink-0 items-center gap-2 text-[10px] font-medium uppercase tracking-[0.1em]" style={{ color: 'var(--text-secondary)' }}>
@@ -115,7 +115,7 @@ export function DailyBenchmarkTelemetry({
             </summary>
             <div className="grid gap-4 border-t p-3 xl:grid-cols-[minmax(0,1fr)_340px]" style={{ borderColor: 'var(--surface-border)' }}>
               <IcpTelemetryList icps={benchmark.icps} scoreLabel="Current score" />
-              <ErrorStream errors={benchmark.errors} title="Live errors" />
+              <ErrorStream errors={benchmark.errors} title="Current-execution raw provider errors" />
             </div>
           </details>
         ) : (
@@ -913,11 +913,12 @@ function IcpTelemetryList({ icps, scoreLabel }: { icps: AdminLabIcpDetail[]; sco
   return (
     <div className="min-w-0 overflow-hidden rounded-lg border" style={{ borderColor: 'var(--surface-border)' }}>
       <div className="grid grid-cols-[minmax(170px,1.5fr)_72px_88px_74px_86px_64px_24px] gap-2 border-b px-3 py-2 text-[9px] uppercase tracking-[0.12em]" style={{ borderColor: 'var(--surface-border)', color: 'var(--text-tertiary)' }}>
-        <span>ICP</span><span>{scoreLabel}</span><span>Spend / cap</span><span>Companies</span><span>Runtime</span><span>Errors</span><span />
+        <span>ICP</span><span>{scoreLabel}</span><span>Spend / cap</span><span>Companies</span><span>Runtime / done</span><span>Provider errors</span><span />
       </div>
       <div className="max-h-[620px] overflow-auto">
         {icps.map((icp) => {
           const runtime = formatIcpRuntime(icp, nowMs)
+          const completionAt = icp.completionAt
           return (
           <details
             key={icp.icpRef}
@@ -953,8 +954,12 @@ function IcpTelemetryList({ icps, scoreLabel }: { icps: AdminLabIcpDetail[]; sco
                 <div className="text-xs tabular-nums" style={{ color: 'var(--text-secondary)' }}>{Math.max(icp.companies.length, icp.companyScoreCount)}</div>
                 <div className="font-mono text-[10px] tabular-nums" style={{ color: icp.isInProgress ? 'var(--gold)' : 'var(--text-secondary)' }}>
                   <span suppressHydrationWarning>{runtime}</span>
-                  <div className="text-[8px] uppercase tracking-[0.08em]" style={{ color: icp.isInProgress ? 'var(--gold)' : 'var(--text-tertiary)' }}>
-                    {icp.isInProgress ? 'counting' : icp.runtimeStartedAt ? 'complete' : 'not started'}
+                  <div suppressHydrationWarning className="text-[8px] uppercase tracking-[0.08em]" style={{ color: icp.isInProgress ? 'var(--gold)' : 'var(--text-tertiary)' }}>
+                    {icp.isInProgress
+                      ? 'counting'
+                      : completionAt
+                        ? formatCompletionClock(completionAt)
+                        : 'not recorded'}
                   </div>
                 </div>
                 <div className={cn('text-xs tabular-nums', icp.errorCount > 0 ? 'text-burgundy' : '')} style={icp.errorCount > 0 ? undefined : { color: 'var(--text-secondary)' }}>{icp.errorCount}</div>
@@ -964,12 +969,12 @@ function IcpTelemetryList({ icps, scoreLabel }: { icps: AdminLabIcpDetail[]; sco
             <div className="border-t px-3 py-3" style={{ borderColor: 'var(--surface-border)', background: 'rgba(255,255,255,0.018)' }}>
               <div className="grid gap-2 sm:grid-cols-4 xl:grid-cols-8">
                 <TelemetryMetric label="Status" value={readable(icp.status)} />
-                <TelemetryMetric label="Runtime" value={runtime} />
+                <TelemetryMetric label={icp.runtimeSource === 'source_execution' ? 'Source runtime' : 'Runtime'} value={runtime} />
                 <TelemetryMetric label="Started" value={formatDateTime(icp.runtimeStartedAt)} />
-                <TelemetryMetric label="Last event" value={formatDateTime(icp.lastActivityAt)} />
+                <TelemetryMetric label="Completed in this run" value={formatDateTime(completionAt)} />
                 <TelemetryMetric label="Base" value={formatScore(icp.baseScore)} />
                 <TelemetryMetric label="Delta" value={formatSigned(icp.delta)} />
-                <TelemetryMetric label="Provider calls" value={icp.providerEventCount} />
+                <TelemetryMetric label="Current execution provider calls" value={icp.providerEventCount} />
                 <TelemetryMetric label="Company score rows" value={icp.companyScoreCount} />
               </div>
               <IntentSignalList icp={icp} />
@@ -1017,6 +1022,12 @@ function formatIcpRuntime(icp: AdminLabIcpDetail, nowMs: number): string {
   const remainder = seconds % 60
   if (hours > 0) return `${hours}:${String(minutes).padStart(2, '0')}:${String(remainder).padStart(2, '0')}`
   return `${minutes}:${String(remainder).padStart(2, '0')}`
+}
+
+function formatCompletionClock(value: string): string {
+  const date = new Date(value)
+  if (!Number.isFinite(date.getTime())) return 'unknown'
+  return `${String(date.getUTCHours()).padStart(2, '0')}:${String(date.getUTCMinutes()).padStart(2, '0')} UTC`
 }
 
 function IntentSignalList({ icp }: { icp: AdminLabIcpDetail }) {

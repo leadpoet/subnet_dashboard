@@ -29,7 +29,9 @@ try {
   const {
     normalizeAdminLabCompanyIntent,
     normalizeAdminLabGatewayControl,
+    orderAdminLabIcpCompletionEntries,
     parseAdminLabPublishedBenchmarkIcpSummaries,
+    resolveAdminLabBenchmarkSourceRow,
   } = require(join(outDir, 'admin-research-lab-telemetry.js'))
   assert.deepEqual(
     normalizeAdminLabCompanyIntent({
@@ -82,6 +84,54 @@ try {
     'active',
   )
   assert.equal(normalizeAdminLabGatewayControl(null).state, 'unknown')
+  const checkpointRow = {
+    benchmark_id: 'benchmark:one',
+    icp_ref: 'icp:one',
+    result_row_hash: 'sha256:result',
+    execution_kind: 'checkpoint_reuse',
+    finished_at: '2026-08-16T20:00:00Z',
+  }
+  const wrongSource = {
+    benchmark_id: 'benchmark:other',
+    icp_ref: 'icp:one',
+    result_row_hash: 'sha256:result',
+    execution_kind: 'model_invocation',
+    status: 'completed',
+    finished_at: '2026-08-16T09:00:00Z',
+  }
+  const laterSource = {
+    benchmark_id: 'benchmark:one',
+    icp_ref: 'icp:one',
+    result_row_hash: 'sha256:result',
+    execution_kind: 'model_invocation',
+    status: 'completed',
+    finished_at: '2026-08-16T11:00:00Z',
+  }
+  const firstSource = {
+    ...laterSource,
+    finished_at: '2026-08-16T10:00:00Z',
+  }
+  assert.equal(
+    resolveAdminLabBenchmarkSourceRow(
+      checkpointRow,
+      [wrongSource, laterSource, firstSource],
+      null,
+    ),
+    firstSource,
+  )
+  assert.equal(
+    resolveAdminLabBenchmarkSourceRow(laterSource, [firstSource], null),
+    laterSource,
+    'a model invocation must keep its own runtime',
+  )
+  assert.deepEqual(
+    orderAdminLabIcpCompletionEntries([
+      { icp: { icpRef: 'icp:unknown' }, completionAt: null },
+      { icp: { icpRef: 'icp:last' }, completionAt: '2026-08-16T12:00:00Z' },
+      { icp: { icpRef: 'icp:first' }, completionAt: '2026-08-16T10:00:00Z' },
+    ]).map((entry) => entry.icp.icpRef),
+    ['icp:first', 'icp:last', 'icp:unknown'],
+  )
   assert.deepEqual(
     parseAdminLabPublishedBenchmarkIcpSummaries({
       per_icp_summaries: [
@@ -93,7 +143,7 @@ try {
           diagnostics: {
             sourcing_failed: false,
             provider_cost_total_usd: '12.3456',
-            provider_cost_summary: { cap_usd: '25' },
+            provider_cost_summary: { cap_usd: '25', failed_call_count: 2 },
             funnel: {
               sourced: 3,
               fit_pass: 1,
@@ -109,7 +159,7 @@ try {
           diagnostics: {
             sourcingFailed: true,
             providerCostTotalUsd: 0,
-            providerCostSummary: { capUsd: 0 },
+            providerCostSummary: { capUsd: 0, failedCallCount: 0 },
             failureCategories: ['provider_error'],
           },
         },
@@ -118,7 +168,7 @@ try {
           score: 0,
           diagnostics: {
             provider_cost_total_usd: -1,
-            provider_cost_summary: { cap_usd: 'not-a-number' },
+            provider_cost_summary: { cap_usd: 'not-a-number', failed_call_count: -2 },
           },
         },
         { score: 99 },
@@ -132,6 +182,7 @@ try {
         score: 10.8,
         spendUsd: 12.3456,
         budgetUsd: 25,
+        failedProviderCallCount: 2,
         status: 'completed',
         failureReason: null,
         hardFailure: false,
@@ -144,6 +195,7 @@ try {
         score: 0,
         spendUsd: 0,
         budgetUsd: 0,
+        failedProviderCallCount: 0,
         status: 'failed',
         failureReason: 'provider_error',
         hardFailure: true,
@@ -156,6 +208,7 @@ try {
         score: 0,
         spendUsd: null,
         budgetUsd: null,
+        failedProviderCallCount: null,
         status: 'completed',
         failureReason: null,
         hardFailure: false,
@@ -180,6 +233,15 @@ try {
   assert.match(routeSource, /research_lab_scoring_run_current/)
   assert.match(routeSource, /fetchPublishedBenchmarkIcpSummaries/)
   assert.match(routeSource, /\.select\('score_summary_doc'\)/)
+  assert.match(routeSource, /research_lab_scoring_icp_execution_current/)
+  assert.match(routeSource, /current_execution_status/)
+  assert.match(routeSource, /\.eq\('execution_kind', 'model_invocation'\)/)
+  assert.match(routeSource, /\.in\('result_row_hash', hashBatch\)/)
+  assert.match(routeSource, /expectation\.benchmarkId\s*\?\s*exactBenchmarkId\s*:\s*exactDateAndWindow/)
+  assert.match(routeSource, /resolveAdminLabBenchmarkSourceRow\(row, sourceLineageRows/)
+  assert.match(routeSource, /orderAdminLabIcpCompletionEntries\(icpsWithCompletion\)/)
+  assert.match(routeSource, /const completionAt = isoStringOr\(row\?\.finished_at\) \?\? null/)
+  assert.match(routeSource, /icps\.reduce\(\(sum, icp\) => sum \+ icp\.errorCount, 0\)/)
   assert.match(routeSource, /published\?\.spendUsd\s*\?\?\s*finiteNumberOrNull\(row\?\.cumulative_spend_usd\)\s*\?\?\s*provider\.spendUsd/)
   assert.match(routeSource, /published\?\.budgetUsd\s*\?\?\s*finiteNumberOrNull\(row\?\.cap_usd\)\s*\?\?\s*provider\.budgetUsd/)
   assert.match(routeSource, /\.eq\('run_type', 'candidate_scoring'\)/)
@@ -241,7 +303,19 @@ try {
   assert.match(routeSource, /api\.github\.com\/repos\/\$\{LEADPOET_REPOSITORY_OWNER\}\/\$\{LEADPOET_REPOSITORY_NAME\}\/commits/)
   assert.match(routeSource, /next: \{ revalidate: 300 \}/)
 
+  const helperSource = await readFile(resolve('src/lib/admin-research-lab-telemetry.ts'), 'utf8')
+  assert.match(helperSource, /stringOrNull\(row\.icp_ref\) === icpRef/)
+  assert.match(helperSource, /stringOrNull\(row\.result_row_hash\) === resultRowHash/)
+  assert.match(helperSource, /stringOrNull\(row\.status\)\?\.toLowerCase\(\) === 'completed'/)
+
   const componentSource = await readFile(resolve('src/app/admin/_components/AdminResearchLabTelemetry.tsx'), 'utf8')
+  assert.match(componentSource, /Current execution provider calls/)
+  assert.match(componentSource, /Current-execution raw provider errors/)
+  assert.match(componentSource, /published provider failures · raw current-execution errors below/)
+  assert.match(componentSource, /Runtime \/ done/)
+  assert.match(componentSource, /formatCompletionClock/)
+  assert.match(componentSource, /const completionAt = icp\.completionAt/)
+  assert.doesNotMatch(componentSource, /const completionAt = icp\.completionAt \?\? icp\.runtimeEndedAt/)
   assert.match(componentSource, /Model intent/)
   assert.match(componentSource, /View intent evidence ↗/)
   assert.match(componentSource, /score=\{company\.intentScore\}/)

@@ -58,8 +58,10 @@ import { getRuntimeSecretEnvironment } from '@/lib/runtime-secret-environment'
 import {
   normalizeAdminLabCompanyIntent,
   normalizeAdminLabGatewayControl,
+  orderAdminLabIcpCompletionEntries,
   parseAdminLabScoreBundleDiagnostics,
   parseAdminLabPublishedBenchmarkIcpSummaries,
+  resolveAdminLabBenchmarkSourceRow,
   type AdminLabCandidateArtifactDetail,
   type AdminLabCandidateRunDetail,
   type AdminLabBenchmarkRunSummary,
@@ -131,6 +133,8 @@ const DEGRADED_DATA_MS = 60 * 60 * 1000
 const SUPABASE_IN_FILTER_BATCH_SIZE = 100
 const TELEMETRY_PAGE_SIZE = 1_000
 const BENCHMARK_HISTORY_LIMIT = 20
+const BENCHMARK_SOURCE_LINEAGE_MAX_BENCHMARKS = 8
+const BENCHMARK_SOURCE_LINEAGE_HASH_BATCH_SIZE = 100
 const CHAMPION_LIMIT = 10
 const COMPANY_TELEMETRY_SELECT = [
   'label_id',
@@ -2316,7 +2320,7 @@ async function fetchBenchmarkTelemetryForRunIds(
         'benchmark V2 ICP telemetry',
         (from, to) => supabase
           .from('research_lab_private_benchmark_dashboard_telemetry')
-          .select('telemetry_mode, scoring_id, scoring_run_id, icp_execution_id, icp_ref, model_role, phase, execution_kind, retry_round, status, score, sourced_company_count, scored_company_count, cumulative_spend_usd, cap_usd, failure_category, retryable, telemetry_degraded, started_at, last_heartbeat_at, finished_at, observed_runtime_seconds, checkpoint_ref, expected_units')
+          .select('telemetry_mode, scoring_id, scoring_run_id, benchmark_id, result_row_hash, icp_execution_id, icp_ref, model_role, phase, execution_kind, retry_round, status, score, sourced_company_count, scored_company_count, cumulative_spend_usd, cap_usd, failure_category, retryable, telemetry_degraded, started_at, last_heartbeat_at, finished_at, observed_runtime_seconds, checkpoint_ref, expected_units')
           .in('scoring_run_id', runIdBatch)
           .order('scoring_run_id', { ascending: true })
           .order('icp_ordinal', { ascending: true })
@@ -2340,7 +2344,7 @@ async function fetchBenchmarkTelemetryByScoringId(
       'legacy benchmark ICP telemetry',
       (from, to) => supabase
         .from('research_lab_private_benchmark_dashboard_telemetry')
-        .select('telemetry_mode, scoring_id, scoring_run_id, icp_execution_id, icp_ref, model_role, phase, execution_kind, retry_round, status, score, sourced_company_count, scored_company_count, cumulative_spend_usd, cap_usd, failure_category, retryable, telemetry_degraded, started_at, last_heartbeat_at, finished_at, observed_runtime_seconds, checkpoint_ref, expected_units')
+        .select('telemetry_mode, scoring_id, scoring_run_id, benchmark_id, result_row_hash, icp_execution_id, icp_ref, model_role, phase, execution_kind, retry_round, status, score, sourced_company_count, scored_company_count, cumulative_spend_usd, cap_usd, failure_category, retryable, telemetry_degraded, started_at, last_heartbeat_at, finished_at, observed_runtime_seconds, checkpoint_ref, expected_units')
         .eq('scoring_id', scoringId)
         .order('icp_ordinal', { ascending: true })
         .order('icp_ref', { ascending: true })
@@ -2350,6 +2354,143 @@ async function fetchBenchmarkTelemetryByScoringId(
     console.warn('[admin:research-lab] legacy benchmark telemetry unavailable', error)
     return []
   }
+}
+
+type BenchmarkSourceRunIdentity = {
+  scoring_run_id?: unknown
+  run_type?: unknown
+  benchmark_id?: unknown
+  benchmark_date?: unknown
+  rolling_window_hash?: unknown
+}
+
+type BenchmarkSourceExecutionRow = {
+  scoring_run_id?: unknown
+  scoring_id?: unknown
+  result_row_hash?: unknown
+  icp_execution_id?: unknown
+  icp_ref?: unknown
+  execution_kind?: unknown
+  current_execution_status?: unknown
+  started_at?: unknown
+  last_heartbeat_at?: unknown
+  finished_at?: unknown
+  observed_runtime_seconds?: unknown
+  created_at?: unknown
+}
+
+type BenchmarkSourceExpectation = {
+  benchmarkId: string | null
+  resultRowHash: string
+  icpRefs: Set<string>
+}
+
+async function fetchBenchmarkSourceLineage(
+  supabase: ReturnType<typeof getAdminSupabase>,
+  canonicalRows: ResearchLabScoringTelemetryRow[],
+  latestRun: ResearchLabScoringRunRow | undefined,
+): Promise<ResearchLabScoringTelemetryRow[]> {
+  const expectations = new Map<string, BenchmarkSourceExpectation>()
+  for (const row of canonicalRows) {
+    const resultRowHash = stringOr(row.result_row_hash)
+    const icpRef = stringOr(row.icp_ref)
+    if (!resultRowHash || !icpRef) continue
+    const benchmarkId = stringOr(row.benchmark_id) ?? stringOr(latestRun?.benchmark_id) ?? null
+    const key = `${benchmarkId ?? ''}\u0000${resultRowHash}`
+    const current = expectations.get(key) ?? {
+      benchmarkId,
+      resultRowHash,
+      icpRefs: new Set<string>(),
+    }
+    current.icpRefs.add(icpRef)
+    expectations.set(key, current)
+  }
+  if (expectations.size === 0) return []
+
+  const groupedByBenchmark = new Map<string, Set<string>>()
+  for (const expectation of [...expectations.values()].slice(0, BENCHMARK_SOURCE_LINEAGE_MAX_BENCHMARKS * BENCHMARK_SOURCE_LINEAGE_HASH_BATCH_SIZE)) {
+    const key = expectation.benchmarkId ?? ''
+    const hashes = groupedByBenchmark.get(key) ?? new Set<string>()
+    hashes.add(expectation.resultRowHash)
+    groupedByBenchmark.set(key, hashes)
+  }
+
+  const sourceRows: ResearchLabScoringTelemetryRow[] = []
+  for (const [, hashes] of [...groupedByBenchmark.entries()].slice(0, BENCHMARK_SOURCE_LINEAGE_MAX_BENCHMARKS)) {
+    const hashValues = [...hashes]
+    for (const hashBatch of chunked(hashValues, BENCHMARK_SOURCE_LINEAGE_HASH_BATCH_SIZE)) {
+      try {
+        const rows = await fetchPagedTelemetryRows<BenchmarkSourceExecutionRow>(
+          'benchmark source ICP execution lineage',
+          (from, to) => supabase
+            .from('research_lab_scoring_icp_execution_current')
+            .select('scoring_run_id, scoring_id, result_row_hash, icp_execution_id, icp_ref, execution_kind, current_execution_status, started_at, last_heartbeat_at, finished_at, observed_runtime_seconds, created_at')
+            .eq('execution_kind', 'model_invocation')
+            .in('result_row_hash', hashBatch)
+            .order('created_at', { ascending: true, nullsFirst: false })
+            .order('icp_ref', { ascending: true })
+            .range(from, to),
+        )
+        sourceRows.push(...rows.map((row) => ({
+          ...row,
+          status: row.current_execution_status,
+        })))
+      } catch (error) {
+        console.warn('[admin:research-lab] benchmark source lineage unavailable', error)
+      }
+    }
+  }
+  if (sourceRows.length === 0) return []
+
+  const sourceRunIds = uniqueStrings(sourceRows.map((row) => stringOr(row.scoring_run_id) ?? null))
+  const runIdentities: BenchmarkSourceRunIdentity[] = []
+  for (const runIdBatch of chunked(sourceRunIds, SUPABASE_IN_FILTER_BATCH_SIZE)) {
+    if (runIdBatch.length === 0) continue
+    try {
+      const result = await supabase
+        .from('research_lab_scoring_run_current')
+        .select('scoring_run_id, run_type, benchmark_id, benchmark_date, rolling_window_hash')
+        .in('scoring_run_id', runIdBatch)
+        .eq('run_type', 'private_baseline_rebenchmark')
+      if (result.error) throw new Error(result.error.message)
+      runIdentities.push(...((result.data ?? []) as BenchmarkSourceRunIdentity[]))
+    } catch (error) {
+      console.warn('[admin:research-lab] benchmark source run identity unavailable', error)
+    }
+  }
+  const runById = new Map(runIdentities.flatMap((row) => {
+    const runId = stringOr(row.scoring_run_id)
+    return runId ? [[runId, row] as const] : []
+  }))
+  return sourceRows.flatMap((row) => {
+    const resultRowHash = stringOr(row.result_row_hash)
+    const sourceRunId = stringOr(row.scoring_run_id)
+    if (!resultRowHash || !sourceRunId) return []
+    const sourceRun = runById.get(sourceRunId)
+    if (!sourceRun) return []
+    const benchmarkId = stringOr(row.benchmark_id) ?? stringOr(sourceRun.benchmark_id)
+    const expectation = expectations.get(`${benchmarkId ?? ''}\u0000${resultRowHash}`)
+    if (!expectation) return []
+    if (!expectation.icpRefs.has(stringOr(row.icp_ref) ?? '')) return []
+    const exactBenchmarkId = Boolean(
+      expectation.benchmarkId
+      && stringOr(sourceRun.benchmark_id) === expectation.benchmarkId,
+    )
+    const benchmarkDate = benchmarkDateOrNull(latestRun?.benchmark_date)
+    const rollingWindowHash = stringOr(latestRun?.rolling_window_hash)
+    const exactDateAndWindow = Boolean(
+      benchmarkDate
+      && rollingWindowHash
+      && benchmarkDateOrNull(sourceRun.benchmark_date) === benchmarkDate
+      && stringOr(sourceRun.rolling_window_hash) === rollingWindowHash,
+    )
+    const compatibleIdentity = expectation.benchmarkId
+      ? exactBenchmarkId
+      : exactDateAndWindow
+    return compatibleIdentity
+      ? [{ ...row, benchmark_id: expectation.benchmarkId ?? benchmarkId }]
+      : []
+  })
 }
 
 function buildHistoricalBenchmarkRuns(
@@ -2517,7 +2658,8 @@ async function buildDailyBenchmarkTelemetry(input: {
   const attempt = latestRun
     ? Math.max(0, Math.round(numberOr(latestRun.run_attempt, 0)))
     : null
-  const [providerRows, companyRows, publishedIcpSummaries] = await Promise.all([
+  const canonicalRows = canonicalizeResearchLabTelemetryRows(input.telemetryRows)
+  const [providerRows, companyRows, publishedIcpSummaries, sourceLineageRows] = await Promise.all([
     execution?.relatedScoringRunIds.length
       ? fetchBenchmarkProviderEnrichment(input.supabase, execution.relatedScoringRunIds)
       : Promise.resolve([]),
@@ -2527,10 +2669,10 @@ async function buildDailyBenchmarkTelemetry(input: {
     publishedBundleId
       ? fetchPublishedBenchmarkIcpSummaries(input.supabase, publishedBundleId)
       : Promise.resolve([]),
+    fetchBenchmarkSourceLineage(input.supabase, canonicalRows, latestRun),
   ])
   const providerByIcp = rollupCostsByIcp(providerRows)
   const companiesByIcp = groupCompaniesByIcp(companyRows)
-  const canonicalRows = canonicalizeResearchLabTelemetryRows(input.telemetryRows)
   const telemetryByIcp = new Map(canonicalRows.flatMap((row) => {
     const icpRef = stringOr(row.icp_ref)
     return icpRef ? [[icpRef, row] as const] : []
@@ -2542,17 +2684,21 @@ async function buildDailyBenchmarkTelemetry(input: {
     ...providerRows.map((row) => stringOr(row.icp_ref) ?? null),
     ...companyRows.map((row) => stringOr(row.icp_ref) ?? null),
   ])
-  const icps = icpRefs.map((icpRef): AdminLabIcpDetail => {
+  const icpsWithCompletion = icpRefs.map((icpRef) => {
     const row = telemetryByIcp.get(icpRef)
     const published = publishedByIcp.get(icpRef)
     const metadata = input.metadata.byRef.get(icpRef)
     const provider = providerByIcp.get(icpRef) ?? emptyCostRollup()
     const companies = companiesByIcp.get(icpRef) ?? []
+    const sourceRow = row
+      ? resolveAdminLabBenchmarkSourceRow(row, sourceLineageRows, stringOr(latestRun?.benchmark_id) ?? null)
+      : null
     const status = (stringOr(row?.status) ?? published?.status ?? 'observed').toLowerCase()
-    const runtimeStartedAt = isoStringOr(row?.started_at) ?? provider.firstActivityAt
-    const runtimeEndedAt = isoStringOr(row?.finished_at) ?? provider.lastActivityAt
-    const runtimeSeconds = finiteNumberOrNull(row?.observed_runtime_seconds)
-    return {
+    const runtimeStartedAt = isoStringOr(sourceRow?.started_at) ?? provider.firstActivityAt
+    const runtimeEndedAt = isoStringOr(sourceRow?.finished_at) ?? provider.lastActivityAt
+    const completionAt = isoStringOr(row?.finished_at) ?? null
+    const runtimeSeconds = finiteNumberOrNull(sourceRow?.observed_runtime_seconds)
+    const icp: AdminLabIcpDetail = {
       icpRef,
       icpHash: published?.icpHash ?? stringOr(providerRows.find((item) => item.icp_ref === icpRef)?.icp_hash) ?? null,
       label: icpLabel(metadata, icpRef),
@@ -2569,15 +2715,24 @@ async function buildDailyBenchmarkTelemetry(input: {
         ?? finiteNumberOrNull(row?.cap_usd)
         ?? provider.budgetUsd,
       providerEventCount: provider.eventCount,
-      errorCount: provider.errorCount + (['failed', 'cancelled'].includes(status) ? 1 : 0),
+      errorCount: published?.failedProviderCallCount
+        ?? provider.errorCount + (['failed', 'cancelled'].includes(status) ? 1 : 0),
       runtimeStartedAt,
       runtimeEndedAt,
+      completionAt,
       lastActivityAt:
-        isoStringOr(row?.finished_at)
-        ?? isoStringOr(row?.last_heartbeat_at)
+        isoStringOr(sourceRow?.finished_at)
+        ?? isoStringOr(sourceRow?.last_heartbeat_at)
         ?? provider.lastActivityAt
         ?? runtimeStartedAt,
       runtimeMs: runtimeSeconds === null ? null : Math.max(0, Math.round(runtimeSeconds * 1_000)),
+      runtimeSource: sourceRow && sourceRow !== row
+        ? 'source_execution'
+        : stringOr(row?.execution_kind) === 'checkpoint_reuse'
+          ? 'checkpoint_reuse'
+          : row
+            ? 'current_execution'
+            : 'unavailable',
       isInProgress: ['held', 'queued', 'started', 'heartbeat', 'sourcing_completed', 'scoring_started'].includes(status),
       failureReason: stringOr(row?.failure_category) ?? published?.failureReason ?? null,
       hardFailure: ['failed', 'cancelled'].includes(status) || (published?.hardFailure ?? false),
@@ -2590,7 +2745,13 @@ async function buildDailyBenchmarkTelemetry(input: {
       ),
       companies,
     }
+    return {
+      icp,
+      completionAt,
+    }
   })
+  const orderedIcpEntries = orderAdminLabIcpCompletionEntries(icpsWithCompletion)
+  const icps = orderedIcpEntries.map((entry) => entry.icp)
   const stateInfo = benchmarkExecutionState(execution, publicationStatus)
   const publishedStatusCount = (status: string) => publishedIcpSummaries.filter(
     (row) => row.status === status,
@@ -2673,9 +2834,7 @@ async function buildDailyBenchmarkTelemetry(input: {
       (sum, row) => sum + row.companyCount,
       0,
     ),
-    errorCount: errors.reduce((sum, item) => sum + item.count, 0)
-      + (failedUnits ?? 0)
-      + (cancelledUnits ?? 0),
+    errorCount: icps.reduce((sum, icp) => sum + icp.errorCount, 0),
     icps,
     errors,
   }
@@ -3181,6 +3340,7 @@ function buildScoreBundleIcpDetails(
         errorCount: cost.errorCount + (failureReason ? 1 : 0),
         runtimeStartedAt,
         runtimeEndedAt,
+        completionAt: runtimeEndedAt,
         lastActivityAt: runtimeLastActivityAt,
         runtimeMs,
         isInProgress,

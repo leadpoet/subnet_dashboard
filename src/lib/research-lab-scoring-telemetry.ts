@@ -40,6 +40,8 @@ export type ResearchLabScoringTelemetryRow = {
   scoring_run_id?: unknown
   source_run_id?: unknown
   candidate_id?: unknown
+  benchmark_id?: unknown
+  result_row_hash?: unknown
   icp_execution_id?: unknown
   icp_ref?: unknown
   model_role?: unknown
@@ -62,6 +64,7 @@ export type ResearchLabScoringTelemetryRow = {
   checkpoint_ref?: unknown
   expected_units?: unknown
   current_status_at?: unknown
+  created_at?: unknown
 }
 
 export type ResearchLabBenchmarkBundleRow = {
