@@ -92,6 +92,8 @@ try {
           company_count: 1,
           diagnostics: {
             sourcing_failed: false,
+            provider_cost_total_usd: '12.3456',
+            provider_cost_summary: { cap_usd: '25' },
             funnel: {
               sourced: 3,
               fit_pass: 1,
@@ -106,7 +108,17 @@ try {
           perIcpScore: 0,
           diagnostics: {
             sourcingFailed: true,
+            providerCostTotalUsd: 0,
+            providerCostSummary: { capUsd: 0 },
             failureCategories: ['provider_error'],
+          },
+        },
+        {
+          icp_ref: 'qualification_private_icp_sets:20260816:icp_003',
+          score: 0,
+          diagnostics: {
+            provider_cost_total_usd: -1,
+            provider_cost_summary: { cap_usd: 'not-a-number' },
           },
         },
         { score: 99 },
@@ -118,6 +130,8 @@ try {
         icpRef: 'qualification_private_icp_sets:20260816:icp_001',
         icpHash: 'sha256:one',
         score: 10.8,
+        spendUsd: 12.3456,
+        budgetUsd: 25,
         status: 'completed',
         failureReason: null,
         hardFailure: false,
@@ -128,9 +142,23 @@ try {
         icpRef: 'qualification_private_icp_sets:20260816:icp_002',
         icpHash: null,
         score: 0,
+        spendUsd: 0,
+        budgetUsd: 0,
         status: 'failed',
         failureReason: 'provider_error',
         hardFailure: true,
+        funnel: null,
+        companyCount: 0,
+      },
+      {
+        icpRef: 'qualification_private_icp_sets:20260816:icp_003',
+        icpHash: null,
+        score: 0,
+        spendUsd: null,
+        budgetUsd: null,
+        status: 'completed',
+        failureReason: null,
+        hardFailure: false,
         funnel: null,
         companyCount: 0,
       },
@@ -152,6 +180,8 @@ try {
   assert.match(routeSource, /research_lab_scoring_run_current/)
   assert.match(routeSource, /fetchPublishedBenchmarkIcpSummaries/)
   assert.match(routeSource, /\.select\('score_summary_doc'\)/)
+  assert.match(routeSource, /published\?\.spendUsd\s*\?\?\s*finiteNumberOrNull\(row\?\.cumulative_spend_usd\)\s*\?\?\s*provider\.spendUsd/)
+  assert.match(routeSource, /published\?\.budgetUsd\s*\?\?\s*finiteNumberOrNull\(row\?\.cap_usd\)\s*\?\?\s*provider\.budgetUsd/)
   assert.match(routeSource, /\.eq\('run_type', 'candidate_scoring'\)/)
   assert.match(routeSource, /isoStringOr\(row\.last_heartbeat_at\)/)
   assert.match(routeSource, /latestIso\(loop\.lastActivityAt, scoreMetrics\?\.lastScoringAt\)/)

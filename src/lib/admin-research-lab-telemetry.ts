@@ -733,6 +733,8 @@ export type AdminLabPublishedBenchmarkIcpSummary = {
   icpRef: string
   icpHash: string | null
   score: number | null
+  spendUsd: number | null
+  budgetUsd: number | null
   status: string
   failureReason: string | null
   hardFailure: boolean
@@ -759,6 +761,9 @@ export function parseAdminLabPublishedBenchmarkIcpSummaries(
     if (!row || !icpRef) return []
 
     const diagnostics = recordOrNull(field(row, 'diagnostics'))
+    const providerCostSummary = recordOrNull(
+      field(diagnostics, 'provider_cost_summary', 'providerCostSummary'),
+    )
     const funnel = parsePublishedBenchmarkFunnel(
       recordOrNull(field(diagnostics, 'funnel')),
     )
@@ -786,6 +791,12 @@ export function parseAdminLabPublishedBenchmarkIcpSummaries(
       score: finiteNumberOrNull(
         field(row, 'score', 'per_icp_score', 'perIcpScore', 'candidate_per_icp_score'),
       ),
+      spendUsd: nonNegativeFiniteNumberOrNull(
+        field(diagnostics, 'provider_cost_total_usd', 'providerCostTotalUsd'),
+      ),
+      budgetUsd: nonNegativeFiniteNumberOrNull(
+        field(providerCostSummary, 'cap_usd', 'capUsd'),
+      ),
       status,
       failureReason,
       hardFailure:
@@ -812,6 +823,11 @@ function parsePublishedBenchmarkFunnel(
     scored: nonNegativeIntegerOrNull(field(value, 'scored')) ?? 0,
   }
   return result
+}
+
+function nonNegativeFiniteNumberOrNull(value: unknown): number | null {
+  const number = finiteNumberOrNull(value)
+  return number !== null && number >= 0 ? number : null
 }
 
 export type AdminLabIntentSignalDetail = {

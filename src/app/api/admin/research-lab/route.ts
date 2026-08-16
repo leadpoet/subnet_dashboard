@@ -2562,8 +2562,12 @@ async function buildDailyBenchmarkTelemetry(input: {
       score: finiteNumberOrNull(row?.score) ?? published?.score ?? null,
       baseScore: null,
       delta: null,
-      spendUsd: finiteNumberOrNull(row?.cumulative_spend_usd) ?? provider.spendUsd,
-      budgetUsd: finiteNumberOrNull(row?.cap_usd) ?? provider.budgetUsd,
+      spendUsd: published?.spendUsd
+        ?? finiteNumberOrNull(row?.cumulative_spend_usd)
+        ?? provider.spendUsd,
+      budgetUsd: published?.budgetUsd
+        ?? finiteNumberOrNull(row?.cap_usd)
+        ?? provider.budgetUsd,
       providerEventCount: provider.eventCount,
       errorCount: provider.errorCount + (['failed', 'cancelled'].includes(status) ? 1 : 0),
       runtimeStartedAt,
