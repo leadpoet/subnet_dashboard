@@ -45,6 +45,7 @@ import {
   type ResearchLabScoringRunRow,
   type ResearchLabScoringTelemetryRow,
 } from '@/lib/research-lab-scoring-telemetry'
+import { utcCalendarDateKey } from '@/lib/research-lab-benchmark'
 
 export const dynamic = 'force-dynamic'
 
@@ -72,6 +73,7 @@ const HIDDEN_LOOP_MINER_PREFIXES = [
 type CachedResponse = {
   data: ResearchLabPayload
   ts: number
+  benchmarkDate: string
 }
 
 type PublicBenchmarkReportRow = {
@@ -663,6 +665,7 @@ type FulfillmentLeaderboardRow = {
 
 let cache: CachedResponse | null = null
 const publicSnapshotFlight: SingleFlightState<ResearchLabPayload> = { current: null }
+let publicSnapshotFlightBenchmarkDate: string | null = null
 
 function getSupabase() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL
@@ -697,19 +700,35 @@ export async function GET(request: Request) {
       return NextResponse.json({ success: true, data: timeline })
     }
 
-    if (cache && Date.now() - cache.ts < CACHE_TTL) {
+    const currentBenchmarkDate = utcCalendarDateKey()
+    if (
+      cache &&
+      cache.benchmarkDate === currentBenchmarkDate &&
+      Date.now() - cache.ts < CACHE_TTL
+    ) {
       return NextResponse.json({ success: true, data: cache.data }, { headers: NO_STORE_HEADERS })
+    }
+
+    // A flight started before UTC midnight must not be shared with requests
+    // for the next benchmark day.
+    if (publicSnapshotFlightBenchmarkDate !== currentBenchmarkDate) {
+      publicSnapshotFlight.current = null
+      publicSnapshotFlightBenchmarkDate = currentBenchmarkDate
     }
 
     const data = await runSingleFlight(publicSnapshotFlight, async () => {
       // A request may have completed while this caller was waiting to enter
       // the flight. Reuse that snapshot instead of starting another refresh.
-      if (cache && Date.now() - cache.ts < CACHE_TTL) return cache.data
+      if (
+        cache &&
+        cache.benchmarkDate === currentBenchmarkDate &&
+        Date.now() - cache.ts < CACHE_TTL
+      ) return cache.data
 
       const supabase = getSupabase()
       const [benchmark, activePromotedModel, loops, allLoops, labMinerSpend] =
         await Promise.all([
-          fetchLatestBenchmark(supabase),
+          fetchLatestBenchmark(supabase, currentBenchmarkDate),
           fetchActivePromotedModelScore(supabase),
           fetchPublicLoops(supabase),
           fetchPublicLoops(supabase, 5_000, 5_000),
@@ -718,7 +737,11 @@ export async function GET(request: Request) {
       const displayBenchmark = benchmark
         ? withBenchmarkDisplayScore(benchmark, activePromotedModel)
         : null
-      const benchmarkTelemetry = await fetchPublicBenchmarkTelemetry(supabase, displayBenchmark)
+      const benchmarkTelemetry = await fetchPublicBenchmarkTelemetry(
+        supabase,
+        displayBenchmark,
+        currentBenchmarkDate,
+      )
       const topicGroups = groupLoopsByTopic(loops)
       const labMinerActivity = buildLabMinerActivityRollup(allLoops)
       const snapshot: ResearchLabPayload = {
@@ -740,7 +763,7 @@ export async function GET(request: Request) {
         benchmarkTelemetry,
         fetchedAt: new Date().toISOString(),
       }
-      cache = { data: snapshot, ts: Date.now() }
+      cache = { data: snapshot, ts: Date.now(), benchmarkDate: currentBenchmarkDate }
       return snapshot
     })
     return NextResponse.json({ success: true, data }, { headers: NO_STORE_HEADERS })
@@ -1407,11 +1430,15 @@ function isExpectedOptionalTimelineSourceMiss(message: string | undefined): bool
   return normalized.includes('does not exist') || normalized.includes('could not find')
 }
 
-async function fetchLatestBenchmark(supabase: ReturnType<typeof getSupabase>): Promise<NormalizedBenchmark | null> {
+async function fetchLatestBenchmark(
+  supabase: ReturnType<typeof getSupabase>,
+  currentBenchmarkDate = utcCalendarDateKey(),
+): Promise<NormalizedBenchmark | null> {
   const { data, error } = await supabase
     .from('research_lab_public_benchmark_report_current')
     .select('report_id, benchmark_date, rolling_window_hash, aggregate_score, report_doc, current_report_status, current_status_at, created_at')
     .eq('current_report_status', 'published')
+    .eq('benchmark_date', currentBenchmarkDate)
     .order('benchmark_date', { ascending: false })
     .order('created_at', { ascending: false })
     .limit(8)
@@ -1495,9 +1522,12 @@ async function fetchLatestBenchmark(supabase: ReturnType<typeof getSupabase>): P
 async function fetchPublicBenchmarkTelemetry(
   supabase: ReturnType<typeof getSupabase>,
   benchmark: NormalizedBenchmark | null,
+  currentBenchmarkDate = utcCalendarDateKey(),
 ): Promise<ResearchLabPublicBenchmarkTelemetry> {
   const publicationStatus = benchmark ? 'published' : 'unavailable'
   const canonicalPublishedScore = benchmark?.aggregateScore ?? null
+  // A missing current-day report is an in-progress state. Do not let a
+  // previous day's run supply progress counts for that state.
   // These views are deliberately revoked from anon/authenticated. If the
   // server-side service key is missing, return an honest aggregate fallback
   // instead of attempting a public-client read or inferring zero progress.
@@ -1513,6 +1543,7 @@ async function fetchPublicBenchmarkTelemetry(
     .from('research_lab_scoring_run_current')
     .select('scoring_run_id, scoring_id, run_type, run_attempt, source_run_id, candidate_id, expected_icp_count, scheduler_type, worker_ref, current_run_status, current_status_at, current_retryable, current_failure_category, current_telemetry_degraded, started_at, last_heartbeat_at, finished_at, observed_runtime_seconds, created_at')
     .eq('run_type', 'private_baseline_rebenchmark')
+    .eq('benchmark_date', currentBenchmarkDate)
     .order('created_at', { ascending: false, nullsFirst: false })
     .limit(1)
   if (latestError) {
@@ -1532,6 +1563,7 @@ async function fetchPublicBenchmarkTelemetry(
       .from('research_lab_scoring_run_current')
       .select('scoring_run_id, scoring_id, run_type, run_attempt, source_run_id, candidate_id, expected_icp_count, scheduler_type, worker_ref, current_run_status, current_status_at, current_retryable, current_failure_category, current_telemetry_degraded, started_at, last_heartbeat_at, finished_at, observed_runtime_seconds, created_at')
       .eq('scoring_id', String(latestRun.scoring_id))
+      .eq('benchmark_date', currentBenchmarkDate)
       .order('run_attempt', { ascending: false })
       .limit(100)
     if (attemptError) {
@@ -1550,6 +1582,7 @@ async function fetchPublicBenchmarkTelemetry(
       .from('research_lab_public_benchmark_report_current')
       .select('benchmark_bundle_id, benchmark_date, current_status_at, created_at')
       .eq('current_report_status', 'published')
+      .eq('benchmark_date', benchmark.benchmarkDate)
       .order('benchmark_date', { ascending: false })
       .order('created_at', { ascending: false })
       .limit(1)

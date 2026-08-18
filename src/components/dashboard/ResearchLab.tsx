@@ -545,27 +545,10 @@ function Hero({
   benchmark: BenchmarkReport | null
   telemetry: PublicBenchmarkTelemetry
 }) {
-  if (!benchmark) {
-    return (
-      <section className="pt-12 pb-14">
-        <div className="font-display font-medium leading-[0.84] tracking-[-0.045em] text-[clamp(40px,6vw,72px)] text-[var(--faint)]">
-          Pending
-        </div>
-        <p className="mt-7 max-w-[560px] text-[14px] leading-[1.7] text-[var(--muted)]">
-          No benchmark has been published yet. When the first Research Lab benchmark is
-          published, the model score and the ideal customer profiles it was measured on
-          will appear here.
-        </p>
-      </section>
-    )
-  }
+  if (!benchmark) return <ScoringHero telemetry={telemetry} />
 
   const score = numberOr(telemetry.canonicalPublishedScore, numberOr(benchmark.aggregateScore, 0))
   const tone = scoreTone(score)
-
-  if (isBenchmarkExecutionInProgress(telemetry.executionStatus)) {
-    return <ScoringHero benchmark={benchmark} telemetry={telemetry} />
-  }
 
   return (
     <section className="pt-12 pb-14">
@@ -596,18 +579,13 @@ function Hero({
 }
 
 /* ============================================================
- * Active scoring — replaces the published score until the run resolves.
+ * Current-day scoring — shown only until today's report is published.
  * ============================================================ */
-function ScoringHero({
-  benchmark,
-  telemetry,
-}: {
-  benchmark: BenchmarkReport
-  telemetry: PublicBenchmarkTelemetry
-}) {
+function ScoringHero({ telemetry }: { telemetry: PublicBenchmarkTelemetry }) {
   const total = Math.max(0, numberOr(telemetry.expectedUnits, 0))
   const resolved = Math.max(0, numberOr(telemetry.resolvedUnits, 0))
-  const hasProgress = telemetry.expectedUnits !== null
+  const hasProgress = isBenchmarkExecutionInProgress(telemetry.executionStatus)
+    && telemetry.expectedUnits !== null
     && telemetry.resolvedUnits !== null
     && total > 0
 
@@ -635,11 +613,6 @@ function ScoringHero({
           : "Today's baseline benchmark is being scored. The new number publishes once scoring finishes."}
       </p>
 
-      <div className="mt-6 font-mono text-[11px] text-[var(--muted-2)]">
-        Last published:{' '}
-        <span className="text-[var(--muted)]">{benchmark.aggregateScore.toFixed(1)}</span> /100 ·{' '}
-        {formatDayShort(benchmark.benchmarkDate)}
-      </div>
     </section>
   )
 }
@@ -668,7 +641,7 @@ function isBenchmarkExecutionInProgress(status: string | null): boolean {
 function KpiRail({ stats }: { stats: ResearchLabData['stats'] }) {
   const scoredTestCount = Math.max(0, numberOr(stats.scoredLoopCount, 0))
   const items = [
-    { label: 'Live experiments', value: stats.activeLoopCount },
+    { label: 'Live autoresearch loops', value: stats.activeLoopCount },
     { label: 'Scored tests', value: scoredTestCount },
     { label: 'Model improvements', value: stats.promisingLoopCount },
   ]
@@ -899,7 +872,6 @@ function LabEmissionSplit({
         <p className="mt-2 max-w-2xl text-[12px] leading-relaxed text-[var(--muted-2)]">
           Live metagraph emission for every current Lab recipient, including queued champions. Loop activity and compute cover the last 24 hours.
         </p>
-        <p className="mt-3 text-[13px] text-[var(--muted-2)]">No Research Lab miner activity yet.</p>
       </section>
     )
   }
@@ -1184,7 +1156,7 @@ function BenchmarkSection({ benchmark }: { benchmark: BenchmarkReport | null }) 
   const publicIcps = benchmark?.publicIcps ?? []
   const detailSub = benchmark
     ? `${formatDate(benchmark.benchmarkDate)} · ${benchmark.itemCount} ICPs`
-    : 'no report'
+    : 'in progress'
   return (
     <section className="pt-16">
       <SecLabel
@@ -1194,7 +1166,7 @@ function BenchmarkSection({ benchmark }: { benchmark: BenchmarkReport | null }) 
       />
       {!benchmark ? (
         <p className="text-[14px] text-[var(--muted)]">
-          The first Research Lab benchmark has not been published yet.
+          Today&apos;s benchmark is still in progress. Completed benchmark detail will appear here when scoring finishes.
         </p>
       ) : (
         <>
@@ -3130,12 +3102,6 @@ function formatDate(value: string): string {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return value
   return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' })
-}
-
-function formatDayShort(value: string): string {
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return value
-  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })
 }
 
 function emptyPublicBenchmarkTelemetry(): PublicBenchmarkTelemetry {
