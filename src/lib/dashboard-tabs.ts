@@ -29,19 +29,34 @@ export function getDashboardTabs(isSubnet71Public: boolean): readonly DashboardT
 }
 
 /**
- * Match only the public subnet71 domains. The first forwarded host is the
- * browser-facing value when a proxy sends a comma-separated host list.
+ * Match only the public subnet71 domains. A proxy can append hosts to a
+ * comma-separated forwarded-host chain, so accept the public host wherever
+ * it appears in that chain.
  */
 export function isSubnet71PublicHost(host: string | null | undefined): boolean {
-  const firstHost = host?.split(',')[0]?.trim()
-  if (!firstHost) return false
+  return (host?.split(',') ?? []).some((candidate) => {
+    const value = candidate.trim()
+    if (!value) return false
 
-  try {
-    const hostname = new URL(`http://${firstHost}`).hostname.toLowerCase().replace(/\.$/, '')
-    return hostname === 'subnet71.com' || hostname === 'www.subnet71.com'
-  } catch {
-    return false
-  }
+    try {
+      const hostname = new URL(`http://${value}`).hostname.toLowerCase().replace(/\.$/, '')
+      return hostname === 'subnet71.com' || hostname === 'www.subnet71.com'
+    } catch {
+      return false
+    }
+  })
+}
+
+/**
+ * Resolve the public site from both request host headers. Some deployments
+ * preserve the browser-facing host in `host` but put an internal upstream
+ * host in `x-forwarded-host`; trusting only the latter exposes hidden tabs.
+ */
+export function isSubnet71PublicRequest(
+  host: string | null | undefined,
+  forwardedHost: string | null | undefined,
+): boolean {
+  return isSubnet71PublicHost(host) || isSubnet71PublicHost(forwardedHost)
 }
 
 export function isDashboardTab(

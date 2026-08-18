@@ -24,6 +24,7 @@ try {
   const {
     getDashboardTabs,
     isDashboardTab,
+    isSubnet71PublicRequest,
     isSubnet71PublicHost,
     normalizeDashboardTab,
   } = require(join(outDir, 'dashboard-tabs.js'))
@@ -32,9 +33,21 @@ try {
   assert.equal(isSubnet71PublicHost('www.subnet71.com:443'), true)
   assert.equal(isSubnet71PublicHost('SUBNET71.COM.'), true)
   assert.equal(isSubnet71PublicHost('subnet71.com, internal.proxy'), true)
+  assert.equal(isSubnet71PublicHost('internal.proxy, subnet71.com'), true)
   assert.equal(isSubnet71PublicHost('subnet71.com.evil.example'), false)
   assert.equal(isSubnet71PublicHost('localhost:3000'), false)
   assert.equal(isSubnet71PublicHost('dashboard.leadpoet.com'), false)
+  assert.equal(
+    isSubnet71PublicRequest('subnet71.com', 'internal.proxy:3000'),
+    true,
+    'the browser-facing host must win when x-forwarded-host is an internal upstream host',
+  )
+  assert.equal(
+    isSubnet71PublicRequest('internal.proxy:3000', 'subnet71.com'),
+    true,
+    'the public forwarded host must still work when host is internal',
+  )
+  assert.equal(isSubnet71PublicRequest('localhost:3000', 'internal.proxy:3000'), false)
 
   const publicTabs = getDashboardTabs(true)
   const defaultTabs = getDashboardTabs(false)
@@ -49,7 +62,9 @@ try {
   const pageSource = await readFile(resolve('src/app/page.tsx'), 'utf8')
   const clientSource = await readFile(resolve('src/components/dashboard/DashboardClient.tsx'), 'utf8')
   assert.match(pageSource, /headers\(\)/)
-  assert.match(pageSource, /isSubnet71PublicHost\(requestHost\)/)
+  assert.match(pageSource, /isSubnet71PublicRequest\(/)
+  assert.match(pageSource, /requestHeaders\.get\('host'\)/)
+  assert.match(pageSource, /requestHeaders\.get\('x-forwarded-host'\)/)
   assert.match(clientSource, /getDashboardTabs\(isSubnet71Public\)/)
   assert.match(clientSource, /normalizeDashboardTab\(tab, visibleTabs\)/)
   assert.match(
