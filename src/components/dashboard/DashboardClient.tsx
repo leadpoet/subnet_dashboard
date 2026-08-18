@@ -17,27 +17,16 @@ import type {
 } from '@/lib/types'
 import type { AllDashboardData } from '@/lib/db-precalc'
 import { cn } from '@/lib/utils'
+import {
+  getDashboardTabs,
+  normalizeDashboardTab,
+  type DashboardTabKey,
+} from '@/lib/dashboard-tabs'
 
 // =================================================================
 // Tab routing config
 // =================================================================
-type TabKey =
-  | 'research-lab'
-  | 'fulfillment'
-  | 'overview'
-  | 'miner-tracker'
-  | 'epoch-analysis'
-  | 'submission-tracker'
-  | 'faq'
-// Single source of truth for the public dashboard tabs. Legacy tab code stays
-// in this file for now, but tabs not listed here cannot be opened from the UI
-// or by an old ?tab=... URL.
-const VISIBLE_TABS: readonly TabKey[] = ['research-lab', 'fulfillment', 'faq'] as const
-const DEFAULT_TAB: TabKey = VISIBLE_TABS[0]
-
-function isValidTab(value: string | null): value is TabKey {
-  return Boolean(value && (VISIBLE_TABS as readonly string[]).includes(value))
-}
+type TabKey = DashboardTabKey
 
 // Dashboard data from API
 interface DashboardData extends AllDashboardData {
@@ -52,9 +41,14 @@ interface DashboardData extends AllDashboardData {
 export interface DashboardClientProps {
   initialData: DashboardData
   metagraph: MetagraphData | null
+  isSubnet71Public: boolean
 }
 
-export function DashboardClient({ initialData, metagraph: initialMetagraph }: DashboardClientProps) {
+export function DashboardClient({
+  initialData,
+  metagraph: initialMetagraph,
+  isSubnet71Public,
+}: DashboardClientProps) {
   // Dashboard data state (aggregated results only - no raw data!)
   const [dashboardData, setDashboardData] = useState<DashboardData>(initialData)
   const [metagraph, setMetagraph] = useState<MetagraphData | null>(initialMetagraph)
@@ -66,8 +60,10 @@ export function DashboardClient({ initialData, metagraph: initialMetagraph }: Da
   // Tab routing. Keep tab state in memory so the public URL stays clean.
   // Older shared URLs with ?tab=... are honored once on mount, then cleaned.
   // -------------------------------------------------------------------
-  const [activeTab, setActiveTab] = useState<TabKey>(DEFAULT_TAB)
-  const [mountedTabs, setMountedTabs] = useState<Set<TabKey>>(() => new Set([DEFAULT_TAB]))
+  const visibleTabs = getDashboardTabs(isSubnet71Public)
+  const defaultTab = visibleTabs[0] ?? 'research-lab'
+  const [activeTab, setActiveTab] = useState<TabKey>(defaultTab)
+  const [mountedTabs, setMountedTabs] = useState<Set<TabKey>>(() => new Set([defaultTab]))
 
   const activateTab = useCallback((tab: TabKey) => {
     setMountedTabs((prev) => {
@@ -82,7 +78,7 @@ export function DashboardClient({ initialData, metagraph: initialMetagraph }: Da
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
     const tab = params.get('tab')
-    if (isValidTab(tab)) activateTab(tab)
+    if (tab) activateTab(normalizeDashboardTab(tab, visibleTabs))
 
     if (params.has('tab')) {
       params.delete('tab')
@@ -90,12 +86,11 @@ export function DashboardClient({ initialData, metagraph: initialMetagraph }: Da
       const next = `${window.location.pathname}${query ? `?${query}` : ''}${window.location.hash}`
       window.history.replaceState(null, '', next)
     }
-  }, [activateTab])
+  }, [activateTab, visibleTabs])
 
   const handleTabChange = useCallback((value: string) => {
-    if (!isValidTab(value)) return
-    activateTab(value)
-  }, [activateTab])
+    activateTab(normalizeDashboardTab(value, visibleTabs))
+  }, [activateTab, visibleTabs])
 
   // -------------------------------------------------------------------
   // Sliding tab underline. A single white indicator measures the active
@@ -337,7 +332,7 @@ export function DashboardClient({ initialData, metagraph: initialMetagraph }: Da
           </div>
         </header>
 
-        {/* Tabs: gated by the public tab registry above. */}
+        {/* Tabs: gated by the request host's public tab policy. */}
         <Tabs value={activeTab} onValueChange={handleTabChange} className="space-y-4 md:space-y-6">
           <div ref={navWrapRef} className="relative">
           <TabsList
@@ -345,48 +340,48 @@ export function DashboardClient({ initialData, metagraph: initialMetagraph }: Da
               'flex w-full justify-start gap-8 sm:gap-10 overflow-x-auto no-scrollbar rounded-none border-0 border-b border-[var(--line)] bg-transparent h-auto p-0'
             )}
           >
-            {VISIBLE_TABS.includes('research-lab') && (
+            {visibleTabs.includes('research-lab') && (
               <DashboardTabTrigger
                 value="research-lab"
                 label="Research Lab"
                 shortLabel="Lab"
               />
             )}
-            {VISIBLE_TABS.includes('fulfillment') && (
+            {visibleTabs.includes('fulfillment') && (
               <DashboardTabTrigger
                 value="fulfillment"
                 label="Fulfillment"
               />
             )}
             {/* Legacy tabs stay registered in code, but are not publicly visible. */}
-            {VISIBLE_TABS.includes('overview') && (
+            {visibleTabs.includes('overview') && (
               <DashboardTabTrigger
                 value="overview"
                 label="Overview"
               />
             )}
-            {VISIBLE_TABS.includes('miner-tracker') && (
+            {visibleTabs.includes('miner-tracker') && (
               <DashboardTabTrigger
                 value="miner-tracker"
                 label="Miner Tracker"
                 shortLabel="Miner"
               />
             )}
-            {VISIBLE_TABS.includes('epoch-analysis') && (
+            {visibleTabs.includes('epoch-analysis') && (
               <DashboardTabTrigger
                 value="epoch-analysis"
                 label="Epoch Analysis"
                 shortLabel="Epoch"
               />
             )}
-            {VISIBLE_TABS.includes('submission-tracker') && (
+            {visibleTabs.includes('submission-tracker') && (
               <DashboardTabTrigger
                 value="submission-tracker"
                 label="Lead Search"
                 shortLabel="Search"
               />
             )}
-            {VISIBLE_TABS.includes('faq') && (
+            {visibleTabs.includes('faq') && (
               <DashboardTabTrigger
                 value="faq"
                 label="FAQ"
@@ -401,7 +396,7 @@ export function DashboardClient({ initialData, metagraph: initialMetagraph }: Da
           </div>
 
           {/* Launch tabs stay mounted so switching tabs does not flash loading states. */}
-          {VISIBLE_TABS.includes('research-lab') && mountedTabs.has('research-lab') && (
+          {visibleTabs.includes('research-lab') && mountedTabs.has('research-lab') && (
             <TabsContent
               value="research-lab"
               keepMounted
@@ -413,7 +408,7 @@ export function DashboardClient({ initialData, metagraph: initialMetagraph }: Da
             </TabsContent>
           )}
 
-          {VISIBLE_TABS.includes('fulfillment') && mountedTabs.has('fulfillment') && (
+          {visibleTabs.includes('fulfillment') && mountedTabs.has('fulfillment') && (
             <TabsContent
               value="fulfillment"
               keepMounted
@@ -425,7 +420,7 @@ export function DashboardClient({ initialData, metagraph: initialMetagraph }: Da
             </TabsContent>
           )}
 
-          {VISIBLE_TABS.includes('faq') && mountedTabs.has('faq') && (
+          {visibleTabs.includes('faq') && mountedTabs.has('faq') && (
             <TabsContent
               value="faq"
               keepMounted
@@ -440,7 +435,7 @@ export function DashboardClient({ initialData, metagraph: initialMetagraph }: Da
           {/* Legacy tabs: keepMounted is intentional here so the
               chart-heavy Overview / MinerTracker views don't lose state
               if they are re-enabled later. */}
-          {VISIBLE_TABS.includes('overview') && (
+          {visibleTabs.includes('overview') && (
             <TabsContent value="overview" keepMounted>
               <Overview
                 metrics={metrics}
@@ -457,7 +452,7 @@ export function DashboardClient({ initialData, metagraph: initialMetagraph }: Da
             </TabsContent>
           )}
 
-          {VISIBLE_TABS.includes('miner-tracker') && (
+          {visibleTabs.includes('miner-tracker') && (
             <TabsContent value="miner-tracker" keepMounted>
               <MinerTracker
                 minerStats={minerStats}
@@ -469,7 +464,7 @@ export function DashboardClient({ initialData, metagraph: initialMetagraph }: Da
             </TabsContent>
           )}
 
-          {VISIBLE_TABS.includes('epoch-analysis') && (
+          {visibleTabs.includes('epoch-analysis') && (
             <TabsContent value="epoch-analysis" keepMounted>
               <EpochAnalysis
                 epochStats={epochStats}
@@ -481,7 +476,7 @@ export function DashboardClient({ initialData, metagraph: initialMetagraph }: Da
             </TabsContent>
           )}
 
-          {VISIBLE_TABS.includes('submission-tracker') && (
+          {visibleTabs.includes('submission-tracker') && (
             <TabsContent value="submission-tracker" keepMounted>
               <SubmissionTracker
                 minerStats={minerStats}
