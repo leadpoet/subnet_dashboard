@@ -46,6 +46,11 @@ import {
   type ResearchLabScoringTelemetryRow,
 } from '@/lib/research-lab-scoring-telemetry'
 import { utcCalendarDateKey } from '@/lib/research-lab-benchmark'
+import {
+  normalizePublicBenchmarkCounts,
+  publicBenchmarkServingModelVersion,
+  type BenchmarkServingModelVersion,
+} from '@/lib/research-lab-public-benchmark'
 
 export const dynamic = 'force-dynamic'
 
@@ -96,6 +101,7 @@ type PublicBenchmarkReportDoc = {
   item_count?: number
   public_icp_count?: number
   private_holdout_icp_count?: number
+  conditional_holdout_icp_count?: number
   zero_lead_icp_count?: number
   low_intent_fit_icp_count?: number
   low_icp_fit_count?: number
@@ -106,7 +112,12 @@ type PublicBenchmarkReportDoc = {
   visibility_split?: {
     public_count?: number
     private_count?: number
+    conditional_count?: number
   }
+  serving_model_version?: unknown
+  activation_model_artifact_hash?: unknown
+  activation_manifest_hash?: unknown
+  activation_git_commit_sha?: unknown
   public_icps?: PublicIcpEntry[]
   icp_buckets?: unknown[]
 }
@@ -533,6 +544,8 @@ type NormalizedBenchmark = {
   itemCount: number
   publicIcpCount: number
   privateHoldoutIcpCount: number
+  conditionalHoldoutIcpCount: number
+  servingModelVersion: BenchmarkServingModelVersion | null
   scoreBandCounts: Record<string, number>
   failureCategoryCounts: Record<string, number>
   issues: BenchmarkIssue[]
@@ -1473,15 +1486,12 @@ async function fetchLatestBenchmark(
     stripInternalIcpFields(Array.isArray(doc.public_icps) ? doc.public_icps : []),
     privateDiag,
   )
-  const publicIcpCount = numberOr(
-    doc.public_icp_count,
-    numberOr(doc.visibility_split?.public_count, publicIcps.length)
-  )
-  const privateHoldoutIcpCount = numberOr(
-    doc.private_holdout_icp_count,
-    numberOr(doc.visibility_split?.private_count, 0)
-  )
-  const itemCount = numberOr(doc.item_count, publicIcpCount + privateHoldoutIcpCount)
+  const {
+    itemCount,
+    publicIcpCount,
+    privateHoldoutIcpCount,
+    conditionalHoldoutIcpCount,
+  } = normalizePublicBenchmarkCounts(doc, publicIcps.length)
   const aggregateScore = numberOr(doc.aggregate_score, row.aggregate_score)
   const aggregateScoreBand = String(doc.aggregate_score_band || scoreBand(aggregateScore))
 
@@ -1494,6 +1504,8 @@ async function fetchLatestBenchmark(
     itemCount,
     publicIcpCount,
     privateHoldoutIcpCount,
+    conditionalHoldoutIcpCount,
+    servingModelVersion: publicBenchmarkServingModelVersion(doc),
     scoreBandCounts: doc.score_band_counts ?? {},
     failureCategoryCounts: doc.failure_category_counts ?? {},
     issues: buildBenchmarkIssues(issuesDoc),

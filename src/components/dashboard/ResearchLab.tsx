@@ -25,6 +25,8 @@ import {
 } from '@/lib/research-lab-status'
 import { formatLabAllocationPercent } from '@/lib/research-lab-emissions'
 import type { MetagraphData } from '@/lib/types'
+import type { BenchmarkServingModelVersion } from '@/lib/research-lab-public-benchmark'
+import { ResearchLabBenchmarkLineage } from './ResearchLabBenchmarkLineage'
 
 type ResearchLabData = {
   benchmark: BenchmarkReport | null
@@ -137,6 +139,8 @@ type BenchmarkReport = {
   itemCount: number
   publicIcpCount: number
   privateHoldoutIcpCount: number
+  conditionalHoldoutIcpCount: number
+  servingModelVersion: BenchmarkServingModelVersion | null
   scoreBandCounts: Record<string, number>
   failureCategoryCounts: Record<string, number>
   issues: BenchmarkIssue[]
@@ -574,6 +578,10 @@ function Hero({
       <div className="mt-6 font-mono text-[11px] text-[var(--muted-2)]">
         Published {formatDate(benchmark.benchmarkDate)}
       </div>
+      <ResearchLabBenchmarkLineage
+        lineage={benchmark.servingModelVersion}
+        currentStatusLabel={benchmark.currentStatusAt ? formatDateTime(benchmark.currentStatusAt) : null}
+      />
     </section>
   )
 }
@@ -1175,10 +1183,13 @@ function BenchmarkSection({ benchmark }: { benchmark: BenchmarkReport | null }) 
               <span className="text-[var(--platinum)]">{benchmark.itemCount}</span> total
             </span>
             <span>
-              <span className="text-[var(--platinum)]">{benchmark.publicIcpCount}</span> shown
+              <span className="text-[var(--platinum)]">{benchmark.publicIcpCount}</span> public
             </span>
             <span>
-              <span className="text-[var(--platinum)]">{benchmark.privateHoldoutIcpCount}</span> withheld
+              <span className="text-[var(--platinum)]">{benchmark.privateHoldoutIcpCount}</span> private
+            </span>
+            <span>
+              <span className="text-[var(--platinum)]">{benchmark.conditionalHoldoutIcpCount}</span> conditional
             </span>
           </div>
           {benchmark.scoreBandCounts && <DistributionStrip counts={benchmark.scoreBandCounts} />}
