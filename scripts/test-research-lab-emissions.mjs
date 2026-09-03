@@ -39,6 +39,14 @@ try {
     epoch: 23691,
     allocation_doc: {
       lab_cap_alpha_percent: 10,
+      source_add_allocations: [
+        {
+          miner_hotkey: '5source',
+          paid_alpha_percent: 0.2,
+          intended_alpha_percent: 0.2,
+          reason: 'source_acceptance',
+        },
+      ],
       reimbursement_allocations: [
         {
           miner_hotkey: '5miner',
@@ -79,7 +87,7 @@ try {
 
   assert.equal(
     researchLabAllocationEntries(snapshot.allocation_doc).length,
-    4,
+    5,
     'all allocation arrays should feed the same rollup',
   )
 
@@ -92,6 +100,11 @@ try {
   assert.equal(miner.labBucketSharePercent, 4.63569)
   assert.equal(formatLabAllocationPercent(miner.paidAlphaPercent), '0.4636%')
   assert.equal(formatLabAllocationPercent(miner.labBucketSharePercent), '4.6357%')
+  const sourceMiner = rollup.byHotkey['5source']
+  assert.ok(sourceMiner, 'SOURCE_ADD recipient should be present')
+  assert.equal(sourceMiner.paidAlphaPercent, 0.2)
+  assert.equal(sourceMiner.intendedAlphaPercent, 0.2)
+  assert.equal(sourceMiner.allocationCount, 1)
 
   const fulfillment = buildFulfillmentRewardRollup({
     epoch: 23874,
@@ -153,9 +166,18 @@ try {
   assert.match(routeSource, /numberOr\(loop\.scoredCandidateCount, 0\) > 0/)
   assert.match(routeSource, /promisingLoopCount: allLoops\.filter\(isModelImprovementResearchLabLoop\)\.length/)
   assert.match(routeSource, /statusKey[\s\S]*=== 'promoted'/)
-  assert.match(routeSource, /\.from\('published_weight_bundles'\)/)
-  assert.match(routeSource, /\.select\('epoch_id'\)/)
-  assert.match(routeSource, /\.eq\('netuid', 71\)/)
+  const epochSelectorStart = routeSource.indexOf('async function fetchLatestPublishedWeightEpoch(')
+  const epochSelectorEnd = routeSource.indexOf('async function fetchCurrentLabAllocation(', epochSelectorStart)
+  assert.ok(epochSelectorStart >= 0 && epochSelectorEnd > epochSelectorStart)
+  const epochSelectorSource = routeSource.slice(epochSelectorStart, epochSelectorEnd)
+  const compactQueryIndex = epochSelectorSource.indexOf(".from('research_lab_compact_weight_authorities_v2')")
+  const legacyQueryIndex = epochSelectorSource.indexOf(".from('published_weight_bundles')")
+  assert.ok(compactQueryIndex >= 0, 'current allocation should use compact V2 authority')
+  assert.ok(legacyQueryIndex > compactQueryIndex, 'legacy V1 lookup should only be a fallback')
+  assert.match(epochSelectorSource, /\.eq\('authority_stage', 'finalized'\)/)
+  assert.match(epochSelectorSource, /\.order\('epoch_id', \{ ascending: false, nullsFirst: false \}\)/)
+  assert.match(epochSelectorSource, /if \(Number\.isFinite\(finalizedEpoch\)\) return finalizedEpoch/)
+  assert.match(epochSelectorSource, /legacy published weight epoch query failed/)
   assert.match(routeSource, /runSingleFlight\(publicSnapshotFlight/)
   assert.match(routeSource, /run_id:event_doc->>run_id/)
   assert.match(routeSource, /cost_microusd:event_doc->final_cost_ledger->>actual_openrouter_cost_microusd/)

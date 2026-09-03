@@ -18,6 +18,7 @@ export type ResearchLabEmissionAllocationEntry = {
 export type ResearchLabEmissionAllocationDoc = {
   lab_cap_alpha_percent?: number | string | null
   lab_cap_percent?: number | string | null
+  source_add_allocations?: ResearchLabEmissionAllocationEntry[]
   reimbursement_allocations?: ResearchLabEmissionAllocationEntry[]
   champion_allocations?: ResearchLabEmissionAllocationEntry[]
   queued_champion_allocations?: ResearchLabEmissionAllocationEntry[]
@@ -75,6 +76,7 @@ export function researchLabAllocationEntries(
 ): ResearchLabEmissionAllocationEntry[] {
   if (!doc) return []
   return [
+    ...(Array.isArray(doc.source_add_allocations) ? doc.source_add_allocations : []),
     ...(Array.isArray(doc.reimbursement_allocations) ? doc.reimbursement_allocations : []),
     ...(Array.isArray(doc.champion_allocations) ? doc.champion_allocations : []),
     ...(Array.isArray(doc.queued_champion_allocations) ? doc.queued_champion_allocations : []),

@@ -2543,18 +2543,40 @@ function finalizeLabMinerSpendEntries(
 async function fetchLatestPublishedWeightEpoch(
   supabase: ReturnType<typeof getSupabase>,
 ): Promise<number | null> {
-  const { data, error } = await supabase
+  // Compact V2 is the live authority. Keep V1 only for pre-cutover history.
+  const { data: finalizedData, error: finalizedError } = await supabase
+    .from('research_lab_compact_weight_authorities_v2')
+    .select('epoch_id')
+    .eq('netuid', 71)
+    .eq('authority_stage', 'finalized')
+    .order('epoch_id', { ascending: false, nullsFirst: false })
+    .limit(1)
+
+  if (finalizedError) {
+    console.error('[Research Lab API] finalized compact weight epoch query failed:', finalizedError)
+  } else {
+    const finalizedEpoch = numberOr(
+      (finalizedData?.[0] as { epoch_id?: unknown } | undefined)?.epoch_id,
+      NaN,
+    )
+    if (Number.isFinite(finalizedEpoch)) return finalizedEpoch
+  }
+
+  const { data: legacyData, error: legacyError } = await supabase
     .from('published_weight_bundles')
     .select('epoch_id')
     .eq('netuid', 71)
     .order('epoch_id', { ascending: false, nullsFirst: false })
     .limit(1)
 
-  if (error) {
-    console.error('[Research Lab API] published weight epoch query failed:', error)
+  if (legacyError) {
+    console.error('[Research Lab API] legacy published weight epoch query failed:', legacyError)
     return null
   }
-  const epoch = numberOr((data?.[0] as { epoch_id?: unknown } | undefined)?.epoch_id, NaN)
+  const epoch = numberOr(
+    (legacyData?.[0] as { epoch_id?: unknown } | undefined)?.epoch_id,
+    NaN,
+  )
   return Number.isFinite(epoch) ? epoch : null
 }
 
