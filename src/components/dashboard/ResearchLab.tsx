@@ -26,9 +26,9 @@ import {
 import { formatLabAllocationPercent } from '@/lib/research-lab-emissions'
 import type { MetagraphData } from '@/lib/types'
 import type { BenchmarkServingModelVersion } from '@/lib/research-lab-public-benchmark'
-import { ResearchLabBenchmarkLineage } from './ResearchLabBenchmarkLineage'
 
 type ResearchLabData = {
+  arena: ResearchLabArenaSnapshot
   benchmark: BenchmarkReport | null
   loops: ResearchLoop[]
   activityLoops?: ResearchLoop[]
@@ -44,6 +44,17 @@ type ResearchLabData = {
   }
   benchmarkTelemetry: PublicBenchmarkTelemetry
   fetchedAt: string
+}
+
+type ResearchLabArenaSnapshot = {
+  activeRound: { roundId: string; status: string } | null
+  publishedBaseline: {
+    roundId: string
+    submissionId: string
+    score: number
+    rank: number | null
+    publishedAt: string | null
+  } | null
 }
 
 type PublicBenchmarkTelemetry = {
@@ -492,7 +503,7 @@ export function ResearchLab({
         </div>
       </header>
 
-      <Hero benchmark={benchmark} telemetry={data?.benchmarkTelemetry ?? emptyPublicBenchmarkTelemetry()} />
+      <ArenaHero arena={data?.arena ?? { activeRound: null, publishedBaseline: null }} />
 
       <KpiRail stats={stats} />
 
@@ -542,105 +553,58 @@ function ResearchLabLoading() {
 /* ============================================================
  * Hero — the benchmark score, bound to real data only.
  * ============================================================ */
-function Hero({
-  benchmark,
-  telemetry,
-}: {
-  benchmark: BenchmarkReport | null
-  telemetry: PublicBenchmarkTelemetry
-}) {
-  if (!benchmark) return <ScoringHero telemetry={telemetry} />
-
-  const score = numberOr(telemetry.canonicalPublishedScore, numberOr(benchmark.aggregateScore, 0))
-  const tone = scoreTone(score)
+function ArenaHero({ arena }: { arena: ResearchLabArenaSnapshot }) {
+  const baseline = arena.publishedBaseline
+  const activeRound = arena.activeRound
+  const tone = baseline ? scoreTone(baseline.score) : 'var(--platinum)'
 
   return (
     <section className="pt-12 pb-14">
       <div className="mb-5 font-mono text-[10.5px] uppercase tracking-[0.16em] text-[var(--muted-2)]">
-        Daily rebenchmark
+        Public Pydantic baseline · Arena
       </div>
       <div className="flex items-end gap-5">
         <div
-          className="font-display font-medium leading-[0.84] tracking-[-0.045em] text-[clamp(52px,9vw,104px)]"
+          className="font-display font-medium leading-[0.84] tracking-[-0.045em] text-[clamp(48px,8vw,96px)]"
           style={{ color: tone }}
         >
-          <CountUp value={score} decimals={1} />
-          <span className="ml-3.5 align-baseline font-display text-[22px] md:text-[26px] tracking-normal text-[var(--faint)]">
-            /100
-          </span>
-        </div>
-      </div>
-
-      <p className="mt-7 max-w-[560px] text-[14px] leading-[1.7] text-[var(--muted)]">
-        The current daily rebenchmark score for Leadpoet&apos;s sales agent. Each loop tests whether a miner&apos;s change improves the current model.
-      </p>
-
-      <div className="mt-6 font-mono text-[11px] text-[var(--muted-2)]">
-        Published {formatDate(benchmark.benchmarkDate)}
-      </div>
-      <ResearchLabBenchmarkLineage
-        lineage={benchmark.servingModelVersion}
-        currentStatusLabel={benchmark.currentStatusAt ? formatDateTime(benchmark.currentStatusAt) : null}
-      />
-    </section>
-  )
-}
-
-/* ============================================================
- * Current-day scoring — shown only until today's report is published.
- * ============================================================ */
-function ScoringHero({ telemetry }: { telemetry: PublicBenchmarkTelemetry }) {
-  const total = Math.max(0, numberOr(telemetry.expectedUnits, 0))
-  const resolved = Math.max(0, numberOr(telemetry.resolvedUnits, 0))
-  const hasProgress = isBenchmarkExecutionInProgress(telemetry.executionStatus)
-    && telemetry.expectedUnits !== null
-    && telemetry.resolvedUnits !== null
-    && total > 0
-
-  return (
-    <section className="pt-12 pb-14">
-      <div className="flex items-end gap-5">
-        <div className="font-display font-medium leading-[0.9] tracking-[-0.03em] text-[clamp(40px,7vw,72px)] text-[var(--platinum)]">
-          {hasProgress ? (
-            <>
-              <CountUp value={resolved} />
-              <span className="text-[var(--faint)]">/{total}</span>
-              <span className="ml-3.5 align-baseline font-display text-[20px] tracking-normal text-[var(--faint)] md:text-[24px]">
-                ICPs
-              </span>
-            </>
-          ) : (
-            <span>In&nbsp;progress</span>
+          {baseline ? <CountUp value={baseline.score} decimals={1} /> : activeRound?.status === 'open' ? 'Waiting' : activeRound ? 'In progress' : 'Unavailable'}
+          {baseline && (
+            <span className="ml-3.5 align-baseline font-display text-[22px] tracking-normal text-[var(--faint)] md:text-[26px]">
+              /100
+            </span>
           )}
         </div>
       </div>
 
       <p className="mt-7 max-w-[560px] text-[14px] leading-[1.7] text-[var(--muted)]">
-        {hasProgress
-          ? `Today's baseline is scoring across all ${total} ideal customer profiles. The new benchmark publishes once every ICP finishes.`
-          : "Today's baseline benchmark is being scored. The new number publishes once scoring finishes."}
+        {baseline
+          ? 'The persisted final score for the public Pydantic baseline in the latest published Arena round.'
+          : activeRound?.status === 'open'
+            ? 'The Arena round is open for submissions and is waiting to start. The Pydantic baseline score will appear only after the final ranking is published.'
+            : activeRound
+              ? 'The public Pydantic baseline is running in Arena. Its score will appear only after the final ranking is published.'
+            : 'Arena did not return a published Pydantic baseline score. No score is inferred.'}
       </p>
 
+      <div className="mt-6 flex flex-wrap gap-x-5 gap-y-2 font-mono text-[11px] text-[var(--muted-2)]">
+        {activeRound && (
+          <span title={activeRound.roundId}>Active stage: {arenaStatusLabel(activeRound.status)}</span>
+        )}
+        {baseline && (
+          <>
+            <span title={baseline.roundId}>Published round {shortId(baseline.roundId)}</span>
+            {baseline.rank !== null && <span>Final rank {baseline.rank}</span>}
+            {baseline.publishedAt && <span>{formatDateTime(baseline.publishedAt)}</span>}
+          </>
+        )}
+      </div>
     </section>
   )
 }
 
-function isBenchmarkExecutionInProgress(status: string | null): boolean {
-  return [
-    'assigned',
-    'held',
-    'queued',
-    'started',
-    'running',
-    'heartbeat',
-    'sourcing_completed',
-    'scoring_started',
-    'processing',
-    'in_progress',
-    'paused',
-    'resumed',
-    'restarted',
-  ].includes((status ?? '').trim().toLowerCase())
+function arenaStatusLabel(status: string): string {
+  return status.trim().replaceAll('_', ' ')
 }
 
 /* ============================================================
@@ -1169,12 +1133,15 @@ function BenchmarkSection({ benchmark }: { benchmark: BenchmarkReport | null }) 
     <section className="pt-16">
       <SecLabel
         index="01"
-        title="Benchmark detail"
+        title="Retired rebenchmark detail"
         sub={detailSub}
       />
+      <p className="mb-6 max-w-[620px] text-[12px] leading-[1.6] text-[var(--muted-2)]">
+        This section is the retired aggregate report. It is not the Arena Pydantic baseline score shown above.
+      </p>
       {!benchmark ? (
         <p className="text-[14px] text-[var(--muted)]">
-          Today&apos;s benchmark is still in progress. Completed benchmark detail will appear here when scoring finishes.
+          No retired benchmark report is available for today. See the Arena status above.
         </p>
       ) : (
         <>
@@ -3113,23 +3080,6 @@ function formatDate(value: string): string {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return value
   return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' })
-}
-
-function emptyPublicBenchmarkTelemetry(): PublicBenchmarkTelemetry {
-  return {
-    publicationStatus: 'unavailable',
-    executionStatus: null,
-    expectedUnits: null,
-    resolvedUnits: null,
-    completedUnits: null,
-    skippedUnits: null,
-    failedUnits: null,
-    progressPercent: null,
-    startedAt: null,
-    completedAt: null,
-    durationSeconds: null,
-    canonicalPublishedScore: null,
-  }
 }
 
 function formatRelative(value: string): string {

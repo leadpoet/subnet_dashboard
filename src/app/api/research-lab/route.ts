@@ -51,6 +51,10 @@ import {
   publicBenchmarkServingModelVersion,
   type BenchmarkServingModelVersion,
 } from '@/lib/research-lab-public-benchmark'
+import {
+  normalizeResearchLabArenaSnapshot,
+  type ResearchLabArenaSnapshot,
+} from '@/lib/research-lab-arena'
 
 export const dynamic = 'force-dynamic'
 
@@ -74,6 +78,11 @@ const HIDDEN_LOOP_MINER_PREFIXES = [
   '5FEtvB',
   '5FBhsXVWpezSHcpogXo4CjMcgTBctLcZ7VnNoKzn3oEGST44',
 ]
+const ARENA_GATEWAY_URL = (
+  process.env.LEADPOET_GATEWAY_URL?.trim() ||
+  process.env.FULFILLMENT_GATEWAY_URL?.trim() ||
+  'https://gateway.subnet71.com'
+).replace(/\/+$/, '')
 
 type CachedResponse = {
   data: ResearchLabPayload
@@ -467,6 +476,7 @@ type PublicLoopEventDoc = {
 }
 
 type ResearchLabPayload = {
+  arena: ResearchLabArenaSnapshot
   benchmark: NormalizedBenchmark | null
   loops: NormalizedLoop[]
   activityLoops: NormalizedLoop[]
@@ -739,8 +749,9 @@ export async function GET(request: Request) {
       ) return cache.data
 
       const supabase = getSupabase()
-      const [benchmark, activePromotedModel, loops, allLoops, labMinerSpend] =
+      const [arena, benchmark, activePromotedModel, loops, allLoops, labMinerSpend] =
         await Promise.all([
+          fetchResearchLabArena(),
           fetchLatestBenchmark(supabase, currentBenchmarkDate),
           fetchActivePromotedModelScore(supabase),
           fetchPublicLoops(supabase),
@@ -758,6 +769,7 @@ export async function GET(request: Request) {
       const topicGroups = groupLoopsByTopic(loops)
       const labMinerActivity = buildLabMinerActivityRollup(allLoops)
       const snapshot: ResearchLabPayload = {
+        arena,
         benchmark: displayBenchmark,
         loops,
         activityLoops: allLoops,
@@ -787,6 +799,60 @@ export async function GET(request: Request) {
       { status: 500 }
     )
   }
+}
+
+async function fetchResearchLabArena(): Promise<ResearchLabArenaSnapshot> {
+  const unavailable: ResearchLabArenaSnapshot = { activeRound: null, publishedBaseline: null }
+  try {
+    const current = await fetchArenaJson(`${ARENA_GATEWAY_URL}/arena/v1/current`)
+    const currentRecord = asRecord(current)
+    if (!currentRecord) return unavailable
+
+    const runningRounds = Array.isArray(currentRecord.running_rounds)
+      ? currentRecord.running_rounds.map(asRecord).filter((row): row is Record<string, unknown> => row !== null)
+      : []
+    const activeSummary = runningRounds.at(-1) ?? asRecord(currentRecord.round)
+    const activeRoundId = stringOrNull(activeSummary?.round_id)
+    const publishedRound = asRecord(currentRecord.published_round)
+    const publishedRoundId = stringOrNull(publishedRound?.round_id)
+    const roundIds = [...new Set([activeRoundId, publishedRoundId].filter((id): id is string => id !== null))]
+    const roundResults = await Promise.allSettled(roundIds.map(async (roundId) => [
+      roundId,
+      await fetchArenaJson(`${ARENA_GATEWAY_URL}/arena/v1/rounds/${encodeURIComponent(roundId)}`),
+    ] as const))
+    const rounds = new Map(roundResults.flatMap((result) =>
+      result.status === 'fulfilled' ? [result.value] : []
+    ))
+
+    return normalizeResearchLabArenaSnapshot(
+      current,
+      activeRoundId ? rounds.get(activeRoundId) ?? activeSummary : null,
+      publishedRoundId ? rounds.get(publishedRoundId) : null,
+    )
+  } catch (error) {
+    console.warn('[Research Lab API] Arena snapshot unavailable:', error instanceof Error ? error.message : 'request failed')
+    return unavailable
+  }
+}
+
+async function fetchArenaJson(url: string): Promise<unknown> {
+  const response = await fetch(url, {
+    cache: 'no-store',
+    headers: { Accept: 'application/json' },
+    signal: AbortSignal.timeout(8_000),
+  })
+  if (!response.ok) throw new Error(`Arena request failed (${response.status})`)
+  return response.json()
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null
+}
+
+function stringOrNull(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value.trim() : null
 }
 
 // Public-safe per-candidate diagnostics for a ticket, built on-demand from the
