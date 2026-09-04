@@ -167,7 +167,7 @@ try {
 
   const componentSource = await readFile(resolve('src/components/dashboard/ResearchLab.tsx'), 'utf8')
   assert.match(componentSource, /<ArenaHero arena=\{data\?\.arena/)
-  assert.match(componentSource, /Today&apos;s benchmark is still in progress/)
+  assert.match(componentSource, /No retired benchmark report is available for today/)
   assert.match(componentSource, /: 'in progress'/)
   assert.doesNotMatch(componentSource, /No benchmark has been published yet/)
   assert.doesNotMatch(componentSource, /Last published:/)
