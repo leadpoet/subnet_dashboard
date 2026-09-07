@@ -114,9 +114,9 @@ try {
   assert.doesNotMatch(routeSource, /currentRecord\.king/)
 
   const componentSource = await readFile(resolve('src/components/dashboard/ResearchLab.tsx'), 'utf8')
-  assert.match(componentSource, /Public Pydantic baseline · Arena/)
+  assert.match(componentSource, /Public open-model baseline · Arena/)
   assert.match(componentSource, /No score is inferred/)
-  assert.match(componentSource, /Retired rebenchmark detail/)
+  assert.doesNotMatch(componentSource, /Retired rebenchmark detail/)
   assert.match(componentSource, /waiting to start/)
 
   console.log('research-lab-arena: public baseline join, active stage, and incomplete-score handling passed')

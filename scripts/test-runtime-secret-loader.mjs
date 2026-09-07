@@ -23,10 +23,10 @@ const requiredOnly = Object.fromEntries(
 assert.deepEqual(
   parseRuntimeSecret(JSON.stringify(requiredOnly)),
   requiredOnly,
-  'GitHub source access and Resend stay optional until configured',
+  'Research Lab alert delivery and Resend stay optional until configured',
 )
-assert.equal(OPTIONAL_RUNTIME_SECRET_KEYS.length, 5)
-assert.ok(OPTIONAL_RUNTIME_SECRET_KEYS.includes('SOURCING_MODEL_GITHUB_TOKEN'))
+assert.equal(OPTIONAL_RUNTIME_SECRET_KEYS.length, 4)
+assert.ok(!OPTIONAL_RUNTIME_SECRET_KEYS.includes('SOURCING_MODEL_GITHUB_TOKEN'))
 
 const shell = formatShellEnvironment(parsed)
 assert.match(shell, /^SUPABASE_SECRET_KEY='value-0'$/m)

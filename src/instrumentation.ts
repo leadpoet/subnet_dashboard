@@ -34,7 +34,6 @@
 // doesn't stack a second deep-research timer on top of the first one.
 let sweepIntervalHandle: NodeJS.Timeout | null = null
 let alertMonitorIntervalHandle: NodeJS.Timeout | null = null
-let eventMonitorIntervalHandle: NodeJS.Timeout | null = null
 
 const SWEEP_INTERVAL_MS = 60_000
 
@@ -44,7 +43,6 @@ const SWEEP_INTERVAL_MS = 60_000
 const SWEEP_INITIAL_DELAY_MS = 15_000
 const ALERT_MONITOR_INITIAL_DELAY_MS = 30_000
 const DEFAULT_ALERT_MONITOR_INTERVAL_MS = 60_000
-const DEFAULT_EVENT_MONITOR_INTERVAL_MS = 60_000
 
 export async function register(): Promise<void> {
   // Wrapper form (not early return) is load-bearing — see file header.
@@ -169,66 +167,12 @@ export async function register(): Promise<void> {
       )
     }
 
-    // -------------------------------------------------------------
-    // 3. One-shot Research Lab event notifications. This is separate
-    //    from incident lifecycle alerting so successful benchmark and
-    //    promotion events are idempotent without fake recoveries.
-    // -------------------------------------------------------------
-    if (process.env.RESEARCH_LAB_EVENT_MONITOR_ENABLED === 'true') {
-      if (eventMonitorIntervalHandle === null) {
-        const requestedInterval = Number(process.env.RESEARCH_LAB_EVENT_MONITOR_INTERVAL_MS)
-        const intervalMs = Number.isFinite(requestedInterval)
-          ? Math.min(15 * 60_000, Math.max(30_000, Math.trunc(requestedInterval)))
-          : DEFAULT_EVENT_MONITOR_INTERVAL_MS
-        const tick = async () => {
-          try {
-            const {
-              runResearchLabEventMonitor,
-              runResearchLabImprovementAnalysisWorker,
-            } = await import('./lib/research-lab-event-monitor')
-            const result = await runResearchLabEventMonitor()
-            if (result.acquired && (result.discoveredCount > 0 || result.deliveryCount > 0)) {
-              console.log(
-                `[research_lab_events] ${result.discoveredCount} discovered, ` +
-                  `${result.deliveryCount} delivery attempt(s), ` +
-                  `${result.deliveryFailureCount} failure(s)`,
-              )
-            }
-            void runResearchLabImprovementAnalysisWorker().then((analysis) => {
-              if (analysis.claimed) {
-                console.log(
-                  `[research_lab_events] improvement ${analysis.eventKey} ` +
-                    `${analysis.analyzed ? 'analyzed' : `deferred: ${analysis.error ?? 'unknown error'}`}`,
-                )
-              }
-            }).catch((error) => {
-              const msg = error instanceof Error ? error.message : String(error)
-              console.error('[research_lab_events] analysis worker failed:', msg)
-            })
-          } catch (error) {
-            const msg = error instanceof Error ? error.message : String(error)
-            console.error('[research_lab_events] monitor tick failed:', msg)
-          }
-        }
-
-        console.log(
-          `[research_lab_events] starting event monitor ` +
-            `(first tick in ${ALERT_MONITOR_INITIAL_DELAY_MS / 1000}s, ` +
-            `then every ${intervalMs / 1000}s)`,
-        )
-        setTimeout(() => {
-          void tick()
-          eventMonitorIntervalHandle = setInterval(() => void tick(), intervalMs)
-        }, ALERT_MONITOR_INITIAL_DELAY_MS)
-      }
-    } else {
-      console.log(
-        '[research_lab_events] monitor disabled; set RESEARCH_LAB_EVENT_MONITOR_ENABLED=true to enable',
-      )
-    }
+    // Research Lab no longer runs an event-driven autoresearch or model-improvement worker.
+    // Arena owns baseline publication and miner competition; the durable alert monitor above
+    // remains responsible for validator, weight, and settlement health.
 
     // -------------------------------------------------------------
-    // 4. Deep Research auto-sweep loop.
+    // Deep Research auto-sweep loop.
     // -------------------------------------------------------------
     if (sweepIntervalHandle !== null) {
       console.log('[deep_research] sweep interval already running, skipping')
