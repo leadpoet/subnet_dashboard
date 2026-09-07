@@ -7,6 +7,11 @@ import { fetchGatewayPcr0Acceptance, type GatewayPcr0Acceptance } from '@/lib/re
 import { evaluateResearchLabAlerts, type ResearchLabAlertObservations, type ResearchLabAlertResolution, type ResearchLabEvaluatedAlert } from '@/lib/research-lab-alerts'
 import { getRuntimeSecretEnvironment } from '@/lib/runtime-secret-environment'
 import { parseResearchLabAlertDeliveryConfig } from '@/lib/research-lab-alert-delivery'
+import {
+  dedupeLatestValidatorNodes,
+  evaluateValidatorDeploymentEvidence,
+  selectValidatorPcrNode,
+} from '@/lib/admin-validator-health'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -27,7 +32,7 @@ export type AdminLabHealthSignal = { id: string; label: string; value: string; s
 export type AdminLabOps = { state: HealthState; healthSignals: AdminLabHealthSignal[]; alerts: AdminLabAlerts; evaluatedAlerts: ResearchLabEvaluatedAlert[]; alertResolutions: ResearchLabAlertResolution[]; attestation: AdminLabAttestation; gateway: AdminLabGateway; validatorDeployment: AdminLabValidatorDeployment }
 export type AdminResearchLabPayload = { arena: ResearchLabArenaSnapshot; ops: AdminLabOps; fetchedAt: string }
 
-export async function GET(_request?: NextRequest): Promise<NextResponse> {
+export async function GET(_request: NextRequest): Promise<NextResponse> {
   let supabase: ReturnType<typeof getAdminSupabase>
   try { supabase = getAdminSupabase() } catch (error) { return NextResponse.json({ error: error instanceof Error ? error.message : 'admin supabase not configured' }, { status: 503 }) }
   try {
@@ -75,24 +80,20 @@ async function fetchJson(url: string): Promise<unknown> { const response = await
 
 async function fetchAttestation(supabase: ReturnType<typeof getAdminSupabase>): Promise<AdminLabAttestation> {
   const result = await supabase.from('ops_attestation_current').select('*').limit(ADMIN_QUERY_LIMIT)
-  let rows = (result.data ?? []) as Array<Record<string, unknown>>
-  let sourceAvailable = !result.error
-  const fallbackSource = rows.length === 0
-  if (rows.length === 0) {
-    const fallback = await supabase.from('published_weight_bundles').select('*').order('created_at', { ascending: false }).limit(ADMIN_QUERY_LIMIT)
-    rows = (fallback.data ?? []) as Array<Record<string, unknown>>
-    sourceAvailable ||= !fallback.error && rows.length > 0
+  if (result.error) return { state: 'unknown', sourceAvailable: false, latestAttestedAt: null, nodes: [] }
+
+  const nodes = dedupeLatestValidatorNodes(
+    ((result.data ?? []) as Array<Record<string, unknown>>).map(normalizeAttestation),
+  )
+  const latestAttestedAt = latestIso(...nodes.map((node) => node.attestedAt))
+  const age = latestAttestedAt ? Date.now() - Date.parse(latestAttestedAt) : null
+  const mismatched = nodes.some((node) => node.matched === false)
+  return {
+    state: mismatched ? 'critical' : age === null || age > FRESH_ATTESTATION_MS ? 'degraded' : 'healthy',
+    sourceAvailable: true,
+    latestAttestedAt,
+    nodes,
   }
-  if (!sourceAvailable) return { state: 'unknown', sourceAvailable: false, latestAttestedAt: null, nodes: [] }
-  let nodes = rows.map(normalizeAttestation)
-  if (fallbackSource) {
-    nodes = await Promise.all(nodes.map(async (node) => {
-      const acceptance = await fetchGatewayPcr0Acceptance({ gatewayUrl: GATEWAY_URL, pcr0: node.observedPcr0, commit: node.gitSha })
-      return { ...node, matched: acceptance.checked ? acceptance.accepted : node.matched, acceptanceCheckedAt: acceptance.checkedAt, acceptanceDetail: acceptance.detail }
-    }))
-  }
-  const latestAttestedAt = latestIso(...nodes.map((node) => node.attestedAt)); const age = latestAttestedAt ? Date.now() - Date.parse(latestAttestedAt) : null; const mismatched = nodes.some((node) => node.matched === false)
-  return { state: mismatched ? 'critical' : age === null || age > FRESH_ATTESTATION_MS ? 'degraded' : 'healthy', sourceAvailable: true, latestAttestedAt, nodes }
 }
 async function fetchAlerts(supabase: ReturnType<typeof getAdminSupabase>): Promise<AdminLabAlerts> {
   const [current, monitor, registry] = await Promise.all([supabase.from('ops_alert_current').select('*').order('last_seen_at', { ascending: false }).limit(ADMIN_QUERY_LIMIT), supabase.from('ops_alert_monitor_state').select('*').eq('monitor_id', ALERT_MONITOR_ID).limit(1).maybeSingle(), supabase.from('ops_validator_registry').select('*').order('updated_at', { ascending: false }).limit(ADMIN_QUERY_LIMIT)])
@@ -108,16 +109,99 @@ async function buildValidatorDeployment(supabase: ReturnType<typeof getAdminSupa
   const receipt = await supabase.from('research_lab_attested_execution_receipts_v2').select('commit_sha,boot_identity_hash,issued_at,created_at').eq('role', 'validator_weights').order('issued_at', { ascending: false }).limit(1).maybeSingle()
   const receiptRow = (receipt.data ?? null) as Record<string, unknown> | null
   const receiptAt = stringOr(receiptRow?.issued_at) ?? stringOr(receiptRow?.created_at)
-  const node = attestation.nodes.find((item) => item.component.toLowerCase().includes('validator')) ?? attestation.nodes[0]
-  const reportedAt = receiptAt ?? node?.attestedAt ?? null
-  const receiptFresh = Boolean(receiptAt && Date.now() - Date.parse(receiptAt) <= 3 * 60 * 60_000)
-  const runtimeFresh = Boolean(node?.attestedAt && Date.now() - Date.parse(node.attestedAt) <= 5 * 60_000)
-  const verified = (receiptFresh || runtimeFresh) && node?.matched !== false
-  return { sourceAvailable: Boolean(receiptRow || node), currentRuntimeVerified: verified, verificationReason: verified ? null : receiptRow || node ? 'Latest validator runtime receipt or attestation is stale or rejected.' : 'No validator runtime attestation or execution receipt is available.', commitSha: stringOr(receiptRow?.commit_sha) ?? node?.gitSha ?? null, buildId: stringOr(receiptRow?.boot_identity_hash) ?? node?.buildId ?? null, reportedAt, checkedAt: new Date().toISOString() }
+  const evidence = evaluateValidatorDeploymentEvidence(
+    receiptRow
+      ? {
+          commitSha: stringOr(receiptRow.commit_sha),
+          buildId: stringOr(receiptRow.boot_identity_hash),
+          reportedAt: receiptAt,
+        }
+      : null,
+    attestation.nodes,
+    Date.now(),
+  )
+  return {
+    ...evidence,
+    checkedAt: new Date().toISOString(),
+  }
 }
 function buildAlertObservations(attestation: AdminLabAttestation, gateway: GatewayDeployment): ResearchLabAlertObservations { return { validators: attestation.nodes.map((node) => ({ validatorId: node.hotkey ?? node.nodeId, source: 'ops_attestation_current', pcr0: { expectedPcr0: node.expectedPcr0, observedPcr0: node.observedPcr0, matched: node.matched, observedAt: node.attestedAt }, offchainWeightBundle: { publishedAt: node.attestedAt, bundleId: node.id } })), dataFreshness: [{ sourceId: 'validator_attestation', source: 'ops_attestation_current', observedAt: attestation.latestAttestedAt }, ...(gateway.checkedAt ? [{ sourceId: 'gateway_readiness', source: 'gateway', observedAt: gateway.checkedAt }] : [])] } }
-async function checkGatewayPcr0(attestation: AdminLabAttestation): Promise<GatewayPcr0Acceptance> { const node = attestation.nodes.find((item) => item.observedPcr0); return fetchGatewayPcr0Acceptance({ gatewayUrl: GATEWAY_URL, pcr0: node?.observedPcr0 ?? null, commit: node?.gitSha ?? null }) }
-function buildHealthSignals(arena: ResearchLabArenaSnapshot, alerts: AdminLabAlerts, attestation: AdminLabAttestation, gateway: GatewayDeployment, validator: AdminLabValidatorDeployment): AdminLabHealthSignal[] { return [{ id: 'arena', label: 'Arena', value: arena.activeRound?.status ?? 'Unavailable', state: arena.activeRound ? 'healthy' : 'unknown', detail: arena.activeRound ? `Round ${arena.activeRound.roundId} is ${arena.activeRound.status}.` : 'Arena current state is unavailable.', updatedAt: null }, { id: 'baseline', label: 'Public baseline', value: arena.publishedBaseline ? arena.publishedBaseline.score.toFixed(2) : 'Unavailable', state: arena.publishedBaseline ? 'healthy' : 'unknown', detail: arena.publishedBaseline ? `Published round ${arena.publishedBaseline.roundId}.` : 'No published baseline result is available.', updatedAt: arena.publishedBaseline?.publishedAt ?? null }, { id: 'pcr0', label: 'PCR0', value: attestation.nodes.length ? `${attestation.nodes.filter((node) => node.matched === true).length}/${attestation.nodes.length}` : 'Unavailable', state: attestation.state, detail: attestation.latestAttestedAt ? `Latest attestation ${attestation.latestAttestedAt}.` : 'No validator attestation is available.', updatedAt: attestation.latestAttestedAt }, { id: 'gateway', label: 'Gateway', value: gateway.sourceAvailable ? 'Ready' : 'Unavailable', state: gateway.sourceAvailable ? 'healthy' : 'degraded', detail: gateway.unavailableReason ?? 'Gateway deployment endpoint responded.', updatedAt: gateway.checkedAt }, { id: 'validator', label: 'Validator runtime', value: validator.currentRuntimeVerified ? 'Ready' : 'Attention', state: validator.currentRuntimeVerified ? 'healthy' : 'degraded', detail: validator.verificationReason ?? 'Recent validator runtime attestation is available.', updatedAt: validator.reportedAt }, { id: 'alerts', label: 'Alerts', value: `${alerts.activeCount} active`, state: alerts.state, detail: alerts.operations.detail, updatedAt: alerts.latestObservedAt }] }
+async function checkGatewayPcr0(attestation: AdminLabAttestation): Promise<GatewayPcr0Acceptance> {
+  const node = selectValidatorPcrNode(attestation.nodes)
+  return fetchGatewayPcr0Acceptance({
+    gatewayUrl: GATEWAY_URL,
+    pcr0: node?.observedPcr0 ?? null,
+    commit: node?.gitSha ?? null,
+  })
+}
+function buildHealthSignals(
+  arena: ResearchLabArenaSnapshot,
+  alerts: AdminLabAlerts,
+  attestation: AdminLabAttestation,
+  gateway: GatewayDeployment,
+  validator: AdminLabValidatorDeployment,
+): AdminLabHealthSignal[] {
+  return [
+    {
+      id: 'arena',
+      label: 'Arena',
+      value: arena.activeRound?.status ?? 'Unavailable',
+      state: arena.activeRound ? 'healthy' : 'unknown',
+      detail: arena.activeRound
+        ? `Round ${arena.activeRound.roundId} is ${arena.activeRound.status}.`
+        : 'Arena current state is unavailable.',
+      updatedAt: null,
+    },
+    {
+      id: 'baseline',
+      label: 'Public baseline',
+      value: arena.publishedBaseline ? arena.publishedBaseline.score.toFixed(2) : 'Unavailable',
+      state: arena.publishedBaseline ? 'healthy' : 'unknown',
+      detail: arena.publishedBaseline
+        ? `Published round ${arena.publishedBaseline.roundId}.`
+        : 'No published baseline result is available.',
+      updatedAt: arena.publishedBaseline?.publishedAt ?? null,
+    },
+    {
+      id: 'pcr0',
+      label: 'PCR0',
+      value: attestation.nodes.length
+        ? `${attestation.nodes.filter((node) => node.matched === true).length}/${attestation.nodes.length}`
+        : 'Unavailable',
+      state: attestation.state,
+      detail: attestation.latestAttestedAt
+        ? `Latest attestation ${attestation.latestAttestedAt}.`
+        : 'No validator attestation is available.',
+      updatedAt: attestation.latestAttestedAt,
+    },
+    {
+      id: 'gateway',
+      label: 'Gateway',
+      value: gateway.sourceAvailable ? 'Metadata available' : 'Unavailable',
+      state: gateway.sourceAvailable ? 'unknown' : 'degraded',
+      detail: gateway.sourceAvailable
+        ? 'The deployment endpoint reported commit metadata; runtime readiness is not proven by this signal.'
+        : gateway.unavailableReason ?? 'Gateway deployment metadata is unavailable.',
+      updatedAt: gateway.checkedAt,
+    },
+    {
+      id: 'validator',
+      label: 'Validator runtime',
+      value: validator.currentRuntimeVerified ? 'Ready' : 'Attention',
+      state: validator.currentRuntimeVerified ? 'healthy' : 'degraded',
+      detail: validator.verificationReason ?? 'Recent validator runtime evidence is available.',
+      updatedAt: validator.reportedAt,
+    },
+    {
+      id: 'alerts',
+      label: 'Alerts',
+      value: `${alerts.activeCount} active`,
+      state: alerts.state,
+      detail: alerts.operations.detail,
+      updatedAt: alerts.latestObservedAt,
+    },
+  ]
+}
 function normalizeAttestation(row: Record<string, unknown>): AdminLabAttestation['nodes'][number] { const expected = normalizePcr0(row.expected_pcr0 ?? row.expectedPCR0); const observed = normalizePcr0(row.observed_pcr0 ?? row.validator_pcr0 ?? row.pcr0 ?? row.observedPCR0); const explicit = typeof row.matched === 'boolean' ? row.matched : typeof row.pcr0_matched === 'boolean' ? row.pcr0_matched : null; return { id: stringOr(row.id) ?? `${stringOr(row.component) ?? 'validator'}:${stringOr(row.node_id) ?? stringOr(row.validator_hotkey) ?? 'unknown'}`, component: stringOr(row.component) ?? 'validator', nodeId: stringOr(row.node_id) ?? stringOr(row.validator_id) ?? stringOr(row.validator_hotkey) ?? 'unknown', hotkey: stringOr(row.hotkey) ?? stringOr(row.validator_hotkey), expectedPcr0: expected, observedPcr0: observed, matched: explicit ?? (expected && observed ? expected === observed : null), buildId: stringOr(row.build_id) ?? (row.epoch_id === undefined ? null : `epoch ${String(row.epoch_id)}`), gitSha: stringOr(row.git_sha) ?? stringOr(row.git_commit_sha) ?? stringOr(row.pcr0_commit_hash), attestedAt: stringOr(row.attested_at) ?? stringOr(row.updated_at) ?? stringOr(row.created_at), acceptanceCheckedAt: null, acceptanceDetail: null } }
 function normalizeAlert(row: Record<string, unknown>): AdminLabAlert | null { const id = stringOr(row.id) ?? stringOr(row.alert_id); if (!id) return null; return { id, fingerprint: stringOr(row.fingerprint) ?? id, signal: stringOr(row.signal) ?? 'unknown', severity: stringOr(row.severity)?.toLowerCase() ?? 'warning', status: stringOr(row.status)?.toLowerCase() ?? 'open', title: stringOr(row.title) ?? id, detail: stringOr(row.detail) ?? '', firstSeenAt: stringOr(row.first_seen_at) ?? stringOr(row.created_at), lastSeenAt: stringOr(row.last_seen_at) ?? stringOr(row.updated_at), count: numberOr(row.occurrences ?? row.count, 1) } }
 function normalizeValidator(row: Record<string, unknown>): AdminLabMonitoredValidator { return { hotkey: stringOr(row.validator_hotkey) ?? '', label: stringOr(row.label), source: 'database', enabled: booleanOr(row.enabled) ?? true, monitorPcr0: booleanOr(row.monitor_pcr0) ?? true, monitorOffchainWeights: booleanOr(row.monitor_offchain_weights) ?? true, monitorOnchainWeights: booleanOr(row.monitor_onchain_weights) ?? true, expectedPcr0: normalizePcr0(row.expected_pcr0), updatedAt: stringOr(row.updated_at) } }
