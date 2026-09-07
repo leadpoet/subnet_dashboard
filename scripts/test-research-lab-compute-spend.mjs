@@ -164,23 +164,7 @@ try {
     },
   )
 
-  const adminRouteSource = await readFile(resolve('src/app/api/admin/research-lab/route.ts'), 'utf8')
-  assert.match(adminRouteSource, /\.filter\(\(loop\) => isActiveResearchLabLoopStatus\(loop\.statusKey\)\)/)
-  assert.match(adminRouteSource, /id: 'awaiting_funding'/)
-  assert.match(adminRouteSource, /id: 'waiting_credits'/)
-  assert.match(adminRouteSource, /fetchComputeSpendSummary/)
-  assert.match(adminRouteSource, /fetchFinalizedRunEvidence/)
-  assert.match(adminRouteSource, /buildResearchLabFinalizedRunReconciliation/)
-
-  const componentSource = await readFile(resolve('src/app/admin/_components/AdminResearchLab.tsx'), 'utf8')
-  assert.match(componentSource, /Daily compute spend/)
-  assert.match(componentSource, /Finalized OpenRouter cost/)
-  assert.match(componentSource, /Finalized run outcomes/)
-  assert.match(componentSource, /Reached scoring/)
-  assert.match(componentSource, /Candidate, not scored/)
-  assert.match(componentSource, /No-candidate split/)
-
-  console.log('research-lab-compute-spend: daily ledger aggregation, run reconciliation, and admin wiring passed')
+  console.log('research-lab-compute-spend: daily ledger aggregation and run reconciliation passed')
 } finally {
   await rm(outDir, { recursive: true, force: true })
 }

@@ -14,6 +14,7 @@ export type ResearchLabArenaBaseline = {
 export type ResearchLabArenaSnapshot = {
   activeRound: ResearchLabArenaRound | null
   publishedBaseline: ResearchLabArenaBaseline | null
+  publishedWinner: ResearchLabArenaBaseline | null
 }
 
 type JsonRecord = Record<string, unknown>
@@ -38,7 +39,20 @@ export function normalizeResearchLabArenaSnapshot(
       ? { roundId: activeRoundId, status: activeStatus }
       : null,
     publishedBaseline: normalizePublishedBaseline(publishedRoundValue, publishedRoundId),
+    publishedWinner: normalizePublishedWinner(publishedRoundValue, publishedRoundId),
   }
+}
+
+function normalizePublishedWinner(value: unknown, expectedRoundId: string): ResearchLabArenaBaseline | null {
+  const round = record(value)
+  if (!round || !expectedRoundId || text(round.status) !== 'published' || text(round.round_id) !== expectedRoundId) return null
+  const ranking = arrayOfRecords(round.final_ranking)
+  const winner = ranking.find((row) => nonNegativeInteger(row.rank) === 1) ?? ranking[0]
+  const submissionId = text(winner?.submission_id)
+  const score = finiteNumber(winner?.final_score)
+  if (!submissionId || score === null || score < 0 || score > 100) return null
+  const publication = record(round.publication)
+  return { roundId: expectedRoundId, submissionId, score, rank: nonNegativeInteger(winner?.rank), publishedAt: text(publication?.published_at) || null }
 }
 
 function normalizePublishedBaseline(value: unknown, expectedRoundId: string): ResearchLabArenaBaseline | null {

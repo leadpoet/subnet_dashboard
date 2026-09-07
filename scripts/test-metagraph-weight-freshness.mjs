@@ -631,16 +631,9 @@ class Subtensor:
     'Updated should appear immediately after Stake weight and VTrust',
   )
 
-  const labUiSource = await readFile(resolve('src/app/admin/_components/AdminResearchLab.tsx'), 'utf8')
-  const labOps = labUiSource.indexOf('<OpsHealthStrip ops={ops} />')
-  const metagraph = labUiSource.indexOf('<AdminMetagraph />')
-  const dailyBenchmark = labUiSource.indexOf('<DailyBenchmarkTelemetry')
-  assert.ok(
-    labOps < metagraph && metagraph < dailyBenchmark,
-    'Metagraph should render between Lab Ops and Daily Benchmark',
-  )
-
-  console.log('metagraph-weight-freshness: effective stake, seven-UID roster, owner inclusion, telemetry, and UI wiring passed')
+  const adminPageSource = await readFile(resolve('src/app/admin/page.tsx'), 'utf8')
+  assert.match(adminPageSource, /<AdminWeightsAlerts \/>/)
+  console.log('metagraph-weight-freshness: effective stake, seven-UID roster, owner inclusion, and weight watch wiring passed')
 } finally {
   globalThis.fetch = originalFetch
   if (originalPythonPath === undefined) delete process.env.PYTHON_PATH

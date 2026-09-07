@@ -19,6 +19,13 @@ type ResearchLabArenaSnapshot = {
     rank: number | null
     publishedAt: string | null
   } | null
+  publishedWinner: {
+    roundId: string
+    submissionId: string
+    score: number
+    rank: number | null
+    publishedAt: string | null
+  } | null
 }
 
 type LabMinerSpendRollup = {
@@ -108,7 +115,7 @@ export function ResearchLab({
         </p>
       </header>
 
-      <ArenaHero arena={data?.arena ?? { activeRound: null, publishedBaseline: null }} />
+      <ArenaHero arena={data?.arena ?? { activeRound: null, publishedBaseline: null, publishedWinner: null }} />
       <LabEmissionSplit spend={data?.labMinerSpend ?? null} metagraph={metagraph} />
       {error ? <p className="mt-5 text-[12px] text-[var(--muted-2)]">Latest refresh failed: {error}</p> : null}
     </div>
@@ -126,6 +133,7 @@ function ResearchLabLoading() {
 
 function ArenaHero({ arena }: { arena: ResearchLabArenaSnapshot }) {
   const baseline = arena.publishedBaseline
+  const winner = arena.publishedWinner
   const activeRound = arena.activeRound
   const scoreTone = baseline ? (baseline.score >= 80 ? 'var(--white)' : baseline.score >= 60 ? 'var(--platinum)' : 'var(--muted)') : 'var(--platinum)'
   const activeLabel = activeRound ? activeRound.status.trim().replaceAll('_', ' ') : null
@@ -149,6 +157,7 @@ function ArenaHero({ arena }: { arena: ResearchLabArenaSnapshot }) {
       <div className="mt-6 flex flex-wrap gap-x-5 gap-y-2 font-mono text-[11px] text-[var(--muted-2)]">
         {activeLabel ? <span>Active stage: {activeLabel}</span> : null}
         {baseline ? <><span>Published round {shortId(baseline.roundId)}</span>{baseline.rank !== null ? <span>Final rank {baseline.rank}</span> : null}{baseline.publishedAt ? <span>{formatDateTime(baseline.publishedAt)}</span> : null}</> : null}
+        {winner ? <span>Current king: {shortId(winner.submissionId)} · {winner.score.toFixed(1)}</span> : null}
       </div>
     </section>
   )
@@ -174,11 +183,11 @@ function LabEmissionSplit({ spend, metagraph }: { spend: LabMinerSpendRollup | n
     <section className="pt-10">
       <div className="mb-5">
         <div className="font-display text-[22px] font-medium tracking-[-0.025em] text-[var(--platinum)]">Miner settlement and emissions</div>
-        <p className="mt-1.5 max-w-2xl text-[12px] leading-relaxed text-[var(--muted-2)]">Current SOURCE_ADD allocation, metagraph emissions, reimbursement, and compute spend remain visible for active settlement workflows.</p>
+        <p className="mt-1.5 max-w-2xl text-[12px] leading-relaxed text-[var(--muted-2)]">Current Lab allocation, metagraph emissions, reimbursement, and compute spend remain visible for active settlement workflows.</p>
       </div>
       {rows.length === 0 ? <p className="text-[13px] text-[var(--muted-2)]">No current Lab allocation or settlement data is available.</p> : (
         <div className="overflow-hidden rounded-md border border-[var(--line)]">
-          <div className="hidden grid-cols-[minmax(0,1fr)_130px_130px_130px_130px] gap-3 border-b border-[var(--line)] bg-[rgba(236,234,230,0.018)] px-3 py-2 font-mono text-[9.5px] uppercase tracking-[0.1em] text-[var(--muted-2)] md:grid"><span>Hotkey</span><span className="text-right">Metagraph</span><span className="text-right">SOURCE_ADD</span><span className="text-right">Compute / repay</span><span className="text-right">Alpha earned</span></div>
+          <div className="hidden grid-cols-[minmax(0,1fr)_130px_130px_130px_130px] gap-3 border-b border-[var(--line)] bg-[rgba(236,234,230,0.018)] px-3 py-2 font-mono text-[9.5px] uppercase tracking-[0.1em] text-[var(--muted-2)] md:grid"><span>Hotkey</span><span className="text-right">Metagraph</span><span className="text-right">Lab allocation</span><span className="text-right">Compute / repay</span><span className="text-right">Alpha earned</span></div>
           {rows.map((row) => <div key={row.hotkey} className="grid grid-cols-[minmax(0,1fr)_auto] gap-3 border-b border-[var(--line)] px-3 py-3 last:border-b-0 md:grid-cols-[minmax(0,1fr)_130px_130px_130px_130px] md:items-center"><span className="font-mono text-[11px] text-[var(--platinum)]">{shortHotkey(row.hotkey)}</span><span className="text-right font-mono text-[11px] text-[var(--muted)]">{formatLabAllocationPercent(row.metagraphPct)}</span><span className="hidden text-right font-mono text-[11px] text-[var(--muted)] md:block">{formatLabAllocationPercent(row.paidAlphaPct)}</span><span className="text-right font-mono text-[11px] text-[var(--muted)]">{formatUsd(row.computeSpendUsd)} / {formatUsd(row.reimbursementUsd)}</span><span className="hidden text-right font-mono text-[11px] text-[var(--muted)] md:block">{formatAlpha(row.alphaEarned)}</span></div>)}
         </div>
       )}

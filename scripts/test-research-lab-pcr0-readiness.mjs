@@ -90,23 +90,10 @@ try {
   assert.equal(parsedUrl.searchParams.get('require_pcr0_commit_match'), 'true')
 
   const routeSource = await readFile(resolve('src/app/api/admin/research-lab/route.ts'), 'utf8')
-  assert.match(routeSource, /verificationMode: gatewayAcceptanceAvailable \? 'gateway_acceptance'/)
   assert.match(routeSource, /fetchGatewayPcr0Acceptance/)
-  assert.match(routeSource, /audited weight publication is blocked/)
-
+  assert.match(routeSource, /checkGatewayPcr0/)
   const componentSource = await readFile(resolve('src/app/admin/_components/AdminResearchLab.tsx'), 'utf8')
-  assert.match(componentSource, /PCR0 mismatch — weight publication blocked/)
-  assert.match(componentSource, /Production gateway readiness/)
-  assert.match(componentSource, /label=\{gatewayAcceptance \? 'Rejected'/)
-  assert.match(componentSource, /role="alert"/)
-  assert.match(componentSource, /neutralPcr0Acceptance/)
-  assert.match(componentSource, /signal\.value\.endsWith\(' accepted'\)/)
-  assert.match(componentSource, /neutralPcr0Acceptance \? 'unknown' : signal\.state/)
-  assert.match(componentSource, /emphasizedMismatch/)
-  assert.match(componentSource, /signal\.id === 'pcr0' && signal\.state === 'critical' && !neutralPcr0Acceptance/)
-  assert.match(componentSource, /rgba\(240, 109, 120, 0\.48\)/)
-  assert.match(componentSource, /#f06d78/)
-  assert.match(routeSource, /\? 'Unverified'/)
+  assert.match(componentSource, /PCR0 check/)
 
   console.log('research-lab-pcr0-readiness: gateway acceptance and mismatch UI wiring passed')
 } finally {

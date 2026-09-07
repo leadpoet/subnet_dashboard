@@ -49,7 +49,7 @@ const FAQ_DATA: FAQItem[] = [
     id: 'how-it-works',
     question: 'How does the subnet actually work?',
     answer:
-      "The subnet runs on two tracks. Fulfillment is where it produces economic output. When a sales team submits a request, miners compete in real time to source leads that match the request's criteria, including industry, role, geography, company size, and intent signals. Validators score and verify every submission, so only the leads that pass quality checks and fit best reach the sales team. That creates a live market around each request instead of a static list sold over and over again.\n\nThe Research Lab is the second track. Miners direct and fund automated research loops that work to improve Leadpoet's sales agent, with every improvement scored against a shared benchmark. The engine behind every request keeps getting better over time, and the same work generates data to train a state-of-the-art sales LLM.",
+      "The subnet runs on two tracks. Fulfillment is where it produces economic output. When a sales team submits a request, miners compete in real time to source leads that match the request's criteria, including industry, role, geography, company size, and intent signals. Validators score and verify every submission, so only the leads that pass quality checks and fit best reach the sales team. That creates a live market around each request instead of a static list sold over and over again.\n\nThe Research Lab publishes an open baseline and rebenchmarks it daily. Miners can fork the public harness, change the model or agent, and submit a competing system through Arena. Validators score every submission on the same ICPs, and the published result determines the competition outcome.",
   },
   {
     id: 'fulfillment',
@@ -61,13 +61,13 @@ const FAQ_DATA: FAQItem[] = [
     id: 'research-lab',
     question: 'How does the Research Lab work?',
     answer:
-      "The Research Lab is where Leadpoet pushes the frontier of sales intelligence. Miners direct and fund automated research loops: they provide compute, choose a research direction, and run experiments that make Leadpoet's sales agent smarter. Every improvement is scored against a shared benchmark, so progress stays open, measurable, and relentless.\n\nThis is how the best sales agent in the world gets built, in the open. The agent sharpens with every loop, miners are rewarded for the gains they unlock, and each experiment leaves behind a growing, labeled corpus of real sales research. That corpus is the foundation for training state-of-the-art sales models. We improve what ships today and compound the data advantage behind everything we build next.",
+      "The Research Lab runs an open model competition. A public harness, model, APIs, and sourcing logic are rebenchmarked daily to establish the baseline. Miners can fork that baseline, make any changes they want, and submit a competing model through the standardized Arena interface. Validators score the baseline and submissions on the same ICPs, then publish the competition result.",
   },
   {
     id: 'incentives',
     question: 'How does the incentive mechanism work?',
     answer:
-      "Rewards follow verified value, on both tracks. In Fulfillment, miners earn when their leads pass every data-quality and intent check and rank highest for a live request. Validators handle scoring, and the leads that win are the ones that get paid. In the Research Lab, contributors are rewarded when their experiments measurably improve the sales agent against a shared benchmark.\n\nThat keeps every incentive pointed at the same goal: a sharper sales brain and a better agent. Fresher data, tighter fit, stronger signal, and real model gains are what move the market. And because outcomes are measured, the network can't reward anything that doesn't actually work.",
+      "Rewards follow verified value, on both tracks. In Fulfillment, miners earn when their leads pass every data-quality and intent check and rank highest for a live request. Validators handle scoring, and the leads that win are the ones that get paid. In the Research Lab, Arena rewards the submissions that score best against the shared ICP set.\n\nThat keeps incentives tied to measurable output. Validators score the same inputs for every competitor, and the published competition outcome drives settlement.",
   },
   {
     id: 'alpha',

@@ -167,7 +167,7 @@ export async function GET() {
 }
 
 async function fetchResearchLabArena(): Promise<ResearchLabArenaSnapshot> {
-  const unavailable: ResearchLabArenaSnapshot = { activeRound: null, publishedBaseline: null }
+  const unavailable: ResearchLabArenaSnapshot = { activeRound: null, publishedBaseline: null, publishedWinner: null }
   try {
     const current = await fetchArenaJson(`${ARENA_GATEWAY_URL}/arena/v1/current`)
     const currentRecord = asRecord(current)

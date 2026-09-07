@@ -43,6 +43,10 @@ try {
       roundId: 'arena-published', submissionId: 'pydantic-baseline', score: 78.4,
       rank: 2, publishedAt: '2026-09-04T12:00:00Z',
     },
+    publishedWinner: {
+      roundId: 'arena-published', submissionId: 'miner-1', score: 81.2,
+      rank: 1, publishedAt: '2026-09-04T12:00:00Z',
+    },
   })
 
   const incomplete = normalizeResearchLabArenaSnapshot(
@@ -58,7 +62,7 @@ try {
     },
   )
   assert.deepEqual(incomplete, {
-    activeRound: { roundId: 'arena-open', status: 'open' }, publishedBaseline: null,
+    activeRound: { roundId: 'arena-open', status: 'open' }, publishedBaseline: null, publishedWinner: null,
   }, 'an incomplete publication must not fabricate a zero score')
 
   const invalidPublications = [

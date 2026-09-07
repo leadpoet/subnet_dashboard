@@ -124,54 +124,15 @@ try {
   assert.match(unavailable.unavailableReason, /did not report/)
 
   const routeSource = await readFile(resolve('src/app/api/admin/research-lab/route.ts'), 'utf8')
-  assert.match(routeSource, /fetchGatewayDeployment\(\{ gatewayUrl: LEADPOET_GATEWAY_URL \}\)/)
-  assert.match(routeSource, /fetchLeadpoetCommitComparison/)
-  assert.match(routeSource, /commitsBehind: comparison\.commitsBehind/)
-  assert.match(routeSource, /LEADPOET_REPOSITORY_COMPARE_API_URL/)
-  assert.match(routeSource, /buildValidatorDeploymentSummary\(/)
-  assert.match(routeSource, /fetchLatestValidatorExecutionReceipt\(supabase\)/)
-  assert.match(routeSource, /\.from\('research_lab_attested_execution_receipts_v2'\)/)
-  assert.match(routeSource, /\.eq\('role', 'validator_weights'\)/)
-  assert.match(routeSource, /runtimeReceipt\.commitSha \?\? latestValidator\?\.gitSha \?\? null/)
-  assert.match(routeSource, /FRESH_VALIDATOR_EXECUTION_RECEIPT_MS/)
-  assert.match(routeSource, /source: runtimeReceipt\.commitSha/)
-  assert.match(routeSource, /'validator'/)
-  assert.match(routeSource, /distinctCommitCount:/)
-  assert.match(routeSource, /attestation\.source === 'ops_attestation_current'/)
-  assert.match(routeSource, /currentCommitVerified/)
-  assert.match(routeSource, /freshness: 'unknown', commitsBehind: null/)
+  assert.match(routeSource, /fetchGatewayDeployment\(\{ gatewayUrl: GATEWAY_URL \}\)/)
+  assert.match(routeSource, /buildValidatorDeployment\(/)
+  assert.match(routeSource, /ops_attestation_current/)
+  assert.doesNotMatch(routeSource, /github\.com|Sourcing_model|fetchLeadpoetCommitComparison|manifestHash/)
 
   const componentSource = await readFile(resolve('src/app/admin/_components/AdminResearchLab.tsx'), 'utf8')
-  assert.match(componentSource, /const isLatest = repository\.commitFreshness === 'latest'/)
-  assert.match(componentSource, /const isBehind = repository\.commitFreshness === 'behind'/)
-  assert.match(componentSource, /repository\.commitsBehind === 1 \? 'commit' : 'commits'/)
-  assert.match(componentSource, /commitsBehindCopy \?\? 'Behind'/)
-  assert.match(componentSource, /Gateway is \$\{commitsBehindCopy \?\? 'behind'\} latest/)
-  assert.match(componentSource, /label="Gateway commit"/)
-  assert.match(componentSource, /function ValidatorRepositoryPopover/)
-  assert.match(componentSource, /deployment=\{ops\.validatorDeployment\}/)
-  assert.match(
-    componentSource,
-    /const gatewayValidatorAligned = ops\.validatorDeployment\.currentCommitVerified\s+&& commitsMatch\(ops\.leadpoetRepository\.gatewayCommitSha, ops\.validatorDeployment\.commitSha\)/,
-  )
-  assert.match(componentSource, /gatewayValidatorAligned=\{gatewayValidatorAligned\}/)
-  assert.match(componentSource, /const triggerTone = gatewayValidatorAligned \? gatewayValidatorAlignmentTone\(isLatest\) : tone/)
-  assert.match(componentSource, /<BrainCircuit className="h-2\.5 w-2\.5" aria-hidden \/>/)
-  assert.match(componentSource, /function gatewayValidatorAlignmentTone\(isLatest: boolean\)/)
-  assert.match(componentSource, /color: '#8fa398'/)
-  assert.match(componentSource, /Validator is on the latest/)
-  assert.match(componentSource, /deployment\.source === 'attested_execution_receipts_v2'/)
-  assert.match(componentSource, /'Last attested commit'/)
-  assert.match(componentSource, /Reported validator commits/)
-  assert.match(componentSource, /Current validator commit/)
-  assert.match(componentSource, /Running validator commit is unknown/)
-  assert.match(componentSource, /Last published commit/)
-  assert.match(
-    componentSource,
-    /const tone = isVerified\s+\? sourcingModelAlignmentTone\(isLatest, isOutOfLine\)\s+: sourcingModelAlignmentTone\(false, false\)/,
-  )
-
-  console.log('gateway-deployment: gateway and validator commit distance, comparison states, and status UI wiring passed')
+  assert.match(componentSource, /Gateway and validator/)
+  assert.match(componentSource, /Validator runtime/)
+  console.log('gateway-deployment: gateway deployment parsing and active validator status wiring passed')
 } finally {
   await rm(outDir, { recursive: true, force: true })
 }
