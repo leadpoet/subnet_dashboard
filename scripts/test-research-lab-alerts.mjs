@@ -28,17 +28,12 @@ try {
     RESEARCH_LAB_ALERT_SIGNALS,
     buildResearchLabAlertFingerprint,
     evaluateResearchLabAlerts,
-    isExpectedResearchLabBaselineWait,
     isResearchLabBenchmarkAlertFamily,
     parseResearchLabAlertSignalAllowlist,
     resolveResearchLabAlertThresholds,
-    shouldSuppressResearchLabExecutionAlert,
   } = require(join(outDir, 'research-lab-alerts.js'))
 
   assert.equal(RESEARCH_LAB_ALERT_SIGNALS.length, 14)
-  assert.equal(isExpectedResearchLabBaselineWait('waiting_for_baseline'), true)
-  assert.equal(isExpectedResearchLabBaselineWait('queued', 'CandidateBaselineNotReady: same-day baseline missing'), true)
-  assert.equal(isExpectedResearchLabBaselineWait('blocked', 'OpenRouter credits exhausted'), false)
   assert.equal(parseResearchLabAlertSignalAllowlist(undefined), null)
   assert.equal(parseResearchLabAlertSignalAllowlist('  '), null)
   assert.equal(
@@ -67,34 +62,6 @@ try {
   const NOW_MS = Date.parse('2026-07-10T12:00:00.000Z')
   const NOW = new Date(NOW_MS).toISOString()
   const ago = (milliseconds) => new Date(NOW_MS - milliseconds).toISOString()
-
-  assert.equal(shouldSuppressResearchLabExecutionAlert({
-    now: NOW,
-    controls: [{ state: 'paused', updatedAt: ago(8 * 60 * 60 * 1_000) }],
-    status: 'running',
-  }), true, 'paused maintenance suppresses stale execution alerts')
-  assert.equal(shouldSuppressResearchLabExecutionAlert({
-    now: NOW,
-    controls: [{ state: 'active', updatedAt: ago(9_000) }],
-    status: 'running',
-  }), true, 'the observed nine-second restart race gets a projection and worker recovery grace window')
-  assert.equal(shouldSuppressResearchLabExecutionAlert({
-    now: NOW,
-    controls: [{ state: 'active', updatedAt: ago(5 * 60 * 1_000) }],
-    status: 'running',
-  }), false, 'a genuinely stale run pages again after the resume grace window')
-  assert.equal(shouldSuppressResearchLabExecutionAlert({
-    now: NOW,
-    controls: [{ state: 'unknown' }],
-    status: 'checkpointed and paused',
-    detail: 'gateway_restart maintenance',
-  }), true, 'maintenance evidence suppresses alerts even when control telemetry is unavailable')
-  assert.equal(shouldSuppressResearchLabExecutionAlert({
-    now: NOW,
-    controls: [{ state: 'active', updatedAt: ago(10 * 60 * 1_000) }],
-    status: 'checkpointed and paused',
-    detail: 'gateway_restart maintenance',
-  }), false)
   const thresholds = {
     pcr0Stale: { warnMs: 10, criticalMs: 20 },
     offchainWeightBundleStale: { warnMs: 10, criticalMs: 20 },
@@ -461,32 +428,6 @@ try {
     signals(multiSignalRunFixture),
     ['active_run_blocked', 'active_run_stale'],
     'a blocker does not short-circuit independent stale-run evaluation',
-  )
-
-  const dailyRolloverFixture = evaluate({
-    activeRuns: [
-      {
-        runId: 'run-waiting-for-new-window',
-        status: 'waiting_for_baseline',
-        blocked: true,
-        blocker: 'Scoring is waiting for the daily benchmark baseline.',
-        lastActivityAt: ago(60),
-        blockedAt: ago(60),
-      },
-      {
-        runId: 'run-requeued-for-new-window',
-        status: 'queued',
-        blocked: true,
-        blocker: 'baseline_not_ready',
-        lastActivityAt: ago(60),
-        blockedAt: ago(60),
-      },
-    ],
-  })
-  assert.deepEqual(
-    dailyRolloverFixture,
-    [],
-    'expected daily baseline handoffs are monitored by benchmark health, not paged per candidate',
   )
 
   const explicitMatchFixture = evaluate({

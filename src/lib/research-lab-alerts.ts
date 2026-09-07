@@ -232,12 +232,6 @@ export type ResearchLabAlertResolution = {
   metadata: ResearchLabAlertResolutionMetadata
 }
 
-export type ResearchLabAlertMaintenanceControl = {
-  state: 'active' | 'paused' | 'unknown'
-  updatedAt?: ResearchLabAlertTimestamp | null
-  reason?: string | null
-}
-
 export type ResearchLabAlertEvaluationOptions = {
   /** Required to keep evaluation pure and replayable. */
   now: ResearchLabAlertTimestamp
@@ -246,60 +240,6 @@ export type ResearchLabAlertEvaluationOptions = {
 
 const HOUR_MS = 60 * 60 * 1000
 const MINUTE_MS = 60 * 1000
-
-export const DEFAULT_RESEARCH_LAB_MAINTENANCE_RESUME_GRACE_MS = 5 * MINUTE_MS
-
-/**
- * Candidate scoring deliberately waits while the next UTC day's private
- * benchmark establishes the new ICP window. That handoff is owned by the
- * benchmark monitor; treating each queued candidate as blocked or stale
- * creates duplicate pages for a healthy daily rollover.
- */
-export function isExpectedResearchLabBaselineWait(
-  status?: string | null,
-  detail?: string | null,
-): boolean {
-  const operationalText = `${status ?? ''} ${detail ?? ''}`.trim().toLowerCase()
-  if (!operationalText) return false
-  return /(?:^|\b|_)(?:baseline_not_ready|benchmark_baseline_not_ready|parent_baseline_not_ready|waiting_for_baseline|candidate_scoring_(?:next_)?daily_baseline_not_ready|candidatebaselinenotready)(?:\b|_|$)/.test(operationalText) ||
-    /waiting for (?:the )?(?:(?:next|current) )?(?:daily |benchmark |private )?baseline/.test(operationalText)
-}
-
-/**
- * Intentional maintenance is not an incident. After maintenance resumes, wait
- * briefly for workers and projections to emit fresh activity before treating
- * their pre-maintenance timestamp as a new stale condition.
- */
-export function shouldSuppressResearchLabExecutionAlert(input: {
-  now: ResearchLabAlertTimestamp
-  controls: readonly ResearchLabAlertMaintenanceControl[]
-  status?: string | null
-  detail?: string | null
-  resumeGraceMs?: number
-}): boolean {
-  const nowMs = requiredTimestamp(input.now, 'now')
-  const resumeGraceMs = input.resumeGraceMs ?? DEFAULT_RESEARCH_LAB_MAINTENANCE_RESUME_GRACE_MS
-  if (!Number.isFinite(resumeGraceMs) || resumeGraceMs < 0) {
-    throw new TypeError('resumeGraceMs must be a finite, non-negative number')
-  }
-
-  for (const control of input.controls) {
-    if (control.state === 'paused') return true
-    const updatedAtMs = optionalTimestamp(control.updatedAt)
-    if (
-      control.state === 'active' &&
-      updatedAtMs !== null &&
-      nowMs >= updatedAtMs &&
-      nowMs - updatedAtMs < resumeGraceMs
-    ) return true
-  }
-
-  if (input.controls.some((control) => control.state !== 'unknown')) return false
-
-  const operationalText = `${input.status ?? ''} ${input.detail ?? ''}`.toLowerCase()
-  return /(?:maintenance|gateway[_\s-]*restart)/.test(operationalText) &&
-    /(?:pause|paused|checkpoint)/.test(operationalText)
-}
 
 /**
  * Benchmark failures and stalled executions share the same strict closure
@@ -651,8 +591,6 @@ function evaluateActiveRunObservation(
   const source = sourceLabel(observation.source, 'run telemetry')
   const status = normalizedStatus(observation.status)
   const activityAtMs = firstTimestamp(observation.lastActivityAt, observation.startedAt)
-
-  if (isExpectedResearchLabBaselineWait(status, observation.blocker)) return
 
   if (ACTIVE_RUN_STATUSES.has(status)) {
     const stale = staleCandidate({
