@@ -72,6 +72,13 @@ assert.match(deployment, /VERIFY_MONITOR_AFTER/)
 assert.match(deployment, /Correcting stale slot pointer/)
 assert.match(deployment, /Runtime monitor verification failed; restoring \$ACTIVE_SLOT/)
 
+const runtimeMonitorVerifier = await readFile(
+  new URL('./verify-runtime-monitors.mjs', import.meta.url),
+  'utf8',
+)
+assert.match(runtimeMonitorVerifier, /research-lab-alerts:v1/)
+assert.doesNotMatch(runtimeMonitorVerifier, /research-lab-events:v1|ops_research_lab_event_monitor_state/)
+
 const runtimeSecretEnvironment = await readFile(
   new URL('../src/lib/runtime-secret-environment.ts', import.meta.url),
   'utf8',

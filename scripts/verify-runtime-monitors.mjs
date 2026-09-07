@@ -6,11 +6,6 @@ const MONITORS = Object.freeze([
     table: 'ops_alert_monitor_state',
     id: 'research-lab-alerts:v1',
   }),
-  Object.freeze({
-    label: 'event notification monitor',
-    table: 'ops_research_lab_event_monitor_state',
-    id: 'research-lab-events:v1',
-  }),
 ])
 
 function requiredEnv(name) {
