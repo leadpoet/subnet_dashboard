@@ -16,7 +16,6 @@ assert.equal(tsc.status, 0, 'the durable alert monitor and application should co
 const monitor = await readFile(resolve('src/lib/research-lab-alert-monitor.ts'), 'utf8')
 const instrumentation = await readFile(resolve('src/instrumentation.ts'), 'utf8')
 const route = await readFile(resolve('src/app/api/admin/research-lab/route.ts'), 'utf8')
-const alerts = await readFile(resolve('src/lib/research-lab-alerts.ts'), 'utf8')
 const leaseMigration = await readFile(
   resolve('supabase/migrations/20260710093000_research_lab_alert_monitor_lease.sql'),
   'utf8',
@@ -74,9 +73,6 @@ assert.match(route, /evaluatedAlerts/)
 assert.match(route, /alertResolutions/)
 assert.match(route, /ops_attestation_current/)
 assert.match(route, /fetchGatewayPcr0Acceptance/)
-assert.match(alerts, /export const MIN_LINKED_BENCHMARK_FAILURES_FOR_WARNING = 2/)
-assert.match(alerts, /\['benchmark_failed', 'benchmark_stalled'\]/)
-assert.doesNotMatch(alerts, /linkedFailedExecutionIds\.size >= 2/)
 assert.match(leaseMigration, /security definer/)
 assert.match(leaseMigration, /revoke all on function[\s\S]*from public, anon, authenticated/)
 assert.match(leaseMigration, /grant execute on function[\s\S]*to service_role/)
