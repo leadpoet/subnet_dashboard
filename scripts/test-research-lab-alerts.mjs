@@ -259,7 +259,7 @@ try {
   const thresholds = {
     pcr0Stale: { warnMs: 10, criticalMs: 20 },
     offchainWeightBundleStale: { warnMs: 10, criticalMs: 20 },
-    onchainValidatorUpdateStale: { warnMs: 10, criticalMs: 20 },
+    onchainValidatorUpdateStale: { warnMs: 10, criticalMs: 20, warnBlocks: 10, criticalBlocks: 20 },
     benchmarkStalled: { warnMs: 10, criticalMs: 20 },
     activeRunStale: { warnMs: 10, criticalMs: 20 },
     activeRunBlocked: { warnMs: 10, criticalMs: 20 },
@@ -588,6 +588,59 @@ try {
     'onchain_validator_update_missing',
     'pcr0_mismatch',
   ], 'all source observations are merged without short-circuiting')
+
+  const configuredValidatorMissingFixture = evaluate({
+    validators: [{
+      validatorId: 'configured-but-unobserved',
+      source: 'ops validator registry',
+      pcr0: { observedPcr0: null, expectedPcr0: 'expected', observedAt: null },
+      offchainWeightBundle: { publishedAt: null, bundleId: null },
+      onchainUpdate: { lastUpdateBlock: null, currentBlock: null },
+    }],
+  })
+  assert.deepEqual(signals(configuredValidatorMissingFixture), [
+    'offchain_weight_bundle_missing',
+    'onchain_validator_update_missing',
+    'pcr0_missing',
+  ], 'configured validators remain visible when current attestation is absent')
+
+  const staleWeightFixture = evaluate({
+    validators: [{
+      validatorId: 'configured-stale',
+      offchainWeightBundle: { publishedAt: ago(20), bundleId: 'epoch-1' },
+      onchainUpdate: { lastUpdateBlock: 980, currentBlock: 1_000 },
+    }],
+  }, {
+    ...thresholds,
+    onchainValidatorUpdateStale: {
+      ...thresholds.onchainValidatorUpdateStale,
+      warnBlocks: 10,
+      criticalBlocks: 20,
+    },
+  })
+  assert.deepEqual(signals(staleWeightFixture), [
+    'offchain_weight_bundle_stale',
+    'onchain_validator_update_stale',
+  ], 'off-chain bundles and chain last-update blocks page independently')
+
+  const disabledMonitorFixture = evaluate({
+    validators: [{
+      validatorId: 'disabled-pcr0-and-offchain',
+      onchainUpdate: { lastUpdateBlock: 980, currentBlock: 1_000 },
+    }],
+  })
+  assert.deepEqual(signals(disabledMonitorFixture), ['onchain_validator_update_stale'],
+    'omitted PCR0 and off-chain observations stay disabled without suppressing on-chain checks')
+
+  const healthyValidatorFixture = evaluate({
+    validators: [{
+      validatorId: 'healthy-runtime',
+      pcr0: { observedPcr0: 'same', expectedPcr0: 'same', matched: true, observedAt: ago(1) },
+      offchainWeightBundle: { publishedAt: ago(1), bundleId: 'epoch-2' },
+      onchainUpdate: { lastUpdateBlock: 999, currentBlock: 1_000 },
+    }],
+  })
+  assert.deepEqual(healthyValidatorFixture, [], 'fresh runtime and weight evidence produces no alert')
 
   const multiSignalRunFixture = evaluate({
     activeRuns: [{

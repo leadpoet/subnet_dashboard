@@ -7,6 +7,7 @@ import { fetchGatewayPcr0Acceptance, type GatewayPcr0Acceptance } from '@/lib/re
 import { evaluateResearchLabAlerts, type ResearchLabAlertObservations, type ResearchLabAlertResolution, type ResearchLabEvaluatedAlert } from '@/lib/research-lab-alerts'
 import { getRuntimeSecretEnvironment } from '@/lib/runtime-secret-environment'
 import { parseResearchLabAlertDeliveryConfig } from '@/lib/research-lab-alert-delivery'
+import { fetchMetagraph } from '@/lib/metagraph'
 import {
   dedupeLatestValidatorNodes,
   evaluateValidatorDeploymentEvidence,
@@ -38,7 +39,10 @@ export async function GET(_request: NextRequest): Promise<NextResponse> {
   try {
     const [arena, gateway, attestation, alerts] = await Promise.all([fetchArena(), fetchGatewayDeployment({ gatewayUrl: GATEWAY_URL }), fetchAttestation(supabase), fetchAlerts(supabase)])
     const validator = await buildValidatorDeployment(supabase, attestation)
-    const evaluatedAlerts = evaluateResearchLabAlerts(buildAlertObservations(attestation, gateway), { now: new Date() })
+    const evaluatedAlerts = evaluateResearchLabAlerts(
+      await buildAlertObservations(supabase, attestation, gateway, alerts.operations.validators),
+      { now: new Date() },
+    )
     const gatewayPcr0 = await checkGatewayPcr0(attestation)
     const state = worstState([alerts.state, attestation.state, validator.currentRuntimeVerified ? 'healthy' : 'degraded'])
     const data: AdminResearchLabPayload = { arena, ops: { state, healthSignals: buildHealthSignals(arena, alerts, attestation, gateway, validator), alerts: { ...alerts, latestObservedAt: latestIso(alerts.latestObservedAt, attestation.latestAttestedAt) }, evaluatedAlerts, alertResolutions: [], attestation, gateway: { ...gateway, pcr0: gatewayPcr0 }, validatorDeployment: validator }, fetchedAt: new Date().toISOString() }
@@ -125,7 +129,101 @@ async function buildValidatorDeployment(supabase: ReturnType<typeof getAdminSupa
     checkedAt: new Date().toISOString(),
   }
 }
-function buildAlertObservations(attestation: AdminLabAttestation, gateway: GatewayDeployment): ResearchLabAlertObservations { return { validators: attestation.nodes.map((node) => ({ validatorId: node.hotkey ?? node.nodeId, source: 'ops_attestation_current', pcr0: { expectedPcr0: node.expectedPcr0, observedPcr0: node.observedPcr0, matched: node.matched, observedAt: node.attestedAt }, offchainWeightBundle: { publishedAt: node.attestedAt, bundleId: node.id } })), dataFreshness: [{ sourceId: 'validator_attestation', source: 'ops_attestation_current', observedAt: attestation.latestAttestedAt }, ...(gateway.checkedAt ? [{ sourceId: 'gateway_readiness', source: 'gateway', observedAt: gateway.checkedAt }] : [])] } }
+async function buildAlertObservations(
+  supabase: ReturnType<typeof getAdminSupabase>,
+  attestation: AdminLabAttestation,
+  gateway: GatewayDeployment,
+  configuredValidators: AdminLabMonitoredValidator[],
+): Promise<ResearchLabAlertObservations> {
+  const configured = new Map(configuredValidators.map((validator) => [validator.hotkey, validator]))
+  const observed = new Map(
+    attestation.nodes.map((node) => [node.hotkey ?? node.nodeId, node]),
+  )
+  const validatorIds = new Set([...configured.keys(), ...observed.keys()])
+  const onchainIds = [...validatorIds].filter((validatorId) => {
+    const validator = configured.get(validatorId)
+    return validator?.enabled !== false && (validator?.monitorOnchainWeights ?? true)
+  })
+  const offchainIds = [...validatorIds].filter((validatorId) => {
+    const validator = configured.get(validatorId)
+    return validator?.enabled !== false && (validator?.monitorOffchainWeights ?? true)
+  })
+
+  const [metagraph, weightBundles] = await Promise.all([
+    onchainIds.length > 0 ? fetchMetagraph() : Promise.resolve(null),
+    fetchPublishedWeightBundles(supabase, offchainIds),
+  ])
+
+  const validators = [...validatorIds].flatMap((validatorId) => {
+    const configuration = configured.get(validatorId)
+    if (configuration?.enabled === false) return []
+    const node = observed.get(validatorId)
+    const source = node ? 'ops_attestation_current' : 'ops_validator_registry'
+    const observation: NonNullable<ResearchLabAlertObservations['validators']>[number] = {
+      validatorId,
+      source,
+    }
+    if (configuration?.monitorPcr0 ?? true) {
+      observation.pcr0 = {
+        expectedPcr0: configuration?.expectedPcr0 ?? node?.expectedPcr0 ?? null,
+        observedPcr0: node?.observedPcr0 ?? null,
+        matched: node?.matched ?? null,
+        observedAt: node?.attestedAt ?? null,
+      }
+    }
+    if (configuration?.monitorOffchainWeights ?? true) {
+      observation.offchainWeightBundle = weightBundles.get(validatorId) ?? {
+        publishedAt: null,
+        bundleId: null,
+      }
+    }
+    if (configuration?.monitorOnchainWeights ?? true) {
+      observation.onchainUpdate = {
+        lastUpdateBlock: metagraph?.lastUpdates?.[validatorId] ?? null,
+        currentBlock: metagraph?.currentBlock ?? null,
+      }
+    }
+    return [observation]
+  })
+
+  return {
+    validators,
+    dataFreshness: [
+      { sourceId: 'validator_attestation', source: 'ops_attestation_current', observedAt: attestation.latestAttestedAt },
+      ...(gateway.checkedAt
+        ? [{ sourceId: 'gateway_readiness', source: 'gateway', observedAt: gateway.checkedAt }]
+        : []),
+    ],
+  }
+}
+
+async function fetchPublishedWeightBundles(
+  supabase: ReturnType<typeof getAdminSupabase>,
+  validatorHotkeys: string[],
+): Promise<Map<string, { publishedAt: string | null; bundleId: string | null }>> {
+  if (validatorHotkeys.length === 0) return new Map()
+  const result = await supabase
+    .from('published_weight_bundles')
+    .select('validator_hotkey,epoch_id,created_at')
+    .eq('netuid', 71)
+    .in('validator_hotkey', validatorHotkeys)
+    .order('created_at', { ascending: false })
+    .limit(ADMIN_QUERY_LIMIT)
+  if (result.error) {
+    console.error('[Research Lab admin] published weight freshness query failed:', result.error)
+    return new Map()
+  }
+  const latest = new Map<string, { publishedAt: string | null; bundleId: string | null }>()
+  for (const row of (result.data ?? []) as Array<Record<string, unknown>>) {
+    const hotkey = stringOr(row.validator_hotkey)
+    if (!hotkey || latest.has(hotkey)) continue
+    latest.set(hotkey, {
+      publishedAt: stringOr(row.created_at),
+      bundleId: stringOr(row.epoch_id),
+    })
+  }
+  return latest
+}
 async function checkGatewayPcr0(attestation: AdminLabAttestation): Promise<GatewayPcr0Acceptance> {
   const node = selectValidatorPcrNode(attestation.nodes)
   return fetchGatewayPcr0Acceptance({

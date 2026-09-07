@@ -80,9 +80,20 @@ try {
   assert.equal(invalidReceipt.sourceAvailable, false)
 
   const routeSource = await readFile(resolve('src/app/api/admin/research-lab/route.ts'), 'utf8')
-  assert.doesNotMatch(routeSource, /published_weight_bundles.*fetchGatewayPcr0Acceptance/s)
+  assert.match(routeSource, /fetchPublishedWeightBundles/)
+  assert.match(routeSource, /published_weight_bundles/)
+  assert.match(routeSource, /fetchMetagraph\(\)/)
+  assert.match(routeSource, /monitorPcr0/)
+  assert.match(routeSource, /monitorOffchainWeights/)
+  assert.match(routeSource, /monitorOnchainWeights/)
+  assert.match(routeSource, /lastUpdates\?\./)
+  assert.match(routeSource, /currentBlock/)
   assert.match(routeSource, /selectValidatorPcrNode\(attestation\.nodes\)/)
-  assert.doesNotMatch(routeSource, /published_weight_bundles/)
+  const alertObservationSource = routeSource.slice(
+    routeSource.indexOf('async function buildAlertObservations'),
+    routeSource.indexOf('async function checkGatewayPcr0'),
+  )
+  assert.doesNotMatch(alertObservationSource, /fetchGatewayPcr0Acceptance/)
   assert.match(routeSource, /Metadata available/)
   console.log('admin-validator-health: validator filtering, timestamp guards, and metadata-only gateway status passed')
 } finally {
