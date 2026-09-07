@@ -71,12 +71,7 @@ export type ResearchLabAlertThresholds = {
   pcr0Stale: ResearchLabAlertAgeThreshold
   offchainWeightBundleStale: ResearchLabAlertAgeThreshold
   onchainValidatorUpdateStale: ResearchLabAlertAgeThreshold & ResearchLabAlertBlockThreshold
-  benchmarkStalled: ResearchLabAlertAgeThreshold
-  activeRunStale: ResearchLabAlertAgeThreshold
-  activeRunBlocked: ResearchLabAlertAgeThreshold
-  transparencyCheckpointStale: ResearchLabAlertAgeThreshold
   dataFreshness: ResearchLabAlertAgeThreshold
-  maintenancePauseOverrun: ResearchLabAlertAgeThreshold
 }
 
 export type ResearchLabAlertThresholdOverrides = {
@@ -119,41 +114,6 @@ export type ResearchLabValidatorAlertObservation = {
   onchainUpdate?: ResearchLabOnchainUpdateObservation
 }
 
-export type ResearchLabBenchmarkAlertObservation = {
-  benchmarkId: string
-  validatorId?: string | null
-  source?: string | null
-  status: string
-  /** The caller may lower a correlated retry failure to a warning. */
-  failureSeverity?: ResearchLabAlertSeverity
-  /** A verified official stale benchmark is immediately critical. */
-  stalledSeverity?: ResearchLabAlertSeverity
-  startedAt?: ResearchLabAlertTimestamp | null
-  lastActivityAt?: ResearchLabAlertTimestamp | null
-  failedAt?: ResearchLabAlertTimestamp | null
-  error?: string | null
-}
-
-export type ResearchLabActiveRunAlertObservation = {
-  runId: string
-  validatorId?: string | null
-  source?: string | null
-  status: string
-  startedAt?: ResearchLabAlertTimestamp | null
-  lastActivityAt?: ResearchLabAlertTimestamp | null
-  blockedAt?: ResearchLabAlertTimestamp | null
-  blocked?: boolean | null
-  blocker?: string | null
-}
-
-export type ResearchLabTransparencyCheckpointObservation = {
-  /** Use a netuid, environment, or other stable checkpoint stream identifier. */
-  checkpointId: string
-  source?: string | null
-  /** Null means the source explicitly found no checkpoint. */
-  checkpointAt: ResearchLabAlertTimestamp | null
-}
-
 export type ResearchLabDataFreshnessObservation = {
   /** Stable name for the dataset/feed whose freshness is being checked. */
   sourceId: string
@@ -162,32 +122,13 @@ export type ResearchLabDataFreshnessObservation = {
   observedAt: ResearchLabAlertTimestamp | null
 }
 
-export type ResearchLabMaintenancePauseComponent = {
-  componentId: string
-  label: string
-  pausedAt: ResearchLabAlertTimestamp | null
-  reason?: string | null
-  actor?: string | null
-}
-
-export type ResearchLabMaintenancePauseObservation = {
-  /** Stable identifier for the group of maintenance controls. */
-  maintenanceId: string
-  source?: string | null
-  components: readonly ResearchLabMaintenancePauseComponent[]
-}
-
 /**
  * Canonical, already-normalized observations. Arrays may contain the same entity
  * from multiple sources; evaluation merges every emitted signal by fingerprint.
  */
 export type ResearchLabAlertObservations = {
   validators?: readonly ResearchLabValidatorAlertObservation[]
-  benchmarks?: readonly ResearchLabBenchmarkAlertObservation[]
-  activeRuns?: readonly ResearchLabActiveRunAlertObservation[]
-  transparencyCheckpoints?: readonly ResearchLabTransparencyCheckpointObservation[]
   dataFreshness?: readonly ResearchLabDataFreshnessObservation[]
-  maintenancePauses?: readonly ResearchLabMaintenancePauseObservation[]
 }
 
 export type ResearchLabEvaluatedAlert = {
@@ -266,49 +207,8 @@ export const DEFAULT_RESEARCH_LAB_ALERT_THRESHOLDS: Readonly<ResearchLabAlertThr
       warnBlocks: 360,
       criticalBlocks: 720,
     }),
-    benchmarkStalled: frozenThreshold(15 * MINUTE_MS, 30 * MINUTE_MS),
-    activeRunStale: frozenThreshold(15 * MINUTE_MS, 30 * MINUTE_MS),
-    activeRunBlocked: frozenThreshold(0, 60 * MINUTE_MS),
-    transparencyCheckpointStale: frozenThreshold(6 * HOUR_MS, 12 * HOUR_MS),
     dataFreshness: frozenThreshold(15 * MINUTE_MS, 60 * MINUTE_MS),
-    maintenancePauseOverrun: frozenThreshold(6 * HOUR_MS, 12 * HOUR_MS),
   })
-
-const FAILED_STATUSES = new Set([
-  'failed',
-  'failure',
-  'error',
-  'errored',
-  'cancelled',
-  'canceled',
-  'timeout',
-  'timed_out',
-])
-
-const ACTIVE_BENCHMARK_STATUSES = new Set([
-  'active',
-  'assigned',
-  'evaluating',
-  'in_progress',
-  'processing',
-  'queued',
-  'running',
-  'scoring',
-  'started',
-])
-
-const ACTIVE_RUN_STATUSES = new Set([
-  ...ACTIVE_BENCHMARK_STATUSES,
-  'paid_not_started',
-])
-
-const BLOCKED_RUN_STATUSES = new Set([
-  'blocked',
-  'blocked_for_credit',
-  'paused',
-  'stale',
-  'waiting_for_credits',
-])
 
 type AlertCandidate = Omit<ResearchLabEvaluatedAlert, 'sources' | 'occurrences'> & {
   source: string
@@ -325,20 +225,8 @@ export function evaluateResearchLabAlerts(
   for (const observation of observations.validators ?? []) {
     evaluateValidatorObservation(observation, nowMs, thresholds, candidates)
   }
-  for (const observation of observations.benchmarks ?? []) {
-    evaluateBenchmarkObservation(observation, nowMs, thresholds, candidates)
-  }
-  for (const observation of observations.activeRuns ?? []) {
-    evaluateActiveRunObservation(observation, nowMs, thresholds, candidates)
-  }
-  for (const observation of observations.transparencyCheckpoints ?? []) {
-    evaluateCheckpointObservation(observation, nowMs, thresholds, candidates)
-  }
   for (const observation of observations.dataFreshness ?? []) {
     evaluateDataFreshnessObservation(observation, nowMs, thresholds, candidates)
-  }
-  for (const observation of observations.maintenancePauses ?? []) {
-    evaluateMaintenancePauseObservation(observation, nowMs, thresholds, candidates)
   }
 
   return dedupeCandidates(candidates)
@@ -533,131 +421,6 @@ function evaluateValidatorObservation(
   }
 }
 
-function evaluateBenchmarkObservation(
-  observation: ResearchLabBenchmarkAlertObservation,
-  nowMs: number,
-  thresholds: ResearchLabAlertThresholds,
-  candidates: AlertCandidate[],
-): void {
-  const benchmarkId = requiredId(observation.benchmarkId, 'benchmarkId')
-  const validatorId = optionalId(observation.validatorId)
-  const source = sourceLabel(observation.source, 'benchmark telemetry')
-  const status = normalizedStatus(observation.status)
-
-  if (FAILED_STATUSES.has(status)) {
-    const failedAtMs = firstTimestamp(observation.failedAt, observation.lastActivityAt, observation.startedAt)
-    candidates.push(immediateCandidate({
-      signal: 'benchmark_failed',
-      scope: 'benchmark',
-      entityId: benchmarkId,
-      validatorId,
-      title: `Benchmark ${benchmarkId} failed`,
-      detail: nonEmptyString(observation.error) ?? `Benchmark ended with status ${status || 'failed'}.`,
-      observedAtMs: failedAtMs,
-      nowMs,
-      source,
-      severity: observation.failureSeverity,
-    }))
-  }
-
-  if (ACTIVE_BENCHMARK_STATUSES.has(status)) {
-    const activityAtMs = firstTimestamp(observation.lastActivityAt, observation.startedAt)
-    const stale = staleCandidate({
-      signal: 'benchmark_stalled',
-      scope: 'benchmark',
-      entityId: benchmarkId,
-      validatorId,
-      title: `Benchmark ${benchmarkId} is stalled`,
-      missingTimestampDetail: 'The benchmark is active but has no readable activity timestamp.',
-      staleDetail: (ageMs) => `The active benchmark has not emitted progress for ${durationLabel(ageMs)}.`,
-      observedAtMs: activityAtMs,
-      nowMs,
-      threshold: thresholds.benchmarkStalled,
-      source,
-      severity: observation.stalledSeverity,
-    })
-    if (stale) candidates.push(stale)
-  }
-}
-
-function evaluateActiveRunObservation(
-  observation: ResearchLabActiveRunAlertObservation,
-  nowMs: number,
-  thresholds: ResearchLabAlertThresholds,
-  candidates: AlertCandidate[],
-): void {
-  const runId = requiredId(observation.runId, 'runId')
-  const validatorId = optionalId(observation.validatorId)
-  const source = sourceLabel(observation.source, 'run telemetry')
-  const status = normalizedStatus(observation.status)
-  const activityAtMs = firstTimestamp(observation.lastActivityAt, observation.startedAt)
-
-  if (ACTIVE_RUN_STATUSES.has(status)) {
-    const stale = staleCandidate({
-      signal: 'active_run_stale',
-      scope: 'run',
-      entityId: runId,
-      validatorId,
-      title: `Active run ${runId} is stale`,
-      missingTimestampDetail: 'The run is active but has no readable activity timestamp.',
-      staleDetail: (ageMs) => `The active run has not emitted progress for ${durationLabel(ageMs)}.`,
-      observedAtMs: activityAtMs,
-      nowMs,
-      threshold: thresholds.activeRunStale,
-      source,
-    })
-    if (stale) candidates.push(stale)
-  }
-
-  if (observation.blocked === true || BLOCKED_RUN_STATUSES.has(status)) {
-    const blockedAtMs = firstTimestamp(observation.blockedAt, observation.lastActivityAt, observation.startedAt)
-    const blocked = staleCandidate({
-      signal: 'active_run_blocked',
-      scope: 'run',
-      entityId: runId,
-      validatorId,
-      title: `Active run ${runId} is blocked`,
-      missingTimestampDetail: nonEmptyString(observation.blocker) ?? 'The run is blocked and has no readable blocker timestamp.',
-      staleDetail: (ageMs) => {
-        const blocker = nonEmptyString(observation.blocker)
-        return blocker
-          ? `${blocker} Blocked for ${durationLabel(ageMs)}.`
-          : `The run has been blocked for ${durationLabel(ageMs)}.`
-      },
-      observedAtMs: blockedAtMs,
-      nowMs,
-      threshold: thresholds.activeRunBlocked,
-      source,
-    })
-    if (blocked) candidates.push(blocked)
-  }
-}
-
-function evaluateCheckpointObservation(
-  observation: ResearchLabTransparencyCheckpointObservation,
-  nowMs: number,
-  thresholds: ResearchLabAlertThresholds,
-  candidates: AlertCandidate[],
-): void {
-  const checkpointId = requiredId(observation.checkpointId, 'checkpointId')
-  const source = sourceLabel(observation.source, 'transparency log')
-  const checkpointAtMs = optionalTimestamp(observation.checkpointAt)
-  const stale = staleCandidate({
-    signal: 'transparency_checkpoint_stale',
-    scope: 'transparency',
-    entityId: checkpointId,
-    validatorId: null,
-    title: `Transparency checkpoint ${checkpointId} is stale`,
-    missingTimestampDetail: 'No canonical transparency checkpoint was found.',
-    staleDetail: (ageMs) => `The latest transparency checkpoint is ${durationLabel(ageMs)} old.`,
-    observedAtMs: checkpointAtMs,
-    nowMs,
-    threshold: thresholds.transparencyCheckpointStale,
-    source,
-  })
-  if (stale) candidates.push(stale)
-}
-
 function evaluateDataFreshnessObservation(
   observation: ResearchLabDataFreshnessObservation,
   nowMs: number,
@@ -681,58 +444,6 @@ function evaluateDataFreshnessObservation(
     source,
   })
   if (stale) candidates.push(stale)
-}
-
-function evaluateMaintenancePauseObservation(
-  observation: ResearchLabMaintenancePauseObservation,
-  nowMs: number,
-  thresholds: ResearchLabAlertThresholds,
-  candidates: AlertCandidate[],
-): void {
-  const maintenanceId = requiredId(observation.maintenanceId, 'maintenanceId')
-  const source = sourceLabel(observation.source, 'gateway maintenance controls')
-  const paused = observation.components
-    .map((component) => ({
-      componentId: requiredId(component.componentId, 'maintenance componentId'),
-      label: requiredId(component.label, 'maintenance label'),
-      pausedAtMs: optionalTimestamp(component.pausedAt),
-      reason: nonEmptyString(component.reason),
-      actor: nonEmptyString(component.actor),
-    }))
-    .filter((component): component is typeof component & { pausedAtMs: number } => (
-      component.pausedAtMs !== null
-    ))
-    .sort((left, right) => left.pausedAtMs - right.pausedAtMs || left.label.localeCompare(right.label))
-
-  if (paused.length === 0) return
-  const oldestPausedAtMs = paused[0].pausedAtMs
-  const oldestAgeMs = Math.max(0, nowMs - oldestPausedAtMs)
-  const severity = severityAtAge(oldestAgeMs, thresholds.maintenancePauseOverrun)
-  if (!severity) return
-
-  const detail = paused.map((component) => {
-    const ageMs = Math.max(0, nowMs - component.pausedAtMs)
-    const context = [
-      component.reason ? `reason: ${component.reason}` : null,
-      component.actor ? `actor: ${component.actor}` : null,
-    ].filter(Boolean).join('; ')
-    return `${component.label} has been paused for ${durationLabel(ageMs)} since ${new Date(component.pausedAtMs).toISOString()}${context ? ` (${context})` : ''}.`
-  }).join('\n')
-
-  candidates.push(candidate({
-    signal: 'maintenance_pause_overrun',
-    severity,
-    scope: 'maintenance',
-    entityId: maintenanceId,
-    validatorId: null,
-    title: severity === 'critical'
-      ? 'Research Lab maintenance pause exceeded 12 hours'
-      : 'Research Lab maintenance pause exceeded 6 hours',
-    detail,
-    observedAtMs: oldestPausedAtMs,
-    ageMs: oldestAgeMs,
-    source,
-  }))
 }
 
 function staleCandidate(input: {
@@ -944,24 +655,10 @@ function optionalBlock(value: number | null | undefined): number | null {
   return Number.isSafeInteger(value) && (value as number) >= 0 ? value as number : null
 }
 
-function firstTimestamp(
-  ...values: Array<ResearchLabAlertTimestamp | null | undefined>
-): number | null {
-  for (const value of values) {
-    const timestamp = optionalTimestamp(value)
-    if (timestamp !== null) return timestamp
-  }
-  return null
-}
-
 function requiredId(value: string, label: string): string {
   const id = nonEmptyString(value)
   if (!id) throw new TypeError(`${label} must be a non-empty string`)
   return id
-}
-
-function optionalId(value: string | null | undefined): string | null {
-  return nonEmptyString(value)
 }
 
 function nonEmptyString(value: string | null | undefined): string | null {
@@ -970,10 +667,6 @@ function nonEmptyString(value: string | null | undefined): string | null {
 
 function sourceLabel(value: string | null | undefined, fallback: string): string {
   return nonEmptyString(value) ?? fallback
-}
-
-function normalizedStatus(value: string): string {
-  return value.trim().toLowerCase().replace(/[\s-]+/g, '_')
 }
 
 function normalizePcr0(value: string): string {
