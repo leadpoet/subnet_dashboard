@@ -20,6 +20,7 @@ try {
   const {
     dedupeLatestValidatorNodes,
     evaluateValidatorDeploymentEvidence,
+    isFreshAttestationTimestamp,
     isFreshTimestamp,
     isValidCommitSha,
     selectCurrentValidatorNode,
@@ -42,6 +43,9 @@ try {
   assert.equal(isValidCommitSha('future-or-short'), false)
   assert.equal(isFreshTimestamp('2026-09-07T03:00:30Z', now, 300_000), true)
   assert.equal(isFreshTimestamp('2026-09-07T03:02:00Z', now, 300_000), false)
+  assert.equal(isFreshAttestationTimestamp('2026-09-07T03:01:00Z', now, 300_000), false)
+  const invalidPrimary = { ...primary, id: 'primary:invalid', attestedAt: 'not-a-timestamp' }
+  assert.deepEqual(dedupeLatestValidatorNodes([invalidPrimary, newerPrimary]), [newerPrimary])
   assert.deepEqual(dedupeLatestValidatorNodes([primary, newerPrimary, gateway]), [newerPrimary])
   assert.equal(selectCurrentValidatorNode([gateway]), null)
   assert.equal(selectValidatorPcrNode([gateway]), null)
@@ -80,20 +84,18 @@ try {
   assert.equal(invalidReceipt.sourceAvailable, false)
 
   const routeSource = await readFile(resolve('src/app/api/admin/research-lab/route.ts'), 'utf8')
-  assert.match(routeSource, /fetchPublishedWeightBundles/)
-  assert.match(routeSource, /published_weight_bundles/)
-  assert.match(routeSource, /fetchMetagraph\(\)/)
-  assert.match(routeSource, /monitorPcr0/)
-  assert.match(routeSource, /monitorOffchainWeights/)
-  assert.match(routeSource, /monitorOnchainWeights/)
-  assert.match(routeSource, /lastUpdates\?\./)
-  assert.match(routeSource, /currentBlock/)
+  const observationSource = await readFile(resolve('src/lib/admin-alert-observations.ts'), 'utf8')
+  assert.match(routeSource, /buildAdminAlertObservations/)
+  assert.match(observationSource, /published_weight_bundles/)
+  assert.match(observationSource, /fetchMetagraphFn/)
+  assert.match(observationSource, /monitorPcr0/)
+  assert.match(observationSource, /monitorOffchainWeights/)
+  assert.match(observationSource, /monitorOnchainWeights/)
+  assert.match(observationSource, /lastUpdates\?\./)
+  assert.match(observationSource, /currentBlock/)
+  assert.doesNotMatch(observationSource, /fetchGatewayPcr0Acceptance/)
+  assert.match(routeSource, /fetchMetagraphFn:\s*fetchMetagraph/)
   assert.match(routeSource, /selectValidatorPcrNode\(attestation\.nodes\)/)
-  const alertObservationSource = routeSource.slice(
-    routeSource.indexOf('async function buildAlertObservations'),
-    routeSource.indexOf('async function checkGatewayPcr0'),
-  )
-  assert.doesNotMatch(alertObservationSource, /fetchGatewayPcr0Acceptance/)
   assert.match(routeSource, /Metadata available/)
   console.log('admin-validator-health: validator filtering, timestamp guards, and metadata-only gateway status passed')
 } finally {

@@ -43,6 +43,17 @@ export function isFreshTimestamp(
   return nowMs - timestamp <= freshnessMs
 }
 
+export function isFreshAttestationTimestamp(
+  value: string | null,
+  nowMs: number,
+  freshnessMs: number,
+): boolean {
+  if (!value) return false
+  const timestamp = Date.parse(value)
+  if (!Number.isFinite(timestamp) || timestamp > nowMs) return false
+  return nowMs - timestamp <= freshnessMs
+}
+
 function nodeIdentity(node: ValidatorHealthNode): string {
   return node.hotkey ?? node.nodeId ?? node.id
 }
@@ -55,13 +66,23 @@ export function dedupeLatestValidatorNodes<T extends ValidatorHealthNode>(
     if (!isValidatorHealthNode(node)) continue
     const key = nodeIdentity(node)
     const current = latest.get(key)
-    if (!current || Date.parse(node.attestedAt ?? '') > Date.parse(current.attestedAt ?? '')) {
+    if (!current || isLaterAttestation(node.attestedAt, current.attestedAt)) {
       latest.set(key, node)
     }
   }
-  return [...latest.values()].sort((left, right) =>
-    Date.parse(right.attestedAt ?? '') - Date.parse(left.attestedAt ?? ''),
-  )
+  return [...latest.values()].sort((left, right) => compareAttestationTimes(right.attestedAt, left.attestedAt))
+}
+
+function isLaterAttestation(candidate: string | null, current: string | null): boolean {
+  return compareAttestationTimes(candidate, current) > 0
+}
+
+function compareAttestationTimes(left: string | null, right: string | null): number {
+  const leftMs = Date.parse(left ?? '')
+  const rightMs = Date.parse(right ?? '')
+  if (!Number.isFinite(leftMs)) return Number.isFinite(rightMs) ? -1 : 0
+  if (!Number.isFinite(rightMs)) return 1
+  return leftMs - rightMs
 }
 
 export function selectCurrentValidatorNode<T extends ValidatorHealthNode>(
