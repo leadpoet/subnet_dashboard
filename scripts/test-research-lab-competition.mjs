@@ -145,6 +145,8 @@ try {
   assert.match(component, /competition\?\.repoUrl \?\? DEFAULT_REPO_URL/)
   assert.match(component, /Competition data is temporarily unavailable\. This page will retry automatically\./)
   assert.match(component, /<LabEmissionSplit spend=\{settlement\?\.labMinerSpend \?\? null\}/)
+  assert.match(component, /const selectedRound = roundOptions\[0\] \?\? null/, 'the displayed round must follow the automatic priority order on every refresh')
+  assert.doesNotMatch(component, /selectedRoundId|setSelectedRoundId|onSelectRound|roundOptionLabel|Competition round/, 'manual round selection must remain absent')
   assert.match(component, /Public ICPs \(20\)/)
   assert.match(component, /Improve the public agent and compete on the same daily ICPs\./)
   assert.match(component, /All 20 ICPs are public for this round\./)

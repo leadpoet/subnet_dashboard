@@ -43,7 +43,6 @@ export function ResearchLab({
   const [competition, setCompetition] = useState<CompetitionSnapshot | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [selectedRoundId, setSelectedRoundId] = useState<string | null>(null)
 
   const fetchData = useCallback(async () => {
     const [competitionRequest, settlementRequest] = await Promise.allSettled([
@@ -55,7 +54,6 @@ export function ResearchLab({
       const normalized = normalizeCompetitionSnapshot(competitionRequest.value)
       if (normalized) {
         setCompetition(normalized)
-        setSelectedRoundId((current) => current ?? normalized.latestRound?.roundId ?? normalized.latestCompletedRound?.roundId ?? normalized.openRound?.roundId ?? normalized.rounds[0]?.roundId ?? null)
         setError(null)
         refreshed = true
       } else setError('Competition data did not match the public contract.')
@@ -73,11 +71,11 @@ export function ResearchLab({
 
   if (loading && !competition) return <ResearchLabLoading />
   const roundOptions = competition ? competitionRoundOptions(competition) : []
-  const selectedRound = roundOptions.find((round) => round.roundId === selectedRoundId) ?? roundOptions[0] ?? null
+  const selectedRound = roundOptions[0] ?? null
   return (
     <div className="w-full">
       <CompetitionHeader competition={competition} />
-      {!competition ? <Unavailable message="Competition data is temporarily unavailable. This page will retry automatically." /> : selectedRound ? <><RoundSummary competition={competition} round={selectedRound} rounds={roundOptions} onSelectRound={setSelectedRoundId} /><RoundWorkspace round={selectedRound} active={active} /></> : <p className="border-b border-[var(--line)] py-12 text-[14px] text-[var(--muted)]">No production competition round is available.</p>}
+      {!competition ? <Unavailable message="Competition data is temporarily unavailable. This page will retry automatically." /> : selectedRound ? <><RoundSummary round={selectedRound} /><RoundWorkspace round={selectedRound} active={active} /></> : <p className="border-b border-[var(--line)] py-12 text-[14px] text-[var(--muted)]">No production competition round is available.</p>}
       <details className="group mt-12 border-t border-[var(--line)] pt-1">
         <summary className="flex cursor-pointer list-none items-center justify-between gap-4 py-5 font-display text-[17px] text-[var(--muted)] focus:outline-none focus-visible:text-[var(--white)] [&::-webkit-details-marker]:hidden">
           <span>Competition settlement and emissions</span><span aria-hidden className="font-mono text-[11px] text-[var(--muted-2)] transition-transform group-open:rotate-45">+</span>
@@ -111,7 +109,7 @@ function CompetitionHeader({ competition }: { competition: CompetitionSnapshot |
   )
 }
 
-function RoundSummary({ competition, round, rounds, onSelectRound }: { competition: CompetitionSnapshot; round: CompetitionRoundSummary; rounds: CompetitionRoundSummary[]; onSelectRound: (roundId: string) => void }) {
+function RoundSummary({ round }: { round: CompetitionRoundSummary }) {
   const baselineScore = round.baseline?.finalScore ?? null
   const championScore = round.champion?.finalScore ?? null
   return (
@@ -122,7 +120,6 @@ function RoundSummary({ competition, round, rounds, onSelectRound }: { competiti
           <div className="mt-4 font-display text-[clamp(42px,7vw,76px)] font-medium leading-[0.9] tracking-[-0.045em] text-[var(--platinum)]">{baselineScore === null ? 'Not published' : formatCompetitionScore(baselineScore)}{baselineScore === null ? null : <span className="ml-3 align-baseline text-[20px] tracking-normal text-[var(--faint)]">/100 baseline</span>}</div>
           <p className="mt-5 max-w-[610px] text-[13px] leading-[1.7] text-[var(--muted)]">{baselineScore === null ? 'No final baseline score has been published for this round.' : 'Final score for the public baseline in this production round.'}</p>
         </div>
-        <label className="block min-w-[250px]"><span className="mb-2 block font-mono text-[9.5px] uppercase tracking-[0.13em] text-[var(--muted-2)]">Competition round</span><select value={round.roundId} onChange={(event) => onSelectRound(event.target.value)} className="w-full rounded-md border border-[var(--line)] bg-[#0d0d0d] px-3 py-2.5 font-mono text-[11px] text-[var(--platinum)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand)]">{rounds.map((option) => <option key={option.roundId} value={option.roundId}>{roundOptionLabel(option, competition)}</option>)}</select></label>
       </div>
       <CompetitionSchedule round={round} />
       <div className="mt-8 grid gap-px overflow-hidden rounded-md border border-[var(--line)] bg-[var(--line)] sm:grid-cols-3">
@@ -334,7 +331,6 @@ function LabEmissionSplit({ spend, metagraph }: { spend: LabMinerSpendRollup | n
 async function fetchJson(url: string): Promise<unknown> { const response = await fetch(url, { cache: 'no-store', headers: { Accept: 'application/json' } }); if (!response.ok) throw new Error(`Request failed (${response.status})`); return response.json() }
 async function fetchReleasedJson(url: string): Promise<{ state: 'available'; body: unknown } | { state: 'gated'; body: null }> { const response = await fetch(url, { cache: 'no-store', headers: { Accept: 'application/json' } }); if (response.status === 403) return { state: 'gated', body: null }; if (!response.ok) throw new Error(`Request failed (${response.status})`); return { state: 'available', body: await response.json() } }
 function asRecord(value: unknown): Record<string, unknown> | null { return value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null }
-function roundOptionLabel(round: CompetitionRoundSummary, competition: CompetitionSnapshot): string { const tags = [roundStatusLabel(round.status)]; if (round.roundId === competition.latestRound?.roundId) tags.push('latest'); if (round.roundId === competition.latestCompletedRound?.roundId) tags.push('last completed'); if (round.roundId === competition.openRound?.roundId) tags.push('open round'); return `${round.roundId} — ${tags.join(' · ')}` }
 function championMetricDetail(round: CompetitionRoundSummary, championScore: number | null): string {
   if (round.promotionStatus === 'promoted') return `Becomes next baseline · ${formatCompetitionScore(championScore)}`
   if (round.promotionStatus === 'pending') return `Promotion pending · ${formatCompetitionScore(championScore)}`
