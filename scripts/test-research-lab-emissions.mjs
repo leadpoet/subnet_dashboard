@@ -39,14 +39,6 @@ try {
     epoch: 23691,
     allocation_doc: {
       lab_cap_alpha_percent: 10,
-      source_add_allocations: [
-        {
-          miner_hotkey: '5source',
-          paid_alpha_percent: 0.2,
-          intended_alpha_percent: 0.2,
-          reason: 'source_acceptance',
-        },
-      ],
       reimbursement_allocations: [
         {
           miner_hotkey: '5miner',
@@ -87,7 +79,7 @@ try {
 
   assert.equal(
     researchLabAllocationEntries(snapshot.allocation_doc).length,
-    5,
+    4,
     'all allocation arrays should feed the same rollup',
   )
 
@@ -100,12 +92,6 @@ try {
   assert.equal(miner.labBucketSharePercent, 4.63569)
   assert.equal(formatLabAllocationPercent(miner.paidAlphaPercent), '0.4636%')
   assert.equal(formatLabAllocationPercent(miner.labBucketSharePercent), '4.6357%')
-  const sourceMiner = rollup.byHotkey['5source']
-  assert.ok(sourceMiner, 'SOURCE_ADD recipient should be present')
-  assert.equal(sourceMiner.paidAlphaPercent, 0.2)
-  assert.equal(sourceMiner.intendedAlphaPercent, 0.2)
-  assert.equal(sourceMiner.allocationCount, 1)
-
   const fulfillment = buildFulfillmentRewardRollup({
     epoch: 23874,
     labCapAlphaPercent: 30,

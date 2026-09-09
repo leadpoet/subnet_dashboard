@@ -33,7 +33,6 @@ try {
     netuid: 71,
     snapshot_status: 'active',
     lab_cap_alpha_percent: 30,
-    source_add_alpha_percent: 0,
     reimbursement_alpha_percent: 4.964095,
     champion_alpha_percent: 23.1335,
     queued_champion_alpha_percent: 1.902405,
@@ -57,7 +56,6 @@ try {
     reimbursement_alpha_percent: 5,
     champion_alpha_percent: 20,
     queued_champion_alpha_percent: 2,
-    source_add_alpha_percent: 0,
     unallocated_alpha_percent: 0,
     created_at: '2026-07-13T00:00:00Z',
   })

@@ -108,7 +108,6 @@ export function AdminResearchLabEconomics({
     { label: 'Compute reimbursement', metric: allocation.reimbursements, color: '#c9a96e' },
     { label: 'Champions', metric: allocation.champions, color: '#e8e1d4' },
     { label: 'Queued champions', metric: allocation.queuedChampions, color: '#cf9d61' },
-    { label: 'SOURCE_ADD', metric: allocation.sourceAdd, color: '#8a8a86' },
     { label: 'Unallocated', metric: allocation.unallocated, color: '#a8746f' },
   ]
 
@@ -182,7 +181,7 @@ export function AdminResearchLabEconomics({
             <div className="text-[10px] uppercase tracking-[0.12em]" style={{ color: 'var(--text-tertiary)' }}>Research Lab cap</div>
           </div>
         </div>
-        <div className="grid gap-px border-b sm:grid-cols-5" style={{ borderColor: 'var(--surface-border)', background: 'var(--surface-border)' }}>
+        <div className="grid gap-px border-b sm:grid-cols-4" style={{ borderColor: 'var(--surface-border)', background: 'var(--surface-border)' }}>
           {allocationSegments.map((segment) => (
             <div key={segment.label} className="px-4 py-4" style={{ background: 'var(--surface)' }} title={`${segment.metric.source} · ${segment.metric.authoritative ? 'Authoritative' : 'Derived'}`}>
               <div className="text-[10px] uppercase tracking-[0.12em]" style={{ color: 'var(--text-tertiary)' }}>{segment.label}</div>
@@ -206,7 +205,7 @@ export function AdminResearchLabEconomics({
           </div>
           <div className={cn('rounded-lg border px-4 py-3 text-xs', allocation.reconciled ? 'border-gold-soft bg-gold-soft text-gold' : 'border-burgundy-soft bg-burgundy-soft text-burgundy')}>
             {allocation.reconciled ? (
-              <span className="inline-flex items-center gap-2"><Check className="h-3.5 w-3.5" /> SOURCE_ADD + reimbursements + champions + queued champions + unallocated = {formatPercent(allocation.reconciliationTotal)}</span>
+              <span className="inline-flex items-center gap-2"><Check className="h-3.5 w-3.5" /> Reimbursements + champions + queued champions + unallocated = {formatPercent(allocation.reconciliationTotal)}</span>
             ) : (
               <span className="inline-flex items-center gap-2"><AlertTriangle className="h-3.5 w-3.5" /> Allocation mismatch: {allocation.reconciliationDifference.toFixed(6)} percentage points</span>
             )}
@@ -347,7 +346,7 @@ export function AdminResearchLabEconomics({
         <div className="overflow-x-auto">
           <table className="w-full min-w-[960px] text-left text-xs">
             <thead><tr className="border-b" style={{ borderColor: 'var(--surface-border)', color: 'var(--text-tertiary)' }}>
-              {['Epoch', 'Lab cap', 'Reimbursements', 'Champions', 'Queued', 'SOURCE_ADD', 'Unallocated', 'Paid miners', 'Gateway', 'Chain'].map((label) => <th key={label} className="px-4 py-3 font-medium">{label}</th>)}
+              {['Epoch', 'Lab cap', 'Reimbursements', 'Champions', 'Queued', 'Unallocated', 'Paid miners', 'Gateway', 'Chain'].map((label) => <th key={label} className="px-4 py-3 font-medium">{label}</th>)}
             </tr></thead>
             <tbody>{visibleHistory.map((epoch) => (
               <tr key={epoch.epoch} className={cn('border-b last:border-0', epoch.epoch === allocation.epoch && 'bg-gold-soft')} style={{ borderColor: 'var(--surface-border)' }}>
@@ -356,7 +355,6 @@ export function AdminResearchLabEconomics({
                 <td className="px-4 py-3">{epoch.reimbursements.toFixed(6)}%</td>
                 <td className="px-4 py-3">{epoch.champions.toFixed(6)}%</td>
                 <td className="px-4 py-3">{epoch.queuedChampions.toFixed(6)}%</td>
-                <td className="px-4 py-3">{epoch.sourceAdd.toFixed(6)}%</td>
                 <td className="px-4 py-3">{epoch.unallocated.toFixed(6)}%</td>
                 <td className="px-4 py-3">{epoch.paidMinerCount}</td>
                 <td className="px-4 py-3"><StatusPill label={epoch.gatewayPublished ? 'Published' : 'Missing'} tone={epoch.gatewayPublished ? 'good' : 'bad'} /></td>
@@ -497,4 +495,4 @@ function exportChampions(champions: EconomicsChampion[], epoch: number) { downlo
 function exportQueue(payload: ResearchLabEconomicsPayload, epoch: number) { downloadCsv(`research-lab-champion-queue-${epoch}.csv`, payload.championQueue.map((row) => ({ epoch, position: row.position, miner_hotkey: row.minerHotkey, miner_uid: row.minerUid, candidate_id: row.candidateId, intended_alpha_percent: row.intendedThisEpoch.value, paid_alpha_percent: row.paidThisEpoch.value, deferred_alpha_percent: row.deferredThisEpoch.value, remaining_alpha_percent: row.remainingLifetimeReward.value, reason: row.queueReason }))) }
 function exportReimbursements(payload: ResearchLabEconomicsPayload, epoch: number) { downloadCsv(`research-lab-reimbursements-${epoch}.csv`, payload.reimbursements.map((row) => ({ epoch, award_id: row.awardId, miner_hotkey: row.minerHotkey, run_id: row.runId, status: row.status, eligible_cost_microusd: row.eligibleComputeCost.value, target_reimbursement_microusd: row.targetReimbursement.value, intended_alpha_percent: row.intendedThisEpoch.value, paid_alpha_percent: row.paidThisEpoch.value, paid_to_date_alpha_percent: row.paidToDate.value, deferred_alpha_percent: row.deferred.value }))) }
 function exportIcpScores(champion: EconomicsChampion) { downloadCsv(`research-lab-icp-scores-${shortId(champion.candidateId)}.csv`, (champion.scoring?.icps ?? []).map((row) => ({ candidate_id: champion.candidateId, score_bundle_id: champion.scoreBundleId, icp_ref: row.icpRef, status: row.status, baseline_score: row.baselineScore, candidate_score: row.candidateScore, delta: row.delta, company_count: row.companyCount, excluded: String(row.excluded), diagnostics: row.diagnostics }))) }
-function exportHistory(rows: ResearchLabEconomicsPayload['history']) { downloadCsv('research-lab-epoch-history.csv', rows.map((row) => ({ epoch: row.epoch, created_at: row.createdAt, lab_cap_alpha_percent: row.labCap, reimbursement_alpha_percent: row.reimbursements, champion_alpha_percent: row.champions, queued_champion_alpha_percent: row.queuedChampions, source_add_alpha_percent: row.sourceAdd, unallocated_alpha_percent: row.unallocated, paid_miners: row.paidMinerCount, queued_rewards: row.queuedRewardCount, gateway_published: String(row.gatewayPublished), chain_finalized: String(row.chainFinalized) }))) }
+function exportHistory(rows: ResearchLabEconomicsPayload['history']) { downloadCsv('research-lab-epoch-history.csv', rows.map((row) => ({ epoch: row.epoch, created_at: row.createdAt, lab_cap_alpha_percent: row.labCap, reimbursement_alpha_percent: row.reimbursements, champion_alpha_percent: row.champions, queued_champion_alpha_percent: row.queuedChampions, unallocated_alpha_percent: row.unallocated, paid_miners: row.paidMinerCount, queued_rewards: row.queuedRewardCount, gateway_published: String(row.gatewayPublished), chain_finalized: String(row.chainFinalized) }))) }

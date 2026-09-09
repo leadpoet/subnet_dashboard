@@ -95,7 +95,7 @@ async function buildEconomicsPayload({
   const allocationRows = await fetchPagedRows('allocation history', (from, to) =>
     supabase
       .from('research_lab_emission_allocation_current')
-      .select('epoch,netuid,snapshot_status,lab_cap_alpha_percent,reimbursement_alpha_percent,champion_alpha_percent,queued_champion_alpha_percent,unallocated_alpha_percent,source_add_alpha_percent,allocation_hash,allocation_doc,created_at')
+      .select('epoch,netuid,snapshot_status,lab_cap_alpha_percent,reimbursement_alpha_percent,champion_alpha_percent,queued_champion_alpha_percent,unallocated_alpha_percent,allocation_hash,allocation_doc,created_at')
       .order('epoch', { ascending: false, nullsFirst: false })
       .range(from, Math.min(to, 99)),
     100,
@@ -106,7 +106,7 @@ async function buildEconomicsPayload({
   if (!selectedAllocation && requestedEpoch !== null) {
     const { data, error } = await supabase
       .from('research_lab_emission_allocation_current')
-      .select('epoch,netuid,snapshot_status,lab_cap_alpha_percent,reimbursement_alpha_percent,champion_alpha_percent,queued_champion_alpha_percent,unallocated_alpha_percent,source_add_alpha_percent,allocation_hash,allocation_doc,created_at')
+      .select('epoch,netuid,snapshot_status,lab_cap_alpha_percent,reimbursement_alpha_percent,champion_alpha_percent,queued_champion_alpha_percent,unallocated_alpha_percent,allocation_hash,allocation_doc,created_at')
       .eq('epoch', requestedEpoch)
       .limit(1)
     throwIfQueryError('selected allocation', error)
@@ -745,7 +745,6 @@ function buildHistory(allocationRows: Row[], publishedRows: Row[], finalizationR
       reimbursements: finiteNumber(row.reimbursement_alpha_percent) ?? 0,
       champions: finiteNumber(row.champion_alpha_percent) ?? 0,
       queuedChampions: finiteNumber(row.queued_champion_alpha_percent) ?? 0,
-      sourceAdd: finiteNumber(row.source_add_alpha_percent) ?? 0,
       unallocated: finiteNumber(row.unallocated_alpha_percent) ?? 0,
       paidMinerCount: new Set(paidEntries.filter((entry) => (finiteNumber(entry.paid_alpha_percent) ?? 0) > 0).map((entry) => text(entry.miner_hotkey)).filter(Boolean)).size,
       queuedRewardCount: records(doc?.queued_champion_allocations).length,
