@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useVisiblePolling } from '@/lib/hooks/useVisiblePolling'
 import type { MetagraphData } from '@/lib/types'
 import { formatLabAllocationPercent } from '@/lib/research-lab-emissions'
 import {
@@ -31,7 +32,11 @@ type LabMinerAllTimeEntry = { alphaEarned: number; computeSpendUsd: number; sche
 type LabMinerCurrentAllocationEntry = { paidAlphaPercent: number; intendedAlphaPercent: number; overpaidAlphaPercent: number; spendUsd: number; labBucketSharePercent: number; allocationCount: number; reasons: string[] }
 type ReleaseState = 'idle' | 'loading' | 'available' | 'gated' | 'error'
 
-export function ResearchLab({ onSync, metagraph }: { onSync?: () => void; metagraph?: MetagraphData | null } = {}) {
+export function ResearchLab({
+  onSync,
+  metagraph,
+  active = true,
+}: { onSync?: () => void; metagraph?: MetagraphData | null; active?: boolean } = {}) {
   const [settlement, setSettlement] = useState<ResearchLabData | null>(null)
   const [competition, setCompetition] = useState<CompetitionSnapshot | null>(null)
   const [loading, setLoading] = useState(true)
@@ -62,11 +67,7 @@ export function ResearchLab({ onSync, metagraph }: { onSync?: () => void; metagr
     setLoading(false)
   }, [onSync])
 
-  useEffect(() => {
-    void fetchData()
-    const interval = window.setInterval(() => void fetchData(), 60_000)
-    return () => window.clearInterval(interval)
-  }, [fetchData])
+  useVisiblePolling(fetchData, 60_000, { enabled: active })
 
   if (loading && !competition) return <ResearchLabLoading />
   if (!competition) return <Unavailable message={error ?? 'Competition data is temporarily unavailable.'} />
@@ -76,7 +77,7 @@ export function ResearchLab({ onSync, metagraph }: { onSync?: () => void; metagr
   return (
     <div className="w-full">
       <CompetitionHeader competition={competition} />
-      {selectedRound ? <><RoundSummary competition={competition} round={selectedRound} rounds={roundOptions} onSelectRound={setSelectedRoundId} /><RoundWorkspace round={selectedRound} /></> : <p className="border-b border-[var(--line)] py-12 text-[14px] text-[var(--muted)]">No production competition round is available.</p>}
+      {selectedRound ? <><RoundSummary competition={competition} round={selectedRound} rounds={roundOptions} onSelectRound={setSelectedRoundId} /><RoundWorkspace round={selectedRound} active={active} /></> : <p className="border-b border-[var(--line)] py-12 text-[14px] text-[var(--muted)]">No production competition round is available.</p>}
       <details className="group mt-12 border-t border-[var(--line)] pt-1">
         <summary className="flex cursor-pointer list-none items-center justify-between gap-4 py-5 font-display text-[17px] text-[var(--muted)] focus:outline-none focus-visible:text-[var(--white)] [&::-webkit-details-marker]:hidden">
           <span>Competition settlement and emissions</span><span aria-hidden className="font-mono text-[11px] text-[var(--muted-2)] transition-transform group-open:rotate-45">+</span>
@@ -140,7 +141,7 @@ function SummaryMetric({ label, value, detail }: { label: string; value: string;
   return <div className="min-w-0 bg-[#0b0b0b] px-4 py-4"><div className="font-mono text-[9.5px] uppercase tracking-[0.13em] text-[var(--muted-2)]">{label}</div><div className="mt-2 truncate font-mono text-[12px] text-[var(--platinum)]" title={value}>{value}</div><div className="mt-1 truncate text-[11px] text-[var(--muted-2)]" title={detail}>{detail}</div></div>
 }
 
-function RoundWorkspace({ round }: { round: CompetitionRoundSummary }) {
+function RoundWorkspace({ round, active }: { round: CompetitionRoundSummary; active: boolean }) {
   const [submissions, setSubmissions] = useState<CompetitionSubmission[]>([])
   const [benchmark, setBenchmark] = useState<CompetitionBenchmark | null>(null)
   const [benchmarkState, setBenchmarkState] = useState<ReleaseState>('loading')
@@ -154,6 +155,7 @@ function RoundWorkspace({ round }: { round: CompetitionRoundSummary }) {
   const [selectedFile, setSelectedFile] = useState<string | null>(null)
   const [roundRevision, setRoundRevision] = useState(0)
   const roundRequestRef = useRef(0)
+  const roundSnapshotRef = useRef(false)
   const benchmarkReleasedRef = useRef(false)
   const selectedSubmissionIdRef = useRef<string | null>(null)
   selectedSubmissionIdRef.current = selectedSubmissionId
@@ -164,47 +166,51 @@ function RoundWorkspace({ round }: { round: CompetitionRoundSummary }) {
 
   useEffect(() => {
     benchmarkReleasedRef.current = false
+    roundSnapshotRef.current = false
     setRoundLoading(true); setRoundError(null); setBenchmark(null); setBenchmarkState('loading'); setSubmissions([]); selectSubmission(null)
-    const refresh = async (initial: boolean) => {
-      const request = ++roundRequestRef.current
-      const [submissionRequest, benchmarkRequest] = await Promise.allSettled([
-        fetchReleasedJson(`/api/research-lab/rounds/${encodeURIComponent(round.roundId)}/submissions`),
-        fetchReleasedJson(`/api/research-lab/rounds/${encodeURIComponent(round.roundId)}/benchmark`),
-      ])
-      if (request !== roundRequestRef.current) return
-      if (submissionRequest.status === 'fulfilled' && submissionRequest.value.state === 'available') {
-        const next = normalizeCompetitionSubmissions(submissionRequest.value.body)
-        setSubmissions(next)
-        const current = selectedSubmissionIdRef.current
-        selectSubmission(current && next.some((submission) => submission.submissionId === current)
-          ? current
-          : next.find((submission) => submission.isBaseline)?.submissionId ?? next.find((submission) => submission.isChampion)?.submissionId ?? next[0]?.submissionId ?? null)
-        setRoundError(null)
-      } else if (initial) {
-        setSubmissions([])
-        if (submissionRequest.status === 'rejected') setRoundError(errorMessage(submissionRequest.reason, 'Submissions are temporarily unavailable.'))
-      } else {
-        setRoundError(submissionRequest.status === 'rejected'
-          ? `Latest submission refresh failed: ${errorMessage(submissionRequest.reason, 'request failed')}`
-          : 'Latest submission refresh did not return public data.')
-      }
-      if (benchmarkRequest.status === 'fulfilled' && benchmarkRequest.value.state === 'available') {
-        const next = normalizeCompetitionBenchmark(benchmarkRequest.value.body)
-        benchmarkReleasedRef.current = next !== null
-        setBenchmark(next); setBenchmarkState(next ? 'available' : 'error')
-      } else if (benchmarkRequest.status === 'fulfilled') {
-        if (!benchmarkReleasedRef.current) {
-          setBenchmark(null); setBenchmarkState(benchmarkRequest.value.state)
-        } else if (!initial) setRoundError('Latest benchmark refresh failed. The last public snapshot remains shown.')
-      } else if (initial) setBenchmarkState('error')
-      else setRoundError(`Latest benchmark refresh failed: ${errorMessage(benchmarkRequest.reason, 'request failed')}. The last public snapshot remains shown.`)
-      setRoundLoading(false)
-      setRoundRevision((current) => current + 1)
-    }
-    void refresh(true)
-    const interval = window.setInterval(() => void refresh(false), 60_000)
-    return () => { window.clearInterval(interval); roundRequestRef.current += 1 }
+    return () => { roundRequestRef.current += 1 }
   }, [round.roundId, selectSubmission])
+
+  const refreshRound = useCallback(async () => {
+    const initial = !roundSnapshotRef.current
+    const request = ++roundRequestRef.current
+    const [submissionRequest, benchmarkRequest] = await Promise.allSettled([
+      fetchReleasedJson(`/api/research-lab/rounds/${encodeURIComponent(round.roundId)}/submissions`),
+      fetchReleasedJson(`/api/research-lab/rounds/${encodeURIComponent(round.roundId)}/benchmark`),
+    ])
+    if (request !== roundRequestRef.current) return
+    if (submissionRequest.status === 'fulfilled' && submissionRequest.value.state === 'available') {
+      const next = normalizeCompetitionSubmissions(submissionRequest.value.body)
+      setSubmissions(next)
+      const current = selectedSubmissionIdRef.current
+      selectSubmission(current && next.some((submission) => submission.submissionId === current)
+        ? current
+        : next.find((submission) => submission.isBaseline)?.submissionId ?? next.find((submission) => submission.isChampion)?.submissionId ?? next[0]?.submissionId ?? null)
+      setRoundError(null)
+    } else if (initial) {
+      setSubmissions([])
+      if (submissionRequest.status === 'rejected') setRoundError(errorMessage(submissionRequest.reason, 'Submissions are temporarily unavailable.'))
+    } else {
+      setRoundError(submissionRequest.status === 'rejected'
+        ? `Latest submission refresh failed: ${errorMessage(submissionRequest.reason, 'request failed')}`
+        : 'Latest submission refresh did not return public data.')
+    }
+    if (benchmarkRequest.status === 'fulfilled' && benchmarkRequest.value.state === 'available') {
+      const next = normalizeCompetitionBenchmark(benchmarkRequest.value.body)
+      benchmarkReleasedRef.current = next !== null
+      setBenchmark(next); setBenchmarkState(next ? 'available' : 'error')
+    } else if (benchmarkRequest.status === 'fulfilled') {
+      if (!benchmarkReleasedRef.current) {
+        setBenchmark(null); setBenchmarkState(benchmarkRequest.value.state)
+      } else if (!initial) setRoundError('Latest benchmark refresh failed. The last public snapshot remains shown.')
+    } else if (initial) setBenchmarkState('error')
+    else setRoundError(`Latest benchmark refresh failed: ${errorMessage(benchmarkRequest.reason, 'request failed')}. The last public snapshot remains shown.`)
+    roundSnapshotRef.current = true
+    setRoundLoading(false)
+    setRoundRevision((current) => current + 1)
+  }, [round.roundId, selectSubmission])
+
+  useVisiblePolling(refreshRound, 60_000, { enabled: active })
 
   useEffect(() => {
     setResults(null); setCode(null); setCodeState('idle'); setSelectedFile(null)
