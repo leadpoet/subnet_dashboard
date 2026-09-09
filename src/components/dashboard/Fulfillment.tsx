@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { useVisiblePolling } from '@/lib/hooks/useVisiblePolling'
 import * as DialogPrimitive from '@radix-ui/react-dialog'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -392,7 +393,7 @@ function CopyButton({ text }: { text: string }) {
   )
 }
 
-export function Fulfillment({ onSync }: { onSync?: () => void } = {}) {
+export function Fulfillment({ onSync, active = true }: { onSync?: () => void; active?: boolean } = {}) {
   const [data, setData] = useState<FulfillmentData | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -455,11 +456,7 @@ export function Fulfillment({ onSync }: { onSync?: () => void } = {}) {
     }
   }, [onSync])
 
-  useEffect(() => {
-    fetchData()
-    const interval = setInterval(fetchData, 60000)
-    return () => clearInterval(interval)
-  }, [fetchData])
+  useVisiblePolling(fetchData, 60_000, { enabled: active })
 
   // Global "/" keyboard shortcut to focus search
   useEffect(() => {

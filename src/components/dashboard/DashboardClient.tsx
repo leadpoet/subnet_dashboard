@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useCallback, useEffect, useRef } from 'react'
+import { useVisiblePolling } from '@/lib/hooks/useVisiblePolling'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
   Overview,
@@ -130,94 +131,44 @@ export function DashboardClient({
     }
   }, [activeTab])
 
-  // -------------------------------------------------------------------
-  // Polling: every 60s, paused when the tab isn't visible so we
-  // don't burn battery or hammer the API when nobody's looking.
-  // -------------------------------------------------------------------
+  // Share the timer and visibility-resume path so slow refreshes cannot overlap.
+  const dashboardGeneration = useRef(0)
   useEffect(() => {
-    let timeoutId: number
-    let mounted = true
-    const initialBuildVersion = initialData.buildVersion
+    const generation = ++dashboardGeneration.current
+    return () => { dashboardGeneration.current = generation + 1 }
+  }, [initialData.buildVersion])
 
-    const fetchData = async () => {
-      if (!mounted) return
-      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') {
-        // Skip this tick; reschedule. Will resume next time we're visible.
-        if (mounted) timeoutId = window.setTimeout(fetchData, 60 * 1000)
-        return
-      }
-
-      try {
-        const [dashboardRes, metagraphRes] = await Promise.all([
-          fetch('/api/dashboard'),
-          fetch('/api/metagraph')
-        ])
-        if (dashboardRes.ok && mounted) {
-          const newData = await dashboardRes.json()
-
-          // Reload page to pick up new JS when the server has redeployed.
-          if (initialBuildVersion && newData.buildVersion &&
-              newData.buildVersion !== initialBuildVersion) {
-            window.location.reload()
-            return
-          }
-
-          setDashboardData(newData)
-
+  const refreshDashboard = useCallback(async () => {
+    const generation = dashboardGeneration.current
+    try {
+      const [dashboardRes, metagraphRes] = await Promise.all([
+        fetch('/api/dashboard'),
+        fetch('/api/metagraph'),
+      ])
+      if (generation !== dashboardGeneration.current) return
+      if (dashboardRes.ok) {
+        const newData = await dashboardRes.json()
+        if (generation !== dashboardGeneration.current) return
+        if (initialData.buildVersion && newData.buildVersion &&
+            newData.buildVersion !== initialData.buildVersion) {
+          window.location.reload()
+          return
         }
-        if (metagraphRes.ok && mounted) {
-          const newMetagraph = await metagraphRes.json()
-          setMetagraph(newMetagraph)
-        }
-      } catch (error) {
-        // Silent. Surfaced by the stale "Updated X ago" timestamp. Logged
-        // only to aid local debugging.
-        if (process.env.NODE_ENV !== 'production') {
-          console.error('Auto-refresh failed:', error)
-        }
+        setDashboardData(newData)
       }
-
-      if (mounted) {
-        timeoutId = window.setTimeout(fetchData, 60 * 1000)
+      if (metagraphRes.ok) {
+        const newMetagraph = await metagraphRes.json()
+        if (generation === dashboardGeneration.current) setMetagraph(newMetagraph)
       }
-    }
-
-    timeoutId = window.setTimeout(fetchData, 60 * 1000)
-
-    return () => {
-      mounted = false
-      window.clearTimeout(timeoutId)
+    } catch (error) {
+      if (process.env.NODE_ENV !== 'production') {
+        console.error('Auto-refresh failed:', error)
+      }
     }
   }, [initialData.buildVersion])
 
-  // Refresh immediately when the tab becomes visible again after backgrounding.
-  useEffect(() => {
-    const handleVisibilityChange = () => {
-      if (document.visibilityState !== 'visible') return
-      const fetchData = async () => {
-        try {
-          const [dashboardRes, metagraphRes] = await Promise.all([
-            fetch('/api/dashboard'),
-            fetch('/api/metagraph')
-          ])
-          if (dashboardRes.ok) {
-            const newData = await dashboardRes.json()
-            setDashboardData(newData)
-          }
-          if (metagraphRes.ok) {
-            const newMetagraph = await metagraphRes.json()
-            setMetagraph(newMetagraph)
-          }
-        } catch {
-          // Best-effort refresh; ignore.
-        }
-      }
-      fetchData()
-    }
-
-    document.addEventListener('visibilitychange', handleVisibilityChange)
-    return () => document.removeEventListener('visibilitychange', handleVisibilityChange)
-  }, [])
+  // Initial data was rendered on the server; wait one interval on first mount.
+  useVisiblePolling(refreshDashboard, 60_000, { immediate: false })
 
   // Handle navigation from SubmissionTracker to MinerTracker
   const handleUidClick = useCallback((uid: number) => {
@@ -403,7 +354,7 @@ export function DashboardClient({
               className="data-[state=active]:animate-in data-[state=active]:fade-in-0 data-[state=active]:duration-300"
             >
               <ErrorBoundary label="ResearchLab">
-                <ResearchLab metagraph={metagraph} />
+                <ResearchLab metagraph={metagraph} active={activeTab === 'research-lab'} />
               </ErrorBoundary>
             </TabsContent>
           )}
@@ -415,7 +366,7 @@ export function DashboardClient({
               className="data-[state=active]:animate-in data-[state=active]:fade-in-0 data-[state=active]:duration-300"
             >
               <ErrorBoundary label="Fulfillment">
-                <Fulfillment />
+                <Fulfillment active={activeTab === 'fulfillment'} />
               </ErrorBoundary>
             </TabsContent>
           )}

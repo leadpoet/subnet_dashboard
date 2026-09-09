@@ -1,6 +1,7 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
+import { useVisiblePolling } from '@/lib/hooks/useVisiblePolling'
 import type { MetagraphData } from '@/lib/types'
 import { formatLabAllocationPercent } from '@/lib/research-lab-emissions'
 
@@ -67,7 +68,8 @@ type LabMinerCurrentAllocationEntry = {
 export function ResearchLab({
   onSync,
   metagraph,
-}: { onSync?: () => void; metagraph?: MetagraphData | null } = {}) {
+  active = true,
+}: { onSync?: () => void; metagraph?: MetagraphData | null; active?: boolean } = {}) {
   const [data, setData] = useState<ResearchLabData | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -88,11 +90,7 @@ export function ResearchLab({
     }
   }, [onSync])
 
-  useEffect(() => {
-    void fetchData()
-    const interval = window.setInterval(() => void fetchData(), 60_000)
-    return () => window.clearInterval(interval)
-  }, [fetchData])
+  useVisiblePolling(fetchData, 60_000, { enabled: active })
 
   if (loading && !data) return <ResearchLabLoading />
   if (error && !data) {
