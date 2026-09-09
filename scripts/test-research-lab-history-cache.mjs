@@ -86,7 +86,8 @@ function harness() {
       assert.ok(order.includes(table === RECEIPTS ? 'event_id.asc' : 'allocation_id.asc'))
       rows = [...rows].sort((a, b) => {
         if (table === RECEIPTS) return b.created_at.localeCompare(a.created_at) || a.event_id.localeCompare(b.event_id)
-        return a.epoch - b.epoch || a.allocation_id.localeCompare(b.allocation_id)
+        assert.ok(order.includes('created_at.asc.nullsfirst'))
+        return a.epoch - b.epoch || a.created_at.localeCompare(b.created_at) || a.allocation_id.localeCompare(b.allocation_id)
       })
     }
     const offset = Number(call.params.get('offset') || 0)
@@ -288,4 +289,13 @@ assert.equal(large.reads(ALLOCATIONS), 6)
 large.refresh()
 assert.deepEqual(await large.get(), largeResult)
 assert.equal(large.reads(ALLOCATIONS), 6, 'large history also avoids repeat document reads')
+
+const tied = harness()
+const newest = allocation('a-newer-document', 11, 'miner-b', 9)
+newest.created_at = new Date(START + 1_000).toISOString()
+tied.allocations.push(newest)
+const tiedResult = await tied.get()
+assert.equal(tiedResult.currentAllocation.byHotkey['miner-b'].paidAlphaPercent, 9, 'latest epoch fallback must select its newest document across pages')
+tied.refresh()
+assert.deepEqual(await tied.get(), tiedResult)
 console.log(`research-lab-history-cache: actual GET outputs, two miners, rolling expiry, append/backfill, pagination, live allocation, concurrency, failures/retry and cold restart passed; unchanged refresh: receipt payload reads 0 (cold ${receiptReads}), allocation payload reads 0 (cold ${allocationReads})`)

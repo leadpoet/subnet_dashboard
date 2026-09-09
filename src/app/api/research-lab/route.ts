@@ -416,6 +416,7 @@ async function fetchAllocationHistory(
           .from('research_lab_emission_allocation_snapshots')
           .select('epoch, allocation_doc, created_at')
           .order('epoch', { ascending: true, nullsFirst: false })
+          .order('created_at', { ascending: true, nullsFirst: true })
           .order('allocation_id', { ascending: true })
           .range(history.snapshotCount, Math.min(history.snapshotCount + LAB_MINER_SPEND_BATCH_SIZE, expectedCount) - 1)
         if (error || !data?.length) throw new Error('Research Lab allocation history query failed')
@@ -426,7 +427,8 @@ async function fetchAllocationHistory(
             history.firstEpoch = Math.min(history.firstEpoch ?? epoch, epoch)
             history.latestEpoch = Math.max(history.latestEpoch ?? epoch, epoch)
           }
-          if (!history.latestSnapshot || numberOr(snapshot.epoch, -Infinity) > numberOr(history.latestSnapshot.epoch, -Infinity)) {
+          // Equal-epoch snapshots arrive oldest first, with a stable ID tie-break.
+          if (!history.latestSnapshot || numberOr(snapshot.epoch, -Infinity) >= numberOr(history.latestSnapshot.epoch, -Infinity)) {
             history.latestSnapshot = snapshot
           }
           for (const allocation of researchLabAllocationEntries(snapshot.allocation_doc ?? {})) {
