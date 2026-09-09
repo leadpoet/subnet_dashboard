@@ -17,6 +17,7 @@ try {
 
   const require = createRequire(import.meta.url)
   const {
+    DEFAULT_REPO_URL,
     competitionSubmissionStatusLabel,
     competitionRoundOptions,
     formatCompetitionScore,
@@ -26,6 +27,7 @@ try {
     normalizeCompetitionSnapshot,
     normalizeCompetitionSubmissions,
   } = require(join(outDir, 'research-lab-competition.js'))
+  assert.equal(DEFAULT_REPO_URL, 'https://github.com/leadpoet/pydantic-harness/tree/lab')
 
   const published = {
     round_id: 'arena-2026-09-05', status: 'published', mode: 'live', network_name: 'finney', netuid: 71,
@@ -139,6 +141,10 @@ try {
   assert.equal(code.truncated, true)
 
   const component = await readFile(resolve('src/components/dashboard/ResearchLab.tsx'), 'utf8')
+  assert.doesNotMatch(component, /if \(!competition\) return/, 'an Arena outage must not hide the independent settlement view')
+  assert.match(component, /competition\?\.repoUrl \?\? DEFAULT_REPO_URL/)
+  assert.match(component, /Competition data is temporarily unavailable\. This page will retry automatically\./)
+  assert.match(component, /<LabEmissionSplit spend=\{settlement\?\.labMinerSpend \?\? null\}/)
   assert.match(component, /Public ICPs \(20\)/)
   assert.match(component, /Improve the public agent and compete on the same daily ICPs\./)
   assert.match(component, /All 20 ICPs are public for this round\./)

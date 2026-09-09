@@ -5,6 +5,7 @@ import { useVisiblePolling } from '@/lib/hooks/useVisiblePolling'
 import type { MetagraphData } from '@/lib/types'
 import { formatLabAllocationPercent } from '@/lib/research-lab-emissions'
 import {
+  DEFAULT_REPO_URL,
   competitionSubmissionStatusLabel,
   competitionRoundOptions,
   formatCompetitionScore,
@@ -71,14 +72,12 @@ export function ResearchLab({
   useVisiblePolling(fetchData, 60_000, { enabled: active })
 
   if (loading && !competition) return <ResearchLabLoading />
-  if (!competition) return <Unavailable message={error ?? 'Competition data is temporarily unavailable.'} />
-
-  const roundOptions = competitionRoundOptions(competition)
+  const roundOptions = competition ? competitionRoundOptions(competition) : []
   const selectedRound = roundOptions.find((round) => round.roundId === selectedRoundId) ?? roundOptions[0] ?? null
   return (
     <div className="w-full">
       <CompetitionHeader competition={competition} />
-      {selectedRound ? <><RoundSummary competition={competition} round={selectedRound} rounds={roundOptions} onSelectRound={setSelectedRoundId} /><RoundWorkspace round={selectedRound} active={active} /></> : <p className="border-b border-[var(--line)] py-12 text-[14px] text-[var(--muted)]">No production competition round is available.</p>}
+      {!competition ? <Unavailable message="Competition data is temporarily unavailable. This page will retry automatically." /> : selectedRound ? <><RoundSummary competition={competition} round={selectedRound} rounds={roundOptions} onSelectRound={setSelectedRoundId} /><RoundWorkspace round={selectedRound} active={active} /></> : <p className="border-b border-[var(--line)] py-12 text-[14px] text-[var(--muted)]">No production competition round is available.</p>}
       <details className="group mt-12 border-t border-[var(--line)] pt-1">
         <summary className="flex cursor-pointer list-none items-center justify-between gap-4 py-5 font-display text-[17px] text-[var(--muted)] focus:outline-none focus-visible:text-[var(--white)] [&::-webkit-details-marker]:hidden">
           <span>Competition settlement and emissions</span><span aria-hidden className="font-mono text-[11px] text-[var(--muted-2)] transition-transform group-open:rotate-45">+</span>
@@ -86,7 +85,7 @@ export function ResearchLab({
         <p className="mb-5 max-w-2xl text-[12px] leading-relaxed text-[var(--muted-2)]">Current competition allocation, metagraph emissions, reimbursement, and compute spend remain available for settlement review.</p>
         <LabEmissionSplit spend={settlement?.labMinerSpend ?? null} metagraph={metagraph} />
       </details>
-      {error ? <p className="mt-5 text-[12px] text-[var(--muted-2)]">Latest refresh failed: {error}</p> : null}
+      {error && competition ? <p className="mt-5 text-[12px] text-[var(--muted-2)]">Latest refresh failed: {error}</p> : null}
     </div>
   )
 }
@@ -96,18 +95,18 @@ function ResearchLabLoading() {
 }
 
 function Unavailable({ message }: { message: string }) {
-  return <div className="border-l-2 border-l-[var(--line-3)] py-6 pl-5"><div className="font-mono text-[10.5px] uppercase tracking-[0.16em] text-[var(--muted-2)]">Open Source Agent Competition</div><p className="mt-3 text-[14px] text-[var(--muted)]">{message}</p></div>
+  return <p role="status" className="border-b border-[var(--line)] py-10 text-[14px] leading-relaxed text-[var(--muted)]">{message}</p>
 }
 
-function CompetitionHeader({ competition }: { competition: CompetitionSnapshot }) {
+function CompetitionHeader({ competition }: { competition: CompetitionSnapshot | null }) {
   return (
     <header className="flex flex-col justify-between gap-6 border-b border-[var(--line)] pb-8 md:flex-row md:items-end">
       <div>
-        <div className="font-mono text-[10.5px] uppercase tracking-[0.18em] text-[var(--muted-2)]">SN {competition.netuid} · {competition.networkName} · {competition.mode}</div>
+        <div className="font-mono text-[10.5px] uppercase tracking-[0.18em] text-[var(--muted-2)]">{competition ? `SN ${competition.netuid} · ${competition.networkName} · ${competition.mode}` : 'Public benchmark'}</div>
         <h2 className="mt-3 max-w-[760px] font-display text-[32px] font-medium leading-[1.04] tracking-[-0.035em] text-[var(--white)] md:text-[46px]">Open Source Agent Competition</h2>
         <p className="mt-4 max-w-[680px] text-[14px] leading-[1.7] text-[var(--muted)]">Improve the public agent and compete on the same daily ICPs.</p>
       </div>
-      <a href={competition.repoUrl} target="_blank" rel="noreferrer" className="inline-flex shrink-0 items-center justify-center rounded-md border border-[var(--line-3)] px-4 py-2.5 font-mono text-[10.5px] uppercase tracking-[0.12em] text-[var(--platinum)] transition-colors hover:border-[var(--muted-2)] hover:text-[var(--white)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand)]">Open benchmark repository ↗</a>
+      <a href={competition?.repoUrl ?? DEFAULT_REPO_URL} target="_blank" rel="noreferrer" className="inline-flex shrink-0 items-center justify-center rounded-md border border-[var(--line-3)] px-4 py-2.5 font-mono text-[10.5px] uppercase tracking-[0.12em] text-[var(--platinum)] transition-colors hover:border-[var(--muted-2)] hover:text-[var(--white)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand)]">Open benchmark repository ↗</a>
     </header>
   )
 }

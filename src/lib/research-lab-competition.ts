@@ -95,7 +95,7 @@ export type CompetitionCode = {
 
 type JsonRecord = Record<string, unknown>
 
-const DEFAULT_REPO_URL = 'https://github.com/leadpoet/pydantic-harness/tree/lab'
+export const DEFAULT_REPO_URL = 'https://github.com/leadpoet/pydantic-harness/tree/lab'
 
 export function normalizeCompetitionSnapshot(value: unknown): CompetitionSnapshot | null {
   const source = record(value)
