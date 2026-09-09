@@ -7,6 +7,7 @@ import { formatLabAllocationPercent } from '@/lib/research-lab-emissions'
 import {
   competitionSubmissionStatusLabel,
   competitionRoundOptions,
+  formatCompetitionScore,
   normalizeCompetitionBenchmark,
   normalizeCompetitionCode,
   normalizeCompetitionResults,
@@ -119,13 +120,14 @@ function RoundSummary({ competition, round, rounds, onSelectRound }: { competiti
       <div className="flex flex-col justify-between gap-5 md:flex-row md:items-start">
         <div>
           <div className="flex flex-wrap items-center gap-2 font-mono text-[10.5px] uppercase tracking-[0.13em] text-[var(--muted-2)]"><span>{roundStatusLabel(round.status)}</span>{round.cancelReason ? <><span aria-hidden>·</span><span>{humanize(round.cancelReason)}</span></> : null}</div>
-          <div className="mt-4 font-display text-[clamp(42px,7vw,76px)] font-medium leading-[0.9] tracking-[-0.045em] text-[var(--platinum)]">{baselineScore === null ? 'Not published' : baselineScore.toFixed(1)}{baselineScore === null ? null : <span className="ml-3 align-baseline text-[20px] tracking-normal text-[var(--faint)]">/100 baseline</span>}</div>
+          <div className="mt-4 font-display text-[clamp(42px,7vw,76px)] font-medium leading-[0.9] tracking-[-0.045em] text-[var(--platinum)]">{baselineScore === null ? 'Not published' : formatCompetitionScore(baselineScore)}{baselineScore === null ? null : <span className="ml-3 align-baseline text-[20px] tracking-normal text-[var(--faint)]">/100 baseline</span>}</div>
           <p className="mt-5 max-w-[610px] text-[13px] leading-[1.7] text-[var(--muted)]">{baselineScore === null ? 'This production round has no published baseline score. No score is inferred from shadow or test networks.' : 'Final score for the public baseline in this production round.'}</p>
         </div>
         <label className="block min-w-[250px]"><span className="mb-2 block font-mono text-[9.5px] uppercase tracking-[0.13em] text-[var(--muted-2)]">Competition round</span><select value={round.roundId} onChange={(event) => onSelectRound(event.target.value)} className="w-full rounded-md border border-[var(--line)] bg-[#0d0d0d] px-3 py-2.5 font-mono text-[11px] text-[var(--platinum)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand)]">{rounds.map((option) => <option key={option.roundId} value={option.roundId}>{roundOptionLabel(option, competition)}</option>)}</select></label>
       </div>
+      <CompetitionSchedule round={round} />
       <div className="mt-8 grid gap-px overflow-hidden rounded-md border border-[var(--line)] bg-[var(--line)] sm:grid-cols-3">
-        <SummaryMetric label="Current baseline" value="PydanticAI" detail={round.baseline ? `${scoreLabel(baselineScore)} · ${shortHotkey(round.baseline.minerHotkey)}` : 'Score unavailable'} />
+        <SummaryMetric label="Current baseline" value="PydanticAI" detail={round.baseline ? `${formatCompetitionScore(baselineScore)} · ${shortHotkey(round.baseline.minerHotkey)}` : 'Score unavailable'} />
         <SummaryMetric label="Round status" value={roundStatusLabel(round.status)} detail={round.publishedAt ? formatUtc(round.publishedAt) : round.createdAt ? `Created ${formatUtc(round.createdAt)}` : round.roundId} />
         {round.champion
           ? <SummaryMetric label="Champion" value={shortHotkey(round.champion.minerHotkey)} detail={championMetricDetail(round, championScore)} />
@@ -135,6 +137,15 @@ function RoundSummary({ competition, round, rounds, onSelectRound }: { competiti
       </div>
     </section>
   )
+}
+
+function CompetitionSchedule({ round }: { round: CompetitionRoundSummary }) {
+  if (!round.icpSetDate && !round.evaluationDate && !round.publicAt) return null
+  const nextDay = isNextUtcDay(round.icpSetDate, round.evaluationDate)
+  return <div className="mt-8 grid gap-5 border-y border-[var(--line)] py-5 sm:grid-cols-2">
+    <div><div className="font-mono text-[9.5px] uppercase tracking-[0.13em] text-[var(--muted-2)]">{nextDay ? 'Day 0 · Submissions' : 'Submissions'}</div><div className="mt-2 text-[14px] text-[var(--platinum)]">{formatUtcDate(round.icpSetDate)}</div><div className="mt-1 text-[11px] text-[var(--muted-2)]">{round.submissionCutoff ? `Closes ${formatUtc(round.submissionCutoff)}` : 'Submit an agent for this ICP set.'}</div></div>
+    <div><div className="font-mono text-[9.5px] uppercase tracking-[0.13em] text-[var(--muted-2)]">{nextDay ? 'Day 1 · Evaluation' : 'Evaluation'}</div><div className="mt-2 text-[14px] text-[var(--platinum)]">{formatUtcDate(round.evaluationDate)}</div><div className="mt-1 text-[11px] text-[var(--muted-2)]">{round.publicAt ? `ICPs, source, and results publish ${formatUtc(round.publicAt)}` : 'ICPs, source, and results publish after evaluation.'}</div></div>
+  </div>
 }
 
 function SummaryMetric({ label, value, detail }: { label: string; value: string; detail: string }) {
@@ -196,7 +207,7 @@ function RoundWorkspace({ round, active }: { round: CompetitionRoundSummary; act
         : 'Latest submission refresh did not return public data.')
     }
     if (benchmarkRequest.status === 'fulfilled' && benchmarkRequest.value.state === 'available') {
-      const next = normalizeCompetitionBenchmark(benchmarkRequest.value.body)
+      const next = normalizeCompetitionBenchmark(benchmarkRequest.value.body, round)
       benchmarkReleasedRef.current = next !== null
       setBenchmark(next); setBenchmarkState(next ? 'available' : 'error')
     } else if (benchmarkRequest.status === 'fulfilled') {
@@ -208,7 +219,7 @@ function RoundWorkspace({ round, active }: { round: CompetitionRoundSummary; act
     roundSnapshotRef.current = true
     setRoundLoading(false)
     setRoundRevision((current) => current + 1)
-  }, [round.roundId, selectSubmission])
+  }, [round, selectSubmission])
 
   useVisiblePolling(refreshRound, 60_000, { enabled: active })
 
@@ -267,8 +278,8 @@ function RoundWorkspace({ round, active }: { round: CompetitionRoundSummary; act
 
 function SubmissionTable({ submissions, round, selectedId, onSelect }: { submissions: CompetitionSubmission[]; round: CompetitionRoundSummary; selectedId: string | null; onSelect: (submissionId: string) => void }) {
   return (
-    <div className="overflow-x-auto rounded-md border border-[var(--line)]"><table className="w-full min-w-[720px] border-collapse text-left"><thead className="border-b border-[var(--line)] bg-[rgba(236,234,230,0.018)] font-mono text-[9.5px] uppercase tracking-[0.1em] text-[var(--muted-2)]"><tr><th className="px-3 py-2.5 font-normal">Submission</th><th className="px-3 py-2.5 font-normal">Miner hotkey</th><th className="px-3 py-2.5 font-normal">Status</th><th className="px-3 py-2.5 text-right font-normal">Stage 1</th><th className="px-3 py-2.5 text-right font-normal">Final</th></tr></thead><tbody>
-      {submissions.map((submission) => { const selected = submission.submissionId === selectedId; return <tr key={submission.submissionId} className={`border-b border-[var(--line)] last:border-b-0 ${selected ? 'bg-[rgba(236,234,230,0.045)]' : 'hover:bg-[rgba(236,234,230,0.02)]'}`}><td className="p-0"><button type="button" onClick={() => onSelect(submission.submissionId)} className="w-full px-3 py-3 text-left font-mono text-[11px] text-[var(--platinum)] focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--brand)]" aria-pressed={selected}>{shortId(submission.submissionId)} {submission.isBaseline ? <span className="ml-1.5 text-[9px] uppercase tracking-wide text-[var(--brand)]">Baseline</span> : null}</button></td><td className="px-3 py-3 font-mono text-[11px] text-[var(--muted)]" title={submission.minerHotkey}>{shortHotkey(submission.minerHotkey)}</td><td className="px-3 py-3 text-[11px] text-[var(--muted)]">{competitionSubmissionStatusLabel(submission, round)}</td><td className="px-3 py-3 text-right font-mono text-[11px] text-[var(--muted)]">{scoreLabel(submission.stage1Score)}</td><td className="px-3 py-3 text-right font-mono text-[11px] text-[var(--platinum)]">{scoreLabel(submission.finalScore)}</td></tr> })}
+    <div className="overflow-x-auto rounded-md border border-[var(--line)]"><table className="w-full min-w-[640px] border-collapse text-left"><thead className="border-b border-[var(--line)] bg-[rgba(236,234,230,0.018)] font-mono text-[9.5px] uppercase tracking-[0.1em] text-[var(--muted-2)]"><tr><th className="px-3 py-2.5 font-normal">Submission</th><th className="px-3 py-2.5 font-normal">Miner hotkey</th><th className="px-3 py-2.5 font-normal">Status</th><th className="px-3 py-2.5 text-right font-normal">Final</th></tr></thead><tbody>
+      {submissions.map((submission) => { const selected = submission.submissionId === selectedId; return <tr key={submission.submissionId} className={`border-b border-[var(--line)] last:border-b-0 ${selected ? 'bg-[rgba(236,234,230,0.045)]' : 'hover:bg-[rgba(236,234,230,0.02)]'}`}><td className="p-0"><button type="button" onClick={() => onSelect(submission.submissionId)} className="w-full px-3 py-3 text-left font-mono text-[11px] text-[var(--platinum)] focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--brand)]" aria-pressed={selected}>{shortId(submission.submissionId)} {submission.isBaseline ? <span className="ml-1.5 text-[9px] uppercase tracking-wide text-[var(--brand)]">Baseline</span> : null}</button></td><td className="px-3 py-3 font-mono text-[11px] text-[var(--muted)]" title={submission.minerHotkey}>{shortHotkey(submission.minerHotkey)}</td><td className="px-3 py-3 text-[11px] text-[var(--muted)]">{competitionSubmissionStatusLabel(submission, round)}</td><td className="px-3 py-3 text-right font-mono text-[11px] text-[var(--platinum)]">{formatCompetitionScore(submission.finalScore)}</td></tr> })}
       </tbody></table></div>
   )
 }
@@ -276,7 +287,7 @@ function SubmissionTable({ submissions, round, selectedId, onSelect }: { submiss
 function PublishedResults({ benchmark, benchmarkState, results, resultsState, round, submission }: { benchmark: CompetitionBenchmark | null; benchmarkState: ReleaseState; results: CompetitionSubmissionResults | null; resultsState: ReleaseState; round: CompetitionRoundSummary; submission: CompetitionSubmission }) {
   if (round.status === 'cancelled' || results?.incomplete) return <ResultFrame><InlineNotice>This round was cancelled. Per-ICP and aggregate scores were not published.</InlineNotice></ResultFrame>
   if (benchmarkState === 'loading' || (!submission.isBaseline && resultsState === 'loading')) return <ResultFrame><div className="h-24 shimmer rounded-md" /></ResultFrame>
-  if (benchmarkState === 'gated') return <ResultFrame><InlineNotice>Public ICPs are available after baseline scoring completes.</InlineNotice></ResultFrame>
+  if (benchmarkState === 'gated') return <ResultFrame><InlineNotice>All 20 ICPs, source code, and scores publish when Day 1 evaluation is complete.</InlineNotice></ResultFrame>
   if (!benchmark || benchmarkState === 'error') return <ResultFrame><InlineNotice>Published public-ICP details are temporarily unavailable.</InlineNotice></ResultFrame>
   if (!submission.isBaseline && (resultsState === 'gated' || !results)) return <ResultFrame><InlineNotice>Public ICP results are not published for this submission yet.</InlineNotice></ResultFrame>
   if (!submission.isBaseline && resultsState === 'error') return <ResultFrame><InlineNotice>Published public-ICP results are temporarily unavailable.</InlineNotice></ResultFrame>
@@ -284,22 +295,22 @@ function PublishedResults({ benchmark, benchmarkState, results, resultsState, ro
   const scores = submission.isBaseline
     ? new Map(benchmark.icps.flatMap((icp) => icp.baselineScore === null ? [] : [[icp.position, icp.baselineScore] as const]))
     : results?.publicScores ?? new Map<number, number>()
-  return <ResultFrame><div className="mb-5 flex flex-wrap gap-5 font-mono text-[10.5px] text-[var(--muted-2)]"><span>Stage 1 {scoreLabel(results?.stage1Score ?? submission.stage1Score)}</span><span>Final {scoreLabel(results?.finalScore ?? submission.finalScore)}</span><span>{submission.isBaseline ? 'Public baseline' : shortHotkey(submission.minerHotkey)}</span></div><IcpList title="Public ICPs (10)" icps={benchmark.icps} scores={scores} /></ResultFrame>
+  return <ResultFrame><div className="mb-5 flex flex-wrap gap-5 font-mono text-[10.5px] text-[var(--muted-2)]"><span>Final {formatCompetitionScore(results?.finalScore ?? submission.finalScore)}</span><span>{submission.isBaseline ? 'Public baseline' : shortHotkey(submission.minerHotkey)}</span></div><IcpList title="Public ICPs (20)" icps={benchmark.icps} scores={scores} /></ResultFrame>
 }
 
 function ResultFrame({ children }: { children: ReactNode }) { return <div><h3 className="font-display text-[19px] font-medium text-[var(--platinum)]">Published results</h3><div className="mt-4">{children}</div></div> }
 
 function IcpList({ title, icps, scores }: { title: string; icps: CompetitionIcp[]; scores: Map<number, number> }) {
-  return <div><div className="mb-1 font-mono text-[9.5px] uppercase tracking-[0.12em] text-[var(--muted-2)]">{title}</div><p className="mb-3 text-[11px] text-[var(--muted-2)]">7 weakest · 3 strongest, selected after baseline scoring.</p><div className="overflow-hidden rounded-md border border-[var(--line)]">{icps.map((icp, index) => <details key={`${icp.position}-${icp.id}`} className="group border-b border-[var(--line)] last:border-b-0"><summary className="grid cursor-pointer list-none grid-cols-[36px_minmax(0,1fr)_52px_16px] items-center gap-2 px-3 py-3 focus:outline-none focus-visible:bg-[rgba(236,234,230,0.04)] [&::-webkit-details-marker]:hidden"><span className="font-mono text-[10px] text-[var(--muted-2)]">{String(index + 1).padStart(2, '0')}</span><span className="truncate text-[12px] text-[var(--platinum)]">{icp.prompt}</span><span className="text-right font-mono text-[11px] text-[var(--white)]">{scoreLabel(scores.get(icp.position) ?? null)}</span><span aria-hidden className="font-mono text-[11px] text-[var(--muted-2)] transition-transform group-open:rotate-45">+</span></summary><div className="border-t border-[var(--line)] bg-[#090909] px-4 py-4"><dl className="grid gap-x-5 gap-y-3 sm:grid-cols-2"><IcpDetail label="Industry" value={[icp.industry, icp.subIndustry].filter(Boolean).join(' · ')} /><IcpDetail label="Geography" value={icp.geography ?? icp.country} /><IcpDetail label="Company size" value={icp.employeeCount.join(', ')} /><IcpDetail label="Company stage" value={icp.companyStage} /><IcpDetail label="Product or service" value={icp.productService} /><IcpDetail label="Required attribute" value={icp.requiredAttribute} /><IcpDetail label={icp.intentCategory ? `Intent · ${humanize(icp.intentCategory)}` : 'Intent'} value={icp.intentSignal} wide /></dl></div></details>)}</div></div>
+  return <div><div className="mb-1 font-mono text-[9.5px] uppercase tracking-[0.12em] text-[var(--muted-2)]">{title}</div><p className="mb-3 text-[11px] text-[var(--muted-2)]">All 20 ICPs publish together after Day 1 evaluation.</p><div className="overflow-hidden rounded-md border border-[var(--line)]">{icps.map((icp) => <details key={`${icp.position}-${icp.id}`} className="group border-b border-[var(--line)] last:border-b-0"><summary className="grid cursor-pointer list-none grid-cols-[36px_minmax(0,1fr)_52px_16px] items-center gap-2 px-3 py-3 focus:outline-none focus-visible:bg-[rgba(236,234,230,0.04)] [&::-webkit-details-marker]:hidden"><span className="font-mono text-[10px] text-[var(--muted-2)]">{String(icp.position + 1).padStart(2, '0')}</span><span className="truncate text-[12px] text-[var(--platinum)]">{icp.prompt}</span><span className="text-right font-mono text-[11px] text-[var(--white)]">{formatCompetitionScore(scores.get(icp.position) ?? null)}</span><span aria-hidden className="font-mono text-[11px] text-[var(--muted-2)] transition-transform group-open:rotate-45">+</span></summary><div className="border-t border-[var(--line)] bg-[#090909] px-4 py-4"><dl className="grid gap-x-5 gap-y-3 sm:grid-cols-2"><IcpDetail label="Industry" value={[icp.industry, icp.subIndustry].filter(Boolean).join(' · ')} /><IcpDetail label="Geography" value={icp.geography ?? icp.country} /><IcpDetail label="Company size" value={icp.employeeCount.join(', ')} /><IcpDetail label="Company stage" value={icp.companyStage} /><IcpDetail label="Product or service" value={icp.productService} /><IcpDetail label="Required attribute" value={icp.requiredAttribute} /><IcpDetail label={icp.intentCategory ? `Intent · ${humanize(icp.intentCategory)}` : 'Intent'} value={icp.intentSignal} wide /></dl></div></details>)}</div></div>
 }
 
 function IcpDetail({ label, value, wide = false }: { label: string; value: string | null; wide?: boolean }) { if (!value) return null; return <div className={wide ? 'sm:col-span-2' : ''}><dt className="font-mono text-[9px] uppercase tracking-[0.1em] text-[var(--muted-2)]">{label}</dt><dd className="mt-1 text-[11.5px] leading-relaxed text-[var(--muted)]">{value}</dd></div> }
 
 function SourcePanel({ submission, code, codeState, selectedFile, onSelectFile, onRequest }: { submission: CompetitionSubmission; code: CompetitionCode | null; codeState: ReleaseState; selectedFile: CompetitionCode['files'][number] | null; onSelectFile: (path: string) => void; onRequest: () => void }) {
   const availableAt = submission.code.availableAt ? formatUtc(submission.code.availableAt) : null
-  return <aside><h3 className="font-display text-[19px] font-medium text-[var(--platinum)]">Source code</h3><p className="mt-2 text-[12px] leading-relaxed text-[var(--muted-2)]">Code becomes public 24 hours after submission.</p>
-    {codeState === 'idle' ? <div className="mt-4"><button type="button" disabled={!submission.code.available} onClick={onRequest} className="rounded-md border border-[var(--line-3)] px-3.5 py-2 font-mono text-[10px] uppercase tracking-[0.11em] text-[var(--platinum)] transition-colors hover:text-[var(--white)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand)] disabled:cursor-not-allowed disabled:opacity-45">{submission.code.available ? 'View released source' : 'Source locked'}</button>{!submission.code.available ? <p className="mt-2 font-mono text-[9.5px] text-[var(--muted-2)]">{availableAt ? `Available ${availableAt}` : 'Available after the 24-hour gate'}</p> : null}</div> : null}
-    {codeState === 'loading' ? <div className="mt-4 h-20 shimmer rounded-md" /> : null}{codeState === 'gated' ? <div className="mt-4"><InlineNotice>Source is not public yet. The server will release it after the 24-hour gate.</InlineNotice></div> : null}{codeState === 'error' ? <div className="mt-4"><InlineNotice>Released source is temporarily unavailable.</InlineNotice></div> : null}
+  return <aside><h3 className="font-display text-[19px] font-medium text-[var(--platinum)]">Source code</h3><p className="mt-2 text-[12px] leading-relaxed text-[var(--muted-2)]">Code becomes public when Day 1 evaluation is complete.</p>
+    {codeState === 'idle' ? <div className="mt-4"><button type="button" disabled={!submission.code.available} onClick={onRequest} className="rounded-md border border-[var(--line-3)] px-3.5 py-2 font-mono text-[10px] uppercase tracking-[0.11em] text-[var(--platinum)] transition-colors hover:text-[var(--white)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand)] disabled:cursor-not-allowed disabled:opacity-45">{submission.code.available ? 'View released source' : 'Source locked'}</button>{!submission.code.available ? <p className="mt-2 font-mono text-[9.5px] text-[var(--muted-2)]">{availableAt ? `Available ${availableAt}` : 'Available after evaluation'}</p> : null}</div> : null}
+    {codeState === 'loading' ? <div className="mt-4 h-20 shimmer rounded-md" /> : null}{codeState === 'gated' ? <div className="mt-4"><InlineNotice>Source is not public yet. It appears when evaluation is complete.</InlineNotice></div> : null}{codeState === 'error' ? <div className="mt-4"><InlineNotice>Released source is temporarily unavailable.</InlineNotice></div> : null}
     {codeState === 'available' && code ? <div className="mt-4 overflow-hidden rounded-md border border-[var(--line)]"><div className="max-h-36 overflow-y-auto border-b border-[var(--line)] bg-[#090909] p-1.5">{code.files.map((file) => <button key={file.path} type="button" onClick={() => onSelectFile(file.path)} className={`block w-full truncate rounded px-2 py-1.5 text-left font-mono text-[10px] focus:outline-none focus-visible:ring-1 focus-visible:ring-[var(--brand)] ${file.path === selectedFile?.path ? 'bg-[rgba(236,234,230,0.07)] text-[var(--white)]' : 'text-[var(--muted-2)] hover:text-[var(--platinum)]'}`} title={file.path}>{file.path}</button>)}</div>{selectedFile ? <pre className="max-h-[420px] overflow-auto bg-[#070707] p-3 text-[10px] leading-[1.65] text-[var(--muted)]"><code>{selectedFile.content}</code></pre> : <p className="p-3 text-[11px] text-[var(--muted-2)]">No text files were released.</p>}{code.truncated ? <p className="border-t border-[var(--line)] px-3 py-2 text-[10px] text-[var(--muted-2)]">Some files are omitted from this preview.</p> : null}</div> : null}
   </aside>
 }
@@ -320,16 +331,17 @@ async function fetchReleasedJson(url: string): Promise<{ state: 'available'; bod
 function asRecord(value: unknown): Record<string, unknown> | null { return value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null }
 function roundOptionLabel(round: CompetitionRoundSummary, competition: CompetitionSnapshot): string { const tags = [roundStatusLabel(round.status)]; if (round.roundId === competition.latestRound?.roundId) tags.push('latest'); if (round.roundId === competition.latestCompletedRound?.roundId) tags.push('last completed'); if (round.roundId === competition.openRound?.roundId) tags.push('open round'); return `${round.roundId} — ${tags.join(' · ')}` }
 function championMetricDetail(round: CompetitionRoundSummary, championScore: number | null): string {
-  if (round.promotionStatus === 'promoted') return `Becomes next baseline · ${scoreLabel(championScore)}`
-  if (round.promotionStatus === 'pending') return `Promotion pending · ${scoreLabel(championScore)}`
-  return `${humanize(round.champion?.outcome ?? 'champion')} · ${scoreLabel(championScore)}`
+  if (round.promotionStatus === 'promoted') return `Becomes next baseline · ${formatCompetitionScore(championScore)}`
+  if (round.promotionStatus === 'pending') return `Promotion pending · ${formatCompetitionScore(championScore)}`
+  return `${humanize(round.champion?.outcome ?? 'champion')} · ${formatCompetitionScore(championScore)}`
 }
 function roundStatusLabel(value: string): string { if (value === 'published') return 'Published result'; if (value === 'cancelled') return 'Cancelled round'; if (value === 'open') return 'Open for submissions'; return humanize(value) }
 function humanize(value: string): string { const normalized = value.trim().replaceAll('_', ' '); return normalized ? normalized[0].toUpperCase() + normalized.slice(1) : 'Unavailable' }
-function scoreLabel(value: number | null): string { return value === null ? '—' : value.toFixed(1) }
 function shortId(value: string): string { return value.length > 18 ? `${value.slice(0, 9)}…${value.slice(-6)}` : value }
 function shortHotkey(value: string): string { return value.length > 18 ? `${value.slice(0, 9)}…${value.slice(-6)}` : value }
 function formatUtc(value: string): string { const date = new Date(value); return Number.isFinite(date.getTime()) ? `${date.toISOString().slice(0, 16).replace('T', ' ')} UTC` : value }
+function formatUtcDate(value: string | null): string { if (!value) return 'Date unavailable'; const date = new Date(`${value}T00:00:00Z`); return Number.isFinite(date.getTime()) ? `${new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' }).format(date)} · UTC` : value }
+function isNextUtcDay(start: string | null, end: string | null): boolean { if (!start || !end) return false; const startDate = new Date(`${start}T00:00:00Z`); const endDate = new Date(`${end}T00:00:00Z`); return endDate.getTime() - startDate.getTime() === 86_400_000 }
 function formatUsd(value: number): string { if (!Number.isFinite(value) || value <= 0) return '$0.00'; if (value >= 1) return `$${value.toFixed(2)}`; return '<$0.01' }
 function formatAlpha(value: number): string { if (!Number.isFinite(value) || value <= 0) return '0.0000'; return value >= 1 ? value.toFixed(2) : value.toFixed(4) }
 function errorMessage(value: unknown, fallback: string): string { return value instanceof Error ? value.message : fallback }

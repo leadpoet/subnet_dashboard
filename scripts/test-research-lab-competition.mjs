@@ -19,6 +19,7 @@ try {
   const {
     competitionSubmissionStatusLabel,
     competitionRoundOptions,
+    formatCompetitionScore,
     normalizeCompetitionBenchmark,
     normalizeCompetitionCode,
     normalizeCompetitionResults,
@@ -29,12 +30,16 @@ try {
   const published = {
     round_id: 'arena-2026-09-05', status: 'published', mode: 'live', network_name: 'finney', netuid: 71,
     published_at: '2026-09-05T18:00:00Z', created_at: '2026-09-04T18:00:00Z', cancel_reason: null,
+    icp_set_date: '2026-09-04', evaluation_date: '2026-09-05', public_at: '2026-09-05T18:00:00Z',
+    submission_open: '2026-09-04T00:00:00Z', submission_cutoff: '2026-09-04T23:59:59Z',
     baseline: { submission_id: 'baseline', miner_hotkey: '5baseline', final_score: 0 },
     champion: null, promotion_status: 'not_required',
   }
   const cancelled = {
     round_id: 'arena-2026-09-09', status: 'cancelled', mode: 'live', network_name: 'finney', netuid: 71,
     published_at: null, created_at: '2026-09-08T18:00:00Z', cancel_reason: 'scoring_incomplete',
+    icp_set_date: '2026-09-08', evaluation_date: '2026-09-09', public_at: '2026-09-09T18:00:00Z',
+    submission_open: '2026-09-08T00:00:00Z', submission_cutoff: '2026-09-08T23:59:59Z',
     baseline: null, champion: null, promotion_status: 'not_required',
   }
   const snapshot = normalizeCompetitionSnapshot({
@@ -45,7 +50,14 @@ try {
   })
   assert.ok(snapshot)
   assert.equal(snapshot.latestCompletedRound.baseline.finalScore, 0, 'zero is a real score, not missing data')
+  assert.equal(snapshot.latestCompletedRound.evaluationDate, '2026-09-05')
   assert.deepEqual(competitionRoundOptions(snapshot).map((round) => round.roundId), ['arena-2026-09-09', 'arena-2026-09-05'])
+  const legacySnapshot = normalizeCompetitionSnapshot({
+    mode: 'live', network_name: 'finney', netuid: 71, rounds: [{
+      ...published, round_id: 'arena-legacy', icp_set_date: '2026-09-05', evaluation_date: '2026-09-05',
+    }],
+  })
+  assert.ok(legacySnapshot, 'historical same-day bank and evaluation dates remain valid')
 
   const submissions = normalizeCompetitionSubmissions({ submissions: [{
     submission_id: 'miner-1', miner_hotkey: '5miner', is_baseline: false, status: 'scored',
@@ -66,34 +78,48 @@ try {
     competitionSubmissionStatusLabel(champion, { ...pendingRound, promotionStatus: 'promoted' }),
     'Champion · promoted',
   )
+  assert.equal(formatCompetitionScore(0.99), '0.99')
+  assert.equal(formatCompetitionScore(1), '1.00', 'two decimals distinguish threshold-adjacent scores')
+  assert.equal(formatCompetitionScore(null), '—')
 
-  const benchmark = normalizeCompetitionBenchmark({
-    round_id: 'arena-2026-09-05', public_icp_count: 10, private_icp_count: 10,
-    disclosure_policy: 'baseline_7_weakest_3_strongest',
-    icps: [
-      ...Array.from({ length: 10 }, (_, index) => ({
-        icp_id: `public-${index}`, icp_position: index === 9 ? 17 : index,
-        prompt: 'Public ICP', baseline_score: index === 9 ? 0 : 50 + index,
-      })),
-      { icp_id: 'must-drop', prompt: 'No explicit position', baseline_score: 99 },
-    ],
-  })
-  assert.equal(benchmark.icps.length, 10, 'an ICP without explicit icp_position must never use its array index')
-  assert.equal(benchmark.icps[9].position, 17)
-  assert.equal(benchmark.icps[9].baselineScore, 0)
-  assert.equal(benchmark.publicIcpCount, 10)
+  const benchmarkPayload = {
+    round_id: 'arena-2026-09-05', icp_set_date: '2026-09-04', public_at: '2026-09-05T18:00:00Z',
+    public_icp_count: 20, private_icp_count: 0, disclosure_policy: 'all_20_next_day',
+    icps: Array.from({ length: 20 }, (_, index) => ({
+      icp_id: `public-${index}`, icp_position: index,
+      prompt: 'Public ICP', baseline_score: index === 19 ? null : index === 18 ? 0 : 50 + index,
+    })),
+  }
+  const benchmark = normalizeCompetitionBenchmark(benchmarkPayload, snapshot.latestCompletedRound)
+  assert.equal(benchmark.icps.length, 20)
+  assert.equal(benchmark.icps[18].baselineScore, 0)
+  assert.equal(benchmark.icps[19].baselineScore, null, 'a baseline ICP score stays pending instead of becoming zero')
+  assert.equal(benchmark.publicIcpCount, 20)
+  assert.equal(benchmark.privateIcpCount, 0)
+  assert.equal(benchmark.disclosurePolicy, 'all_20_next_day')
+  assert.equal('nextIcps' in benchmark, false, 'the next ICP bank must not enter the public model')
+  assert.equal(normalizeCompetitionBenchmark({ ...benchmarkPayload, icp_set_date: undefined }, snapshot.latestCompletedRound), null, 'a missing bank date must fail closed')
+  assert.equal(normalizeCompetitionBenchmark({ ...benchmarkPayload, icp_set_date: '2026-09-03' }, snapshot.latestCompletedRound), null, 'a different bank must fail selected-round validation')
+  assert.equal(normalizeCompetitionBenchmark({ ...benchmarkPayload, public_at: '2026-09-06T18:00:00Z' }, snapshot.latestCompletedRound), null, 'a mismatched release time must fail selected-round validation')
+  assert.equal(normalizeCompetitionBenchmark({ ...benchmarkPayload, public_icp_count: 10 }), null, 'the retired 10-ICP projection must not render')
+  assert.equal(normalizeCompetitionBenchmark({ ...benchmarkPayload, icps: [...benchmarkPayload.icps.slice(0, 19), { ...benchmarkPayload.icps[0] }] }), null, 'all 20 original positions must be unique')
 
   const results = normalizeCompetitionResults({
     round_id: 'arena-2026-09-05', submission_id: 'miner-1', public_icp_status: 'ready',
     scores: {
-      stage_1: [{ icp_position: 2, per_icp_score: 0 }],
-      stage_2: [{ icp_position: 17, per_icp_score: 88.5 }],
+      stage_1: Array.from({ length: 10 }, (_, index) => ({ icp_position: index, per_icp_score: index === 2 ? 0 : 40 + index })),
+      stage_2: Array.from({ length: 10 }, (_, index) => ({ icp_position: index + 10, per_icp_score: index === 7 ? 88.5 : 60 + index })),
     },
     submission_scores: { stage_1: 40, final: 64.25 },
   })
   assert.equal(results.publicScores.get(2), 0)
   assert.equal(results.publicScores.get(17), 88.5)
+  assert.equal(results.publicScores.size, 20)
   assert.equal(results.publicIcpStatus, 'ready')
+  assert.equal(normalizeCompetitionResults({
+    round_id: 'arena-2026-09-05', submission_id: 'miner-1', public_icp_status: 'ready',
+    scores: { stage_1: [{ icp_position: 2, per_icp_score: 99 }] }, submission_scores: { final: 99 },
+  }), null, 'a partial ready result must fail closed')
   const incomplete = normalizeCompetitionResults({
     round_id: 'arena-2026-09-09', submission_id: 'miner-1', round_status: 'cancelled', incomplete: true,
     scores: { stage_1: [{ icp_position: 2, per_icp_score: 99 }] },
@@ -107,9 +133,9 @@ try {
   assert.equal(code.truncated, true)
 
   const component = await readFile(resolve('src/components/dashboard/ResearchLab.tsx'), 'utf8')
-  assert.match(component, /Public ICPs \(10\)/)
+  assert.match(component, /Public ICPs \(20\)/)
   assert.match(component, /Improve the public agent and compete on the same daily ICPs\./)
-  assert.match(component, /7 weakest · 3 strongest, selected after baseline scoring\./)
+  assert.match(component, /All 20 ICPs publish together after Day 1 evaluation\./)
   assert.match(component, /value="PydanticAI"/)
   assert.doesNotMatch(component, /server-held .* evaluation view/)
   assert.match(component, /response\.status === 403/)
@@ -119,12 +145,17 @@ try {
   assert.match(component, /selectedSubmissionIdRef\.current !== requestedSubmissionId/)
   assert.match(component, /Last known submissions are shown below/)
   assert.match(component, /normalized\?\.roundId !== requestedRoundId/)
-  assert.match(component, /Code becomes public 24 hours after submission\./)
+  assert.match(component, /Code becomes public when Day 1 evaluation is complete\./)
+  assert.doesNotMatch(component, /24.hour|24 hours|private ICP/i)
+  assert.match(component, /Day 0 · Submissions/)
+  assert.match(component, /Day 1 · Evaluation/)
+  assert.match(component, /normalizeCompetitionBenchmark\(benchmarkRequest\.value\.body, round\)/)
   assert.match(component, /Some files are omitted from this preview\./)
   assert.match(component, /promotionStatus === 'promoted'[^]*Becomes next baseline/)
   assert.match(component, /promotionStatus === 'pending'[^]*Promotion pending/)
   assert.doesNotMatch(component, /slice\(10/)
   assert.doesNotMatch(component, /More 10 ICPs/)
+  assert.doesNotMatch(component, />Stage 1</)
   assert.doesNotMatch(component, /outputs|run_results|judge_evidence/)
 
   const proxy = await readFile(resolve('src/lib/arena-public-proxy.ts'), 'utf8')
@@ -134,6 +165,11 @@ try {
   const codeRoute = await readFile(resolve('src/app/api/research-lab/submissions/[submissionId]/code/route.ts'), 'utf8')
   assert.match(codeRoute, /publicArenaId/)
   assert.match(codeRoute, /encodeURIComponent\(submissionId\)/)
+
+  const shell = await readFile(resolve('src/components/dashboard/DashboardClient.tsx'), 'utf8')
+  assert.match(shell, /label="Open Source Agent Competition"/)
+  const faq = await readFile(resolve('src/components/dashboard/FAQ.tsx'), 'utf8')
+  assert.doesNotMatch(faq, /24.hour|24 hours|keeps the complementary|fixed 10-ICP/i)
 
   console.log('research-lab-competition: public projection, honest scores, release gates, and narrow proxy checks passed')
 } finally {

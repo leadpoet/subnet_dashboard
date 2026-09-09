@@ -294,7 +294,7 @@ export function DashboardClient({
             {visibleTabs.includes('research-lab') && (
               <DashboardTabTrigger
                 value="research-lab"
-                label="Agent Competition"
+                label="Open Source Agent Competition"
                 shortLabel="Competition"
               />
             )}

@@ -12,6 +12,11 @@ export type CompetitionRoundSummary = {
   netuid: number
   publishedAt: string | null
   createdAt: string | null
+  icpSetDate: string | null
+  evaluationDate: string | null
+  publicAt: string | null
+  submissionOpen: string | null
+  submissionCutoff: string | null
   cancelReason: string | null
   baseline: CompetitionParticipant | null
   champion: (CompetitionParticipant & { outcome: string | null }) | null
@@ -47,6 +52,8 @@ export type CompetitionSubmission = {
 
 export type CompetitionBenchmark = {
   roundId: string
+  icpSetDate: string
+  publicAt: string
   icps: CompetitionIcp[]
   publicIcpCount: number
   privateIcpCount: number
@@ -140,10 +147,21 @@ export function normalizeCompetitionSubmissions(value: unknown): CompetitionSubm
   }).filter(isPresent)
 }
 
-export function normalizeCompetitionBenchmark(value: unknown): CompetitionBenchmark | null {
+export function normalizeCompetitionBenchmark(
+  value: unknown,
+  expectedRound?: Pick<CompetitionRoundSummary, 'roundId' | 'icpSetDate' | 'publicAt'>,
+): CompetitionBenchmark | null {
   const source = record(value)
   const roundId = text(source?.round_id)
-  if (!source || !roundId || !Array.isArray(source.icps)) return null
+  const icpSetDate = calendarDate(source?.icp_set_date)
+  const publicAt = utcTimestamp(source?.public_at)
+  if (!source || !roundId || !icpSetDate || !publicAt || !Array.isArray(source.icps)) return null
+  if (
+    expectedRound
+    && (roundId !== expectedRound.roundId
+      || (expectedRound.icpSetDate !== null && icpSetDate !== expectedRound.icpSetDate)
+      || (expectedRound.publicAt !== null && publicAt !== expectedRound.publicAt))
+  ) return null
   const icps = source.icps.map((item) => {
     const row = record(item)
     const position = integer(row?.icp_position)
@@ -164,19 +182,21 @@ export function normalizeCompetitionBenchmark(value: unknown): CompetitionBenchm
       intentSignal: nullableText(row.intent_signal),
       intentCategory: nullableText(row.intent_category),
     }
-  }).filter(isPresent)
+  }).filter(isPresent).sort((left, right) => left.position - right.position)
   const publicIcpCount = integer(source.public_icp_count)
   const privateIcpCount = integer(source.private_icp_count)
   const disclosurePolicy = text(source.disclosure_policy)
   if (
-    publicIcpCount !== 10
-    || privateIcpCount !== 10
-    || disclosurePolicy !== 'baseline_7_weakest_3_strongest'
-    || icps.length !== 10
-    || new Set(icps.map((icp) => icp.position)).size !== 10
+    publicIcpCount !== 20
+    || privateIcpCount !== 0
+    || disclosurePolicy !== 'all_20_next_day'
+    || icps.length !== 20
+    || new Set(icps.map((icp) => icp.position)).size !== 20
   ) return null
   return {
     roundId,
+    icpSetDate,
+    publicAt,
     icps,
     publicIcpCount,
     privateIcpCount,
@@ -192,14 +212,17 @@ export function normalizeCompetitionResults(value: unknown): CompetitionSubmissi
   const scores = record(source.scores)
   const submissionScores = record(source.submission_scores)
   const incomplete = source.incomplete === true || text(source.round_status) === 'cancelled'
+  const publicIcpStatus = text(source.public_icp_status) || 'pending'
+  const publicScores = incomplete ? new Map<number, number>() : mergeScores(perIcpScores(scores?.stage_1), perIcpScores(scores?.stage_2))
+  if (!incomplete && publicIcpStatus === 'ready' && publicScores.size !== 20) return null
   return {
     roundId,
     submissionId,
     incomplete,
     stage1Score: incomplete ? null : score(submissionScores?.stage_1),
     finalScore: incomplete ? null : score(submissionScores?.final),
-    publicIcpStatus: text(source.public_icp_status) || 'pending',
-    publicScores: incomplete ? new Map() : mergeScores(perIcpScores(scores?.stage_1), perIcpScores(scores?.stage_2)),
+    publicIcpStatus,
+    publicScores,
   }
 }
 
@@ -241,6 +264,10 @@ export function competitionSubmissionStatusLabel(
   return humanizeStatus(submission.status)
 }
 
+export function formatCompetitionScore(value: number | null): string {
+  return value === null ? '—' : value.toFixed(2)
+}
+
 function normalizeRound(source: JsonRecord | null): CompetitionRoundSummary | null {
   const roundId = text(source?.round_id)
   const status = text(source?.status)
@@ -248,6 +275,12 @@ function normalizeRound(source: JsonRecord | null): CompetitionRoundSummary | nu
   const baseline = normalizeParticipant(record(source.baseline))
   const championSource = record(source.champion)
   const champion = normalizeParticipant(championSource)
+  const icpSetDate = optionalCalendarDate(source.icp_set_date)
+  const evaluationDate = optionalCalendarDate(source.evaluation_date)
+  const publicAt = optionalUtcTimestamp(source.public_at)
+  const submissionOpen = optionalUtcTimestamp(source.submission_open)
+  const submissionCutoff = optionalUtcTimestamp(source.submission_cutoff)
+  if ([icpSetDate, evaluationDate, publicAt, submissionOpen, submissionCutoff].includes(undefined)) return null
   return {
     roundId,
     status,
@@ -256,6 +289,11 @@ function normalizeRound(source: JsonRecord | null): CompetitionRoundSummary | nu
     netuid: integer(source.netuid) ?? 0,
     publishedAt: nullableText(source.published_at),
     createdAt: nullableText(source.created_at),
+    icpSetDate: icpSetDate ?? null,
+    evaluationDate: evaluationDate ?? null,
+    publicAt: publicAt ?? null,
+    submissionOpen: submissionOpen ?? null,
+    submissionCutoff: submissionCutoff ?? null,
     cancelReason: nullableText(source.cancel_reason),
     baseline,
     champion: champion ? { ...champion, outcome: nullableText(championSource?.outcome) } : null,
@@ -300,6 +338,27 @@ function text(value: unknown): string {
 
 function nullableText(value: unknown): string | null {
   return text(value) || null
+}
+
+function calendarDate(value: unknown): string | null {
+  const normalized = text(value)
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(normalized)) return null
+  const date = new Date(`${normalized}T00:00:00Z`)
+  return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === normalized ? normalized : null
+}
+
+function utcTimestamp(value: unknown): string | null {
+  const normalized = text(value)
+  if (!normalized.endsWith('Z')) return null
+  return Number.isFinite(new Date(normalized).getTime()) ? normalized : null
+}
+
+function optionalCalendarDate(value: unknown): string | null | undefined {
+  return value === null || value === undefined ? null : calendarDate(value) ?? undefined
+}
+
+function optionalUtcTimestamp(value: unknown): string | null | undefined {
+  return value === null || value === undefined ? null : utcTimestamp(value) ?? undefined
 }
 
 function humanizeStatus(value: string): string {
