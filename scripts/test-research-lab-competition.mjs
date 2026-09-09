@@ -17,6 +17,7 @@ try {
 
   const require = createRequire(import.meta.url)
   const {
+    competitionSubmissionStatusLabel,
     competitionRoundOptions,
     normalizeCompetitionBenchmark,
     normalizeCompetitionCode,
@@ -53,6 +54,18 @@ try {
   }] })
   assert.equal(submissions[0].stage1Score, 0)
   assert.equal(submissions[0].finalScore, null)
+  const pendingRound = { ...snapshot.latestCompletedRound, promotionStatus: 'pending' }
+  assert.equal(
+    competitionSubmissionStatusLabel(submissions[0], pendingRound),
+    'Scored · not promoted',
+    'a non-winning scored submission must not inherit the champion promotion state',
+  )
+  const champion = { ...submissions[0], status: 'champion', isChampion: true }
+  assert.equal(competitionSubmissionStatusLabel(champion, pendingRound), 'Champion · promotion pending')
+  assert.equal(
+    competitionSubmissionStatusLabel(champion, { ...pendingRound, promotionStatus: 'promoted' }),
+    'Champion · promoted',
+  )
 
   const benchmark = normalizeCompetitionBenchmark({
     round_id: 'arena-2026-09-05', public_icp_count: 10, private_icp_count: 10,
@@ -108,8 +121,6 @@ try {
   assert.match(component, /normalized\?\.roundId !== requestedRoundId/)
   assert.match(component, /Code becomes public 24 hours after submission\./)
   assert.match(component, /Some files are omitted from this preview\./)
-  assert.match(component, /Champion · promotion pending/)
-  assert.match(component, /Champion · promoted/)
   assert.match(component, /promotionStatus === 'promoted'[^]*Becomes next baseline/)
   assert.match(component, /promotionStatus === 'pending'[^]*Promotion pending/)
   assert.doesNotMatch(component, /slice\(10/)

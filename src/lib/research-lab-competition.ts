@@ -226,6 +226,21 @@ export function competitionRoundOptions(snapshot: CompetitionSnapshot): Competit
   })
 }
 
+export function competitionSubmissionStatusLabel(
+  submission: Pick<CompetitionSubmission, 'isBaseline' | 'isChampion' | 'status'>,
+  round: Pick<CompetitionRoundSummary, 'promotionStatus' | 'status'>,
+): string {
+  if (submission.isChampion || submission.status === 'champion') {
+    if (round.promotionStatus === 'pending') return 'Champion · promotion pending'
+    if (round.promotionStatus === 'promoted') return 'Champion · promoted'
+    return 'Champion'
+  }
+  if (submission.status === 'scored' && round.status === 'published' && !submission.isBaseline) {
+    return 'Scored · not promoted'
+  }
+  return humanizeStatus(submission.status)
+}
+
 function normalizeRound(source: JsonRecord | null): CompetitionRoundSummary | null {
   const roundId = text(source?.round_id)
   const status = text(source?.status)
@@ -285,6 +300,11 @@ function text(value: unknown): string {
 
 function nullableText(value: unknown): string | null {
   return text(value) || null
+}
+
+function humanizeStatus(value: string): string {
+  const normalized = value.trim().replaceAll('_', ' ')
+  return normalized ? normalized[0].toUpperCase() + normalized.slice(1) : 'Unavailable'
 }
 
 function integer(value: unknown): number | null {

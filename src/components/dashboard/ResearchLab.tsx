@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import type { MetagraphData } from '@/lib/types'
 import { formatLabAllocationPercent } from '@/lib/research-lab-emissions'
 import {
+  competitionSubmissionStatusLabel,
   competitionRoundOptions,
   normalizeCompetitionBenchmark,
   normalizeCompetitionCode,
@@ -261,7 +262,7 @@ function RoundWorkspace({ round }: { round: CompetitionRoundSummary }) {
 function SubmissionTable({ submissions, round, selectedId, onSelect }: { submissions: CompetitionSubmission[]; round: CompetitionRoundSummary; selectedId: string | null; onSelect: (submissionId: string) => void }) {
   return (
     <div className="overflow-x-auto rounded-md border border-[var(--line)]"><table className="w-full min-w-[720px] border-collapse text-left"><thead className="border-b border-[var(--line)] bg-[rgba(236,234,230,0.018)] font-mono text-[9.5px] uppercase tracking-[0.1em] text-[var(--muted-2)]"><tr><th className="px-3 py-2.5 font-normal">Submission</th><th className="px-3 py-2.5 font-normal">Miner hotkey</th><th className="px-3 py-2.5 font-normal">Status</th><th className="px-3 py-2.5 text-right font-normal">Stage 1</th><th className="px-3 py-2.5 text-right font-normal">Final</th></tr></thead><tbody>
-      {submissions.map((submission) => { const selected = submission.submissionId === selectedId; return <tr key={submission.submissionId} className={`border-b border-[var(--line)] last:border-b-0 ${selected ? 'bg-[rgba(236,234,230,0.045)]' : 'hover:bg-[rgba(236,234,230,0.02)]'}`}><td className="p-0"><button type="button" onClick={() => onSelect(submission.submissionId)} className="w-full px-3 py-3 text-left font-mono text-[11px] text-[var(--platinum)] focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--brand)]" aria-pressed={selected}>{shortId(submission.submissionId)} {submission.isBaseline ? <span className="ml-1.5 text-[9px] uppercase tracking-wide text-[var(--brand)]">Baseline</span> : null}</button></td><td className="px-3 py-3 font-mono text-[11px] text-[var(--muted)]" title={submission.minerHotkey}>{shortHotkey(submission.minerHotkey)}</td><td className="px-3 py-3 text-[11px] text-[var(--muted)]">{submissionStatusLabel(submission, round)}</td><td className="px-3 py-3 text-right font-mono text-[11px] text-[var(--muted)]">{scoreLabel(submission.stage1Score)}</td><td className="px-3 py-3 text-right font-mono text-[11px] text-[var(--platinum)]">{scoreLabel(submission.finalScore)}</td></tr> })}
+      {submissions.map((submission) => { const selected = submission.submissionId === selectedId; return <tr key={submission.submissionId} className={`border-b border-[var(--line)] last:border-b-0 ${selected ? 'bg-[rgba(236,234,230,0.045)]' : 'hover:bg-[rgba(236,234,230,0.02)]'}`}><td className="p-0"><button type="button" onClick={() => onSelect(submission.submissionId)} className="w-full px-3 py-3 text-left font-mono text-[11px] text-[var(--platinum)] focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--brand)]" aria-pressed={selected}>{shortId(submission.submissionId)} {submission.isBaseline ? <span className="ml-1.5 text-[9px] uppercase tracking-wide text-[var(--brand)]">Baseline</span> : null}</button></td><td className="px-3 py-3 font-mono text-[11px] text-[var(--muted)]" title={submission.minerHotkey}>{shortHotkey(submission.minerHotkey)}</td><td className="px-3 py-3 text-[11px] text-[var(--muted)]">{competitionSubmissionStatusLabel(submission, round)}</td><td className="px-3 py-3 text-right font-mono text-[11px] text-[var(--muted)]">{scoreLabel(submission.stage1Score)}</td><td className="px-3 py-3 text-right font-mono text-[11px] text-[var(--platinum)]">{scoreLabel(submission.finalScore)}</td></tr> })}
       </tbody></table></div>
   )
 }
@@ -312,16 +313,6 @@ async function fetchJson(url: string): Promise<unknown> { const response = await
 async function fetchReleasedJson(url: string): Promise<{ state: 'available'; body: unknown } | { state: 'gated'; body: null }> { const response = await fetch(url, { cache: 'no-store', headers: { Accept: 'application/json' } }); if (response.status === 403) return { state: 'gated', body: null }; if (!response.ok) throw new Error(`Request failed (${response.status})`); return { state: 'available', body: await response.json() } }
 function asRecord(value: unknown): Record<string, unknown> | null { return value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null }
 function roundOptionLabel(round: CompetitionRoundSummary, competition: CompetitionSnapshot): string { const tags = [roundStatusLabel(round.status)]; if (round.roundId === competition.latestRound?.roundId) tags.push('latest'); if (round.roundId === competition.latestCompletedRound?.roundId) tags.push('last completed'); if (round.roundId === competition.openRound?.roundId) tags.push('open round'); return `${round.roundId} — ${tags.join(' · ')}` }
-function submissionStatusLabel(submission: CompetitionSubmission, round: CompetitionRoundSummary): string {
-  if (submission.isChampion || submission.status === 'champion') {
-    if (round.promotionStatus === 'pending') return 'Champion · promotion pending'
-    if (round.promotionStatus === 'promoted') return 'Champion · promoted'
-    return 'Champion'
-  }
-  if (submission.status === 'scored' && round.promotionStatus === 'pending') return 'Scored · promotion pending'
-  if (submission.status === 'scored' && round.status === 'published' && !submission.isBaseline) return 'Scored · not promoted'
-  return humanize(submission.status)
-}
 function championMetricDetail(round: CompetitionRoundSummary, championScore: number | null): string {
   if (round.promotionStatus === 'promoted') return `Becomes next baseline · ${scoreLabel(championScore)}`
   if (round.promotionStatus === 'pending') return `Promotion pending · ${scoreLabel(championScore)}`
