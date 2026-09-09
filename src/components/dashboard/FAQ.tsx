@@ -49,7 +49,7 @@ const FAQ_DATA: FAQItem[] = [
     id: 'how-it-works',
     question: 'How does the subnet actually work?',
     answer:
-      "The subnet runs on two tracks. Fulfillment is where it produces economic output. When a sales team submits a request, miners compete in real time to source leads that match the request's criteria, including industry, role, geography, company size, and intent signals. Validators score and verify every submission, so only the leads that pass quality checks and fit best reach the sales team. That creates a live market around each request instead of a static list sold over and over again.\n\nThe Research Lab publishes an open baseline and rebenchmarks it daily. Miners can fork the public harness, change the model or agent, and submit a competing system through Arena. Validators score every submission on the same ICPs, and the published result determines the competition outcome.",
+      "The subnet runs on two tracks. Fulfillment is where it produces economic output. When a sales team submits a request, miners compete in real time to source leads that match the request's criteria, including industry, role, geography, company size, and intent signals. Validators score and verify every submission, so only the leads that pass quality checks and fit best reach the sales team. That creates a live market around each request instead of a static list sold over and over again.\n\nThe Open Source Agent Competition publishes a baseline agent that miners can fork and improve. Validators evaluate every submission against the same server-held benchmark. After baseline scoring completes, the server publishes a fixed 10-ICP evaluation view and keeps the complementary 10 ICPs private.",
   },
   {
     id: 'fulfillment',
@@ -59,15 +59,15 @@ const FAQ_DATA: FAQItem[] = [
   },
   {
     id: 'research-lab',
-    question: 'How does the Research Lab work?',
+    question: 'How does the Open Source Agent Competition work?',
     answer:
-      "The Research Lab runs an open model competition. A public harness, model, APIs, and sourcing logic are rebenchmarked daily to establish the baseline. Miners can fork that baseline, make any changes they want, and submit a competing model through the standardized Arena interface. Validators score the baseline and submissions on the same ICPs, then publish the competition result.",
+      "Miners fork the public benchmark repository, improve the agent, and submit it through Arena. Validators score the baseline and every submission against the same 20-ICP benchmark. Once baseline scoring completes, the server discloses a fixed public set of 10 ICPs: seven of the baseline's weakest and three of its strongest. The other 10 remain private. Submission source code becomes public only after the server-enforced 24-hour gate.",
   },
   {
     id: 'incentives',
     question: 'How does the incentive mechanism work?',
     answer:
-      "Rewards follow verified value, on both tracks. In Fulfillment, miners earn when their leads pass every data-quality and intent check and rank highest for a live request. Validators handle scoring, and the leads that win are the ones that get paid. In the Research Lab, Arena rewards the submissions that score best against the shared ICP set.\n\nThat keeps incentives tied to measurable output. Validators score the same inputs for every competitor, and the published competition outcome drives settlement.",
+      "Rewards follow verified value, on both tracks. In Fulfillment, miners earn when their leads pass every data-quality and intent check and rank highest for a live request. Validators handle scoring, and the leads that win are the ones that get paid. In the Agent Competition, Arena rewards the submissions that score best against the shared benchmark.\n\nThat keeps incentives tied to measurable output. Validators score the same inputs for every competitor, and the published competition outcome drives settlement.",
   },
   {
     id: 'alpha',

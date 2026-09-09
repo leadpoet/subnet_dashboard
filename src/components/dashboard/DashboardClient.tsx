@@ -343,8 +343,8 @@ export function DashboardClient({
             {visibleTabs.includes('research-lab') && (
               <DashboardTabTrigger
                 value="research-lab"
-                label="Research Lab"
-                shortLabel="Lab"
+                label="Agent Competition"
+                shortLabel="Competition"
               />
             )}
             {visibleTabs.includes('fulfillment') && (

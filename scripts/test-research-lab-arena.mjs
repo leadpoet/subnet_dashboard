@@ -118,10 +118,10 @@ try {
   assert.doesNotMatch(routeSource, /currentRecord\.king/)
 
   const componentSource = await readFile(resolve('src/components/dashboard/ResearchLab.tsx'), 'utf8')
-  assert.match(componentSource, /Public open-model baseline · Arena/)
+  assert.match(componentSource, /Open Source Agent Competition/)
   assert.match(componentSource, /No score is inferred/)
   assert.doesNotMatch(componentSource, /Retired rebenchmark detail/)
-  assert.match(componentSource, /waiting to start/)
+  assert.match(componentSource, /Not published/)
 
   console.log('research-lab-arena: public baseline join, active stage, and incomplete-score handling passed')
 } finally {

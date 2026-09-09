@@ -1,91 +1,64 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import type { MetagraphData } from '@/lib/types'
 import { formatLabAllocationPercent } from '@/lib/research-lab-emissions'
+import {
+  competitionRoundOptions,
+  normalizeCompetitionBenchmark,
+  normalizeCompetitionCode,
+  normalizeCompetitionResults,
+  normalizeCompetitionSnapshot,
+  normalizeCompetitionSubmissions,
+  type CompetitionBenchmark,
+  type CompetitionCode,
+  type CompetitionIcp,
+  type CompetitionRoundSummary,
+  type CompetitionSnapshot,
+  type CompetitionSubmission,
+  type CompetitionSubmissionResults,
+} from '@/lib/research-lab-competition'
 
-type ResearchLabData = {
-  arena: ResearchLabArenaSnapshot
-  labMinerSpend: LabMinerSpendRollup
-  fetchedAt: string
-}
-
-type ResearchLabArenaSnapshot = {
-  activeRound: { roundId: string; status: string } | null
-  publishedBaseline: {
-    roundId: string
-    submissionId: string
-    score: number
-    rank: number | null
-    publishedAt: string | null
-  } | null
-  publishedWinner: {
-    roundId: string
-    submissionId: string
-    score: number
-    rank: number | null
-    publishedAt: string | null
-  } | null
-}
-
+type ResearchLabData = { labMinerSpend: LabMinerSpendRollup; fetchedAt: string }
 type LabMinerSpendRollup = {
   byHotkey: Record<string, LabMinerSpendEntry>
   allTime: { byHotkey: Record<string, LabMinerAllTimeEntry> }
-  currentAllocation: {
-    epoch: number | null
-    source: string
-    byHotkey: Record<string, LabMinerCurrentAllocationEntry>
-  }
+  currentAllocation: { epoch: number | null; source: string; byHotkey: Record<string, LabMinerCurrentAllocationEntry> }
 }
+type LabMinerSpendEntry = { computeSpendUsd: number; scheduledReimbursementUsd: number; activeAwardCount: number; reimbursementEpochs: number | null }
+type LabMinerAllTimeEntry = { alphaEarned: number; computeSpendUsd: number; scheduledReimbursementUsd: number; awardCount: number; reimbursementEpochs: number | null; alphaAllocationCount: number }
+type LabMinerCurrentAllocationEntry = { paidAlphaPercent: number; intendedAlphaPercent: number; overpaidAlphaPercent: number; spendUsd: number; labBucketSharePercent: number; allocationCount: number; reasons: string[] }
+type ReleaseState = 'idle' | 'loading' | 'available' | 'gated' | 'error'
 
-type LabMinerSpendEntry = {
-  computeSpendUsd: number
-  scheduledReimbursementUsd: number
-  activeAwardCount: number
-  reimbursementEpochs: number | null
-}
-
-type LabMinerAllTimeEntry = {
-  alphaEarned: number
-  computeSpendUsd: number
-  scheduledReimbursementUsd: number
-  awardCount: number
-  reimbursementEpochs: number | null
-  alphaAllocationCount: number
-}
-
-type LabMinerCurrentAllocationEntry = {
-  paidAlphaPercent: number
-  intendedAlphaPercent: number
-  overpaidAlphaPercent: number
-  spendUsd: number
-  labBucketSharePercent: number
-  allocationCount: number
-  reasons: string[]
-}
-
-export function ResearchLab({
-  onSync,
-  metagraph,
-}: { onSync?: () => void; metagraph?: MetagraphData | null } = {}) {
-  const [data, setData] = useState<ResearchLabData | null>(null)
+export function ResearchLab({ onSync, metagraph }: { onSync?: () => void; metagraph?: MetagraphData | null } = {}) {
+  const [settlement, setSettlement] = useState<ResearchLabData | null>(null)
+  const [competition, setCompetition] = useState<CompetitionSnapshot | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [selectedRoundId, setSelectedRoundId] = useState<string | null>(null)
 
   const fetchData = useCallback(async () => {
-    try {
-      const response = await fetch(`/api/research-lab?t=${Date.now()}`, { cache: 'no-store' })
-      if (!response.ok) throw new Error(`Request failed (${response.status})`)
-      const body = await response.json()
-      if (!body.success) throw new Error(body.error || 'Research Lab data unavailable')
-      setData(body.data as ResearchLabData)
-      setError(null)
-      onSync?.()
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Failed to fetch Research Lab data')
-    } finally {
-      setLoading(false)
+    const [competitionRequest, settlementRequest] = await Promise.allSettled([
+      fetchJson('/api/research-lab/competition'),
+      fetchJson(`/api/research-lab?t=${Date.now()}`),
+    ])
+    let refreshed = false
+    if (competitionRequest.status === 'fulfilled') {
+      const normalized = normalizeCompetitionSnapshot(competitionRequest.value)
+      if (normalized) {
+        setCompetition(normalized)
+        setSelectedRoundId((current) => current ?? normalized.latestRound?.roundId ?? normalized.latestCompletedRound?.roundId ?? normalized.openRound?.roundId ?? normalized.rounds[0]?.roundId ?? null)
+        setError(null)
+        refreshed = true
+      } else setError('Competition data did not match the public contract.')
+    } else setError(errorMessage(competitionRequest.reason, 'Competition data is temporarily unavailable.'))
+    if (settlementRequest.status === 'fulfilled') {
+      const body = asRecord(settlementRequest.value)
+      if (body?.success === true && asRecord(body.data)) setSettlement(body.data as ResearchLabData)
+      refreshed = true
     }
+    if (refreshed) onSync?.()
+    setLoading(false)
   }, [onSync])
 
   useEffect(() => {
@@ -94,109 +67,207 @@ export function ResearchLab({
     return () => window.clearInterval(interval)
   }, [fetchData])
 
-  if (loading && !data) return <ResearchLabLoading />
-  if (error && !data) {
-    return (
-      <div className="border-l-2 border-l-[var(--line-3)] py-6 pl-5">
-        <div className="font-mono text-[10.5px] uppercase tracking-[0.16em] text-[var(--muted-2)]">Research Lab</div>
-        <p className="mt-3 text-[14px] text-[var(--muted)]">{error}</p>
-      </div>
-    )
-  }
+  if (loading && !competition) return <ResearchLabLoading />
+  if (!competition) return <Unavailable message={error ?? 'Competition data is temporarily unavailable.'} />
 
+  const roundOptions = competitionRoundOptions(competition)
+  const selectedRound = roundOptions.find((round) => round.roundId === selectedRoundId) ?? roundOptions[0] ?? null
   return (
     <div className="w-full">
-      <header>
-        <h2 className="max-w-[700px] font-display text-[26px] font-medium leading-[1.12] tracking-[-0.025em] text-[var(--platinum)] md:text-[30px]">
-          Public baseline and Arena competition
-        </h2>
-        <p className="mt-3 max-w-[620px] text-[14px] leading-[1.7] text-[var(--muted)]">
-          Research Lab publishes the open baseline, rebenchmarks it daily, and compares miner submissions on the same ICPs through Arena.
-        </p>
-      </header>
-
-      <ArenaHero arena={data?.arena ?? { activeRound: null, publishedBaseline: null, publishedWinner: null }} />
-      <LabEmissionSplit spend={data?.labMinerSpend ?? null} metagraph={metagraph} />
+      <CompetitionHeader competition={competition} />
+      {selectedRound ? <><RoundSummary competition={competition} round={selectedRound} rounds={roundOptions} onSelectRound={setSelectedRoundId} /><RoundWorkspace round={selectedRound} /></> : <p className="border-b border-[var(--line)] py-12 text-[14px] text-[var(--muted)]">No production competition round is available.</p>}
+      <details className="group mt-12 border-t border-[var(--line)] pt-1">
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-4 py-5 font-display text-[17px] text-[var(--muted)] focus:outline-none focus-visible:text-[var(--white)] [&::-webkit-details-marker]:hidden">
+          <span>Miner settlement and emissions</span><span aria-hidden className="font-mono text-[11px] text-[var(--muted-2)] transition-transform group-open:rotate-45">+</span>
+        </summary>
+        <p className="mb-5 max-w-2xl text-[12px] leading-relaxed text-[var(--muted-2)]">Current Lab allocation, metagraph emissions, reimbursement, and compute spend remain available for settlement review.</p>
+        <LabEmissionSplit spend={settlement?.labMinerSpend ?? null} metagraph={metagraph} />
+      </details>
       {error ? <p className="mt-5 text-[12px] text-[var(--muted-2)]">Latest refresh failed: {error}</p> : null}
     </div>
   )
 }
 
 function ResearchLabLoading() {
+  return <div className="w-full"><div className="font-mono text-[11px] uppercase tracking-[0.2em] text-[var(--muted-2)]">Open Source Agent Competition</div><div className="mt-10 space-y-4"><div className="h-20 w-48 shimmer rounded-md" /><div className="h-4 w-96 max-w-full shimmer rounded" /></div></div>
+}
+
+function Unavailable({ message }: { message: string }) {
+  return <div className="border-l-2 border-l-[var(--line-3)] py-6 pl-5"><div className="font-mono text-[10.5px] uppercase tracking-[0.16em] text-[var(--muted-2)]">Open Source Agent Competition</div><p className="mt-3 text-[14px] text-[var(--muted)]">{message}</p></div>
+}
+
+function CompetitionHeader({ competition }: { competition: CompetitionSnapshot }) {
   return (
-    <div className="w-full">
-      <div className="font-mono text-[11px] uppercase tracking-[0.2em] text-[var(--muted-2)]">Research Lab</div>
-      <div className="mt-10 space-y-4"><div className="h-20 w-48 shimmer rounded-md" /><div className="h-4 w-96 max-w-full shimmer rounded" /></div>
-    </div>
+    <header className="flex flex-col justify-between gap-6 border-b border-[var(--line)] pb-8 md:flex-row md:items-end">
+      <div>
+        <div className="font-mono text-[10.5px] uppercase tracking-[0.18em] text-[var(--muted-2)]">SN {competition.netuid} · {competition.networkName} · {competition.mode}</div>
+        <h2 className="mt-3 max-w-[760px] font-display text-[32px] font-medium leading-[1.04] tracking-[-0.035em] text-[var(--white)] md:text-[46px]">Open Source Agent Competition</h2>
+        <p className="mt-4 max-w-[680px] text-[14px] leading-[1.7] text-[var(--muted)]">Fork the public agent, improve it, and compete on a server-held 20-ICP benchmark. After baseline scoring completes, the server publishes a fixed 10-ICP evaluation view. The other ICPs remain private.</p>
+      </div>
+      <a href={competition.repoUrl} target="_blank" rel="noreferrer" className="inline-flex shrink-0 items-center justify-center rounded-md border border-[var(--line-3)] px-4 py-2.5 font-mono text-[10.5px] uppercase tracking-[0.12em] text-[var(--platinum)] transition-colors hover:border-[var(--muted-2)] hover:text-[var(--white)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand)]">Open benchmark repository ↗</a>
+    </header>
   )
 }
 
-function ArenaHero({ arena }: { arena: ResearchLabArenaSnapshot }) {
-  const baseline = arena.publishedBaseline
-  const winner = arena.publishedWinner
-  const activeRound = arena.activeRound
-  const scoreTone = baseline ? (baseline.score >= 80 ? 'var(--white)' : baseline.score >= 60 ? 'var(--platinum)' : 'var(--muted)') : 'var(--platinum)'
-  const activeLabel = activeRound ? activeRound.status.trim().replaceAll('_', ' ') : null
-
+function RoundSummary({ competition, round, rounds, onSelectRound }: { competition: CompetitionSnapshot; round: CompetitionRoundSummary; rounds: CompetitionRoundSummary[]; onSelectRound: (roundId: string) => void }) {
+  const baselineScore = round.baseline?.finalScore ?? null
+  const championScore = round.champion?.finalScore ?? null
   return (
-    <section className="border-b border-[var(--line)] py-12 md:py-14">
-      <div className="mb-5 font-mono text-[10.5px] uppercase tracking-[0.16em] text-[var(--muted-2)]">Public open-model baseline · Arena</div>
-      <div className="font-display text-[clamp(48px,8vw,96px)] font-medium leading-[0.84] tracking-[-0.045em]" style={{ color: scoreTone }}>
-        {baseline ? baseline.score.toFixed(1) : activeRound?.status === 'open' ? 'Waiting' : activeRound ? 'In progress' : 'Unavailable'}
-        {baseline ? <span className="ml-3.5 align-baseline text-[22px] tracking-normal text-[var(--faint)] md:text-[26px]">/100</span> : null}
+    <section className="border-b border-[var(--line)] py-10 md:py-12">
+      <div className="flex flex-col justify-between gap-5 md:flex-row md:items-start">
+        <div>
+          <div className="flex flex-wrap items-center gap-2 font-mono text-[10.5px] uppercase tracking-[0.13em] text-[var(--muted-2)]"><span>{roundStatusLabel(round.status)}</span>{round.cancelReason ? <><span aria-hidden>·</span><span>{humanize(round.cancelReason)}</span></> : null}</div>
+          <div className="mt-4 font-display text-[clamp(42px,7vw,76px)] font-medium leading-[0.9] tracking-[-0.045em] text-[var(--platinum)]">{baselineScore === null ? 'Not published' : baselineScore.toFixed(1)}{baselineScore === null ? null : <span className="ml-3 align-baseline text-[20px] tracking-normal text-[var(--faint)]">/100 baseline</span>}</div>
+          <p className="mt-5 max-w-[610px] text-[13px] leading-[1.7] text-[var(--muted)]">{baselineScore === null ? 'This production round has no published baseline score. No score is inferred from shadow or test networks.' : 'Final score for the public baseline in this production round.'}</p>
+        </div>
+        <label className="block min-w-[250px]"><span className="mb-2 block font-mono text-[9.5px] uppercase tracking-[0.13em] text-[var(--muted-2)]">Competition round</span><select value={round.roundId} onChange={(event) => onSelectRound(event.target.value)} className="w-full rounded-md border border-[var(--line)] bg-[#0d0d0d] px-3 py-2.5 font-mono text-[11px] text-[var(--platinum)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand)]">{rounds.map((option) => <option key={option.roundId} value={option.roundId}>{roundOptionLabel(option, competition)}</option>)}</select></label>
       </div>
-      <p className="mt-7 max-w-[560px] text-[14px] leading-[1.7] text-[var(--muted)]">
-        {baseline
-          ? 'The persisted final score for the public baseline in the latest published Arena round.'
-          : activeRound?.status === 'open'
-            ? 'The Arena round is open for submissions and waiting to start.'
-            : activeRound
-              ? 'The public baseline is running in Arena. Its score appears after final ranking is published.'
-              : 'Arena did not return a published baseline score. No score is inferred.'}
-      </p>
-      <div className="mt-6 flex flex-wrap gap-x-5 gap-y-2 font-mono text-[11px] text-[var(--muted-2)]">
-        {activeLabel ? <span>Active stage: {activeLabel}</span> : null}
-        {baseline ? <><span>Published round {shortId(baseline.roundId)}</span>{baseline.rank !== null ? <span>Final rank {baseline.rank}</span> : null}{baseline.publishedAt ? <span>{formatDateTime(baseline.publishedAt)}</span> : null}</> : null}
-        {winner ? <span>Current king: {shortId(winner.submissionId)} · {winner.score.toFixed(1)}</span> : null}
+      <div className="mt-8 grid gap-px overflow-hidden rounded-md border border-[var(--line)] bg-[var(--line)] sm:grid-cols-3">
+        <SummaryMetric label="Baseline" value={round.baseline ? shortHotkey(round.baseline.minerHotkey) : 'Unavailable'} detail={scoreLabel(baselineScore)} />
+        <SummaryMetric label="Champion" value={round.champion ? shortHotkey(round.champion.minerHotkey) : 'Not published'} detail={round.champion ? `${humanize(round.champion.outcome ?? 'champion')} · ${scoreLabel(championScore)}` : 'No champion inferred'} />
+        <SummaryMetric label="Published" value={round.publishedAt ? formatUtc(round.publishedAt) : 'Not published'} detail={`${round.roundId} · ${humanize(round.promotionStatus ?? 'not required')}`} />
       </div>
     </section>
   )
 }
 
-function LabEmissionSplit({ spend, metagraph }: { spend: LabMinerSpendRollup | null; metagraph?: MetagraphData | null }) {
-  const rows = useMemo(() => {
-    const current = spend?.currentAllocation?.byHotkey ?? {}
-    const recent = spend?.byHotkey ?? {}
-    const allTime = spend?.allTime?.byHotkey ?? {}
-    const keys = new Set([...Object.keys(current), ...Object.keys(recent), ...Object.keys(allTime), ...Object.keys(metagraph?.incentives ?? {})])
-    return Array.from(keys).map((hotkey) => ({
-      hotkey,
-      metagraphPct: Math.max(0, Number(metagraph?.incentives?.[hotkey] ?? 0) * 100),
-      paidAlphaPct: Math.max(0, Number(current[hotkey]?.paidAlphaPercent ?? 0)),
-      computeSpendUsd: Math.max(0, Number(recent[hotkey]?.computeSpendUsd ?? 0)),
-      reimbursementUsd: Math.max(0, Number(recent[hotkey]?.scheduledReimbursementUsd ?? 0)),
-      alphaEarned: Math.max(0, Number(allTime[hotkey]?.alphaEarned ?? 0)),
-    })).filter((row) => row.metagraphPct > 0 || row.paidAlphaPct > 0 || row.computeSpendUsd > 0 || row.alphaEarned > 0).sort((a, b) => b.metagraphPct - a.metagraphPct || b.alphaEarned - a.alphaEarned || a.hotkey.localeCompare(b.hotkey))
-  }, [metagraph?.incentives, spend])
+function SummaryMetric({ label, value, detail }: { label: string; value: string; detail: string }) {
+  return <div className="min-w-0 bg-[#0b0b0b] px-4 py-4"><div className="font-mono text-[9.5px] uppercase tracking-[0.13em] text-[var(--muted-2)]">{label}</div><div className="mt-2 truncate font-mono text-[12px] text-[var(--platinum)]" title={value}>{value}</div><div className="mt-1 truncate text-[11px] text-[var(--muted-2)]" title={detail}>{detail}</div></div>
+}
+
+function RoundWorkspace({ round }: { round: CompetitionRoundSummary }) {
+  const [submissions, setSubmissions] = useState<CompetitionSubmission[]>([])
+  const [benchmark, setBenchmark] = useState<CompetitionBenchmark | null>(null)
+  const [benchmarkState, setBenchmarkState] = useState<ReleaseState>('loading')
+  const [selectedSubmissionId, setSelectedSubmissionId] = useState<string | null>(null)
+  const [roundLoading, setRoundLoading] = useState(true)
+  const [roundError, setRoundError] = useState<string | null>(null)
+  const [results, setResults] = useState<CompetitionSubmissionResults | null>(null)
+  const [resultsState, setResultsState] = useState<ReleaseState>('idle')
+  const [code, setCode] = useState<CompetitionCode | null>(null)
+  const [codeState, setCodeState] = useState<ReleaseState>('idle')
+  const [selectedFile, setSelectedFile] = useState<string | null>(null)
+
+  useEffect(() => {
+    let active = true
+    setRoundLoading(true); setRoundError(null); setBenchmark(null); setBenchmarkState('loading'); setSelectedSubmissionId(null)
+    Promise.allSettled([fetchReleasedJson(`/api/research-lab/rounds/${encodeURIComponent(round.roundId)}/submissions`), fetchReleasedJson(`/api/research-lab/rounds/${encodeURIComponent(round.roundId)}/benchmark`)]).then(([submissionRequest, benchmarkRequest]) => {
+      if (!active) return
+      if (submissionRequest.status === 'fulfilled' && submissionRequest.value.state === 'available') {
+        const submissionResponse = submissionRequest.value
+        const next = normalizeCompetitionSubmissions(submissionResponse.body)
+        setSubmissions(next)
+        setSelectedSubmissionId(next.find((submission) => submission.isBaseline)?.submissionId ?? next.find((submission) => submission.isChampion)?.submissionId ?? next[0]?.submissionId ?? null)
+      } else {
+        setSubmissions([])
+        if (submissionRequest.status === 'rejected') setRoundError(errorMessage(submissionRequest.reason, 'Submissions are temporarily unavailable.'))
+      }
+      if (benchmarkRequest.status === 'fulfilled' && benchmarkRequest.value.state === 'available') {
+        const benchmarkResponse = benchmarkRequest.value
+        const next = normalizeCompetitionBenchmark(benchmarkResponse.body)
+        setBenchmark(next); setBenchmarkState(next ? 'available' : 'error')
+      } else setBenchmarkState(benchmarkRequest.status === 'fulfilled' ? benchmarkRequest.value.state : 'error')
+    }).finally(() => { if (active) setRoundLoading(false) })
+    return () => { active = false }
+  }, [round.roundId])
+
+  useEffect(() => {
+    setResults(null); setCode(null); setCodeState('idle'); setSelectedFile(null)
+    if (!selectedSubmissionId) { setResultsState('idle'); return }
+    let active = true
+    setResultsState('loading')
+    fetchReleasedJson(`/api/research-lab/rounds/${encodeURIComponent(round.roundId)}/results/${encodeURIComponent(selectedSubmissionId)}`).then((response) => {
+      if (!active) return
+      if (response.state !== 'available') { setResultsState(response.state); return }
+      const normalized = normalizeCompetitionResults(response.body)
+      setResults(normalized); setResultsState(normalized ? 'available' : 'error')
+    }).catch(() => { if (active) setResultsState('error') })
+    return () => { active = false }
+  }, [round.roundId, selectedSubmissionId])
+
+  const selectedSubmission = submissions.find((submission) => submission.submissionId === selectedSubmissionId) ?? null
+  const selectedCodeFile = code?.files.find((file) => file.path === selectedFile) ?? code?.files[0] ?? null
+  const requestCode = async () => {
+    if (!selectedSubmission) return
+    setCodeState('loading')
+    try {
+      const response = await fetchReleasedJson(`/api/research-lab/submissions/${encodeURIComponent(selectedSubmission.submissionId)}/code`)
+      if (response.state !== 'available') { setCodeState(response.state); return }
+      const normalized = normalizeCompetitionCode(response.body)
+      setCode(normalized); setSelectedFile(normalized?.files[0]?.path ?? null); setCodeState(normalized ? 'available' : 'error')
+    } catch { setCodeState('error') }
+  }
 
   return (
     <section className="pt-10">
-      <div className="mb-5">
-        <div className="font-display text-[22px] font-medium tracking-[-0.025em] text-[var(--platinum)]">Miner settlement and emissions</div>
-        <p className="mt-1.5 max-w-2xl text-[12px] leading-relaxed text-[var(--muted-2)]">Current Lab allocation, metagraph emissions, reimbursement, and compute spend remain visible for active settlement workflows.</p>
-      </div>
-      {rows.length === 0 ? <p className="text-[13px] text-[var(--muted-2)]">No current Lab allocation or settlement data is available.</p> : (
-        <div className="overflow-hidden rounded-md border border-[var(--line)]">
-          <div className="hidden grid-cols-[minmax(0,1fr)_130px_130px_130px_130px] gap-3 border-b border-[var(--line)] bg-[rgba(236,234,230,0.018)] px-3 py-2 font-mono text-[9.5px] uppercase tracking-[0.1em] text-[var(--muted-2)] md:grid"><span>Hotkey</span><span className="text-right">Metagraph</span><span className="text-right">Lab allocation</span><span className="text-right">Compute / repay</span><span className="text-right">Alpha earned</span></div>
-          {rows.map((row) => <div key={row.hotkey} className="grid grid-cols-[minmax(0,1fr)_auto] gap-3 border-b border-[var(--line)] px-3 py-3 last:border-b-0 md:grid-cols-[minmax(0,1fr)_130px_130px_130px_130px] md:items-center"><span className="font-mono text-[11px] text-[var(--platinum)]">{shortHotkey(row.hotkey)}</span><span className="text-right font-mono text-[11px] text-[var(--muted)]">{formatLabAllocationPercent(row.metagraphPct)}</span><span className="hidden text-right font-mono text-[11px] text-[var(--muted)] md:block">{formatLabAllocationPercent(row.paidAlphaPct)}</span><span className="text-right font-mono text-[11px] text-[var(--muted)]">{formatUsd(row.computeSpendUsd)} / {formatUsd(row.reimbursementUsd)}</span><span className="hidden text-right font-mono text-[11px] text-[var(--muted)] md:block">{formatAlpha(row.alphaEarned)}</span></div>)}
-        </div>
-      )}
+      <div className="mb-5 flex items-end justify-between gap-4"><div><h3 className="font-display text-[22px] font-medium tracking-[-0.025em] text-[var(--platinum)]">Submissions</h3><p className="mt-1 text-[12px] text-[var(--muted-2)]">Select a submission to inspect its published public-ICP scores and released source.</p></div><span className="font-mono text-[10px] text-[var(--muted-2)]">{submissions.length} total</span></div>
+      {roundLoading ? <div className="h-24 shimmer rounded-md" /> : roundError ? <InlineNotice>{roundError}</InlineNotice> : submissions.length === 0 ? <InlineNotice>No submissions are public for this round.</InlineNotice> : <SubmissionTable submissions={submissions} round={round} selectedId={selectedSubmissionId} onSelect={setSelectedSubmissionId} />}
+      {selectedSubmission ? <div className="mt-8 grid gap-8 xl:grid-cols-[minmax(0,1.45fr)_minmax(300px,0.55fr)]"><PublishedResults benchmark={benchmark} benchmarkState={benchmarkState} results={results} resultsState={resultsState} round={round} submission={selectedSubmission} /><SourcePanel submission={selectedSubmission} code={code} codeState={codeState} selectedFile={selectedCodeFile} onSelectFile={setSelectedFile} onRequest={() => void requestCode()} /></div> : null}
     </section>
   )
 }
 
-function shortId(value: string): string { return value.length > 14 ? `${value.slice(0, 7)}…${value.slice(-5)}` : value }
-function shortHotkey(value: string): string { return value.length > 14 ? `${value.slice(0, 8)}…${value.slice(-5)}` : value }
-function formatDateTime(value: string): string { const date = new Date(value); return Number.isFinite(date.getTime()) ? date.toLocaleString() : value }
+function SubmissionTable({ submissions, round, selectedId, onSelect }: { submissions: CompetitionSubmission[]; round: CompetitionRoundSummary; selectedId: string | null; onSelect: (submissionId: string) => void }) {
+  return (
+    <div className="overflow-x-auto rounded-md border border-[var(--line)]"><table className="w-full min-w-[720px] border-collapse text-left"><thead className="border-b border-[var(--line)] bg-[rgba(236,234,230,0.018)] font-mono text-[9.5px] uppercase tracking-[0.1em] text-[var(--muted-2)]"><tr><th className="px-3 py-2.5 font-normal">Submission</th><th className="px-3 py-2.5 font-normal">Miner hotkey</th><th className="px-3 py-2.5 font-normal">Status</th><th className="px-3 py-2.5 text-right font-normal">Stage 1</th><th className="px-3 py-2.5 text-right font-normal">Final</th></tr></thead><tbody>
+      {submissions.map((submission) => { const selected = submission.submissionId === selectedId; return <tr key={submission.submissionId} className={`border-b border-[var(--line)] last:border-b-0 ${selected ? 'bg-[rgba(236,234,230,0.045)]' : 'hover:bg-[rgba(236,234,230,0.02)]'}`}><td className="p-0"><button type="button" onClick={() => onSelect(submission.submissionId)} className="w-full px-3 py-3 text-left font-mono text-[11px] text-[var(--platinum)] focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--brand)]" aria-pressed={selected}>{shortId(submission.submissionId)} {submission.isBaseline ? <span className="ml-1.5 text-[9px] uppercase tracking-wide text-[var(--brand)]">Baseline</span> : null}</button></td><td className="px-3 py-3 font-mono text-[11px] text-[var(--muted)]" title={submission.minerHotkey}>{shortHotkey(submission.minerHotkey)}</td><td className="px-3 py-3 text-[11px] text-[var(--muted)]">{submissionStatusLabel(submission, round)}</td><td className="px-3 py-3 text-right font-mono text-[11px] text-[var(--muted)]">{scoreLabel(submission.stage1Score)}</td><td className="px-3 py-3 text-right font-mono text-[11px] text-[var(--platinum)]">{scoreLabel(submission.finalScore)}</td></tr> })}
+      </tbody></table></div>
+  )
+}
+
+function PublishedResults({ benchmark, benchmarkState, results, resultsState, round, submission }: { benchmark: CompetitionBenchmark | null; benchmarkState: ReleaseState; results: CompetitionSubmissionResults | null; resultsState: ReleaseState; round: CompetitionRoundSummary; submission: CompetitionSubmission }) {
+  if (round.status === 'cancelled' || results?.incomplete) return <ResultFrame><InlineNotice>This round was cancelled. Per-ICP and aggregate scores were not published.</InlineNotice></ResultFrame>
+  if (benchmarkState === 'loading' || (!submission.isBaseline && resultsState === 'loading')) return <ResultFrame><div className="h-24 shimmer rounded-md" /></ResultFrame>
+  if (benchmarkState === 'gated') return <ResultFrame><InlineNotice>Public ICPs are available after baseline scoring completes.</InlineNotice></ResultFrame>
+  if (!benchmark || benchmarkState === 'error') return <ResultFrame><InlineNotice>Published public-ICP details are temporarily unavailable.</InlineNotice></ResultFrame>
+  if (!submission.isBaseline && (resultsState === 'gated' || !results)) return <ResultFrame><InlineNotice>Public ICP results are not published for this submission yet.</InlineNotice></ResultFrame>
+  if (!submission.isBaseline && resultsState === 'error') return <ResultFrame><InlineNotice>Published public-ICP results are temporarily unavailable.</InlineNotice></ResultFrame>
+  if (!submission.isBaseline && results?.publicIcpStatus !== 'ready') return <ResultFrame><InlineNotice>Public ICP results are pending for this submission.</InlineNotice></ResultFrame>
+  const scores = submission.isBaseline
+    ? new Map(benchmark.icps.flatMap((icp) => icp.baselineScore === null ? [] : [[icp.position, icp.baselineScore] as const]))
+    : results?.publicScores ?? new Map<number, number>()
+  return <ResultFrame><div className="mb-5 flex flex-wrap gap-5 font-mono text-[10.5px] text-[var(--muted-2)]"><span>Stage 1 {scoreLabel(results?.stage1Score ?? submission.stage1Score)}</span><span>Final {scoreLabel(results?.finalScore ?? submission.finalScore)}</span><span>{submission.isBaseline ? 'Public baseline' : shortHotkey(submission.minerHotkey)}</span></div><IcpList title="Public ICPs (10)" icps={benchmark.icps} scores={scores} /></ResultFrame>
+}
+
+function ResultFrame({ children }: { children: ReactNode }) { return <div><h3 className="font-display text-[19px] font-medium text-[var(--platinum)]">Published results</h3><div className="mt-4">{children}</div></div> }
+
+function IcpList({ title, icps, scores }: { title: string; icps: CompetitionIcp[]; scores: Map<number, number> }) {
+  return <div><div className="mb-2 font-mono text-[9.5px] uppercase tracking-[0.12em] text-[var(--muted-2)]">{title}</div><div className="overflow-hidden rounded-md border border-[var(--line)]">{icps.map((icp, index) => <details key={`${icp.position}-${icp.id}`} className="group border-b border-[var(--line)] last:border-b-0"><summary className="grid cursor-pointer list-none grid-cols-[36px_minmax(0,1fr)_52px_16px] items-center gap-2 px-3 py-3 focus:outline-none focus-visible:bg-[rgba(236,234,230,0.04)] [&::-webkit-details-marker]:hidden"><span className="font-mono text-[10px] text-[var(--muted-2)]">{String(index + 1).padStart(2, '0')}</span><span className="truncate text-[12px] text-[var(--platinum)]">{icp.prompt}</span><span className="text-right font-mono text-[11px] text-[var(--white)]">{scoreLabel(scores.get(icp.position) ?? null)}</span><span aria-hidden className="font-mono text-[11px] text-[var(--muted-2)] transition-transform group-open:rotate-45">+</span></summary><div className="border-t border-[var(--line)] bg-[#090909] px-4 py-4"><dl className="grid gap-x-5 gap-y-3 sm:grid-cols-2"><IcpDetail label="Industry" value={[icp.industry, icp.subIndustry].filter(Boolean).join(' · ')} /><IcpDetail label="Geography" value={icp.geography ?? icp.country} /><IcpDetail label="Company size" value={icp.employeeCount.join(', ')} /><IcpDetail label="Company stage" value={icp.companyStage} /><IcpDetail label="Product or service" value={icp.productService} /><IcpDetail label="Required attribute" value={icp.requiredAttribute} /><IcpDetail label={icp.intentCategory ? `Intent · ${humanize(icp.intentCategory)}` : 'Intent'} value={icp.intentSignal} wide /></dl></div></details>)}</div></div>
+}
+
+function IcpDetail({ label, value, wide = false }: { label: string; value: string | null; wide?: boolean }) { if (!value) return null; return <div className={wide ? 'sm:col-span-2' : ''}><dt className="font-mono text-[9px] uppercase tracking-[0.1em] text-[var(--muted-2)]">{label}</dt><dd className="mt-1 text-[11.5px] leading-relaxed text-[var(--muted)]">{value}</dd></div> }
+
+function SourcePanel({ submission, code, codeState, selectedFile, onSelectFile, onRequest }: { submission: CompetitionSubmission; code: CompetitionCode | null; codeState: ReleaseState; selectedFile: CompetitionCode['files'][number] | null; onSelectFile: (path: string) => void; onRequest: () => void }) {
+  const availableAt = submission.code.availableAt ? formatUtc(submission.code.availableAt) : null
+  return <aside><h3 className="font-display text-[19px] font-medium text-[var(--platinum)]">Source code</h3><p className="mt-2 text-[12px] leading-relaxed text-[var(--muted-2)]">Each submission stays private for 24 hours. The server releases a bounded, read-only source view after that gate.</p>
+    {codeState === 'idle' ? <div className="mt-4"><button type="button" disabled={!submission.code.available} onClick={onRequest} className="rounded-md border border-[var(--line-3)] px-3.5 py-2 font-mono text-[10px] uppercase tracking-[0.11em] text-[var(--platinum)] transition-colors hover:text-[var(--white)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand)] disabled:cursor-not-allowed disabled:opacity-45">{submission.code.available ? 'View released source' : 'Source locked'}</button>{!submission.code.available ? <p className="mt-2 font-mono text-[9.5px] text-[var(--muted-2)]">{availableAt ? `Available ${availableAt}` : 'Available after the 24-hour gate'}</p> : null}</div> : null}
+    {codeState === 'loading' ? <div className="mt-4 h-20 shimmer rounded-md" /> : null}{codeState === 'gated' ? <div className="mt-4"><InlineNotice>Source is not public yet. The server will release it after the 24-hour gate.</InlineNotice></div> : null}{codeState === 'error' ? <div className="mt-4"><InlineNotice>Released source is temporarily unavailable.</InlineNotice></div> : null}
+    {codeState === 'available' && code ? <div className="mt-4 overflow-hidden rounded-md border border-[var(--line)]"><div className="max-h-36 overflow-y-auto border-b border-[var(--line)] bg-[#090909] p-1.5">{code.files.map((file) => <button key={file.path} type="button" onClick={() => onSelectFile(file.path)} className={`block w-full truncate rounded px-2 py-1.5 text-left font-mono text-[10px] focus:outline-none focus-visible:ring-1 focus-visible:ring-[var(--brand)] ${file.path === selectedFile?.path ? 'bg-[rgba(236,234,230,0.07)] text-[var(--white)]' : 'text-[var(--muted-2)] hover:text-[var(--platinum)]'}`} title={file.path}>{file.path}</button>)}</div>{selectedFile ? <pre className="max-h-[420px] overflow-auto bg-[#070707] p-3 text-[10px] leading-[1.65] text-[var(--muted)]"><code>{selectedFile.content}</code></pre> : <p className="p-3 text-[11px] text-[var(--muted-2)]">No text files were released.</p>}{code.truncated ? <p className="border-t border-[var(--line)] px-3 py-2 text-[10px] text-[var(--muted-2)]">The server truncated this source view at its public size limit.</p> : null}</div> : null}
+  </aside>
+}
+
+function InlineNotice({ children }: { children: ReactNode }) { return <p className="rounded-md border border-[var(--line)] bg-[#0a0a0a] px-4 py-4 text-[12px] leading-relaxed text-[var(--muted-2)]">{children}</p> }
+
+function LabEmissionSplit({ spend, metagraph }: { spend: LabMinerSpendRollup | null; metagraph?: MetagraphData | null }) {
+  const rows = useMemo(() => {
+    const current = spend?.currentAllocation?.byHotkey ?? {}; const recent = spend?.byHotkey ?? {}; const allTime = spend?.allTime?.byHotkey ?? {}; const keys = new Set([...Object.keys(current), ...Object.keys(recent), ...Object.keys(allTime), ...Object.keys(metagraph?.incentives ?? {})])
+    return Array.from(keys).map((hotkey) => ({ hotkey, metagraphPct: Math.max(0, Number(metagraph?.incentives?.[hotkey] ?? 0) * 100), paidAlphaPct: Math.max(0, Number(current[hotkey]?.paidAlphaPercent ?? 0)), computeSpendUsd: Math.max(0, Number(recent[hotkey]?.computeSpendUsd ?? 0)), reimbursementUsd: Math.max(0, Number(recent[hotkey]?.scheduledReimbursementUsd ?? 0)), alphaEarned: Math.max(0, Number(allTime[hotkey]?.alphaEarned ?? 0)) })).filter((row) => row.metagraphPct > 0 || row.paidAlphaPct > 0 || row.computeSpendUsd > 0 || row.alphaEarned > 0).sort((a, b) => b.metagraphPct - a.metagraphPct || b.alphaEarned - a.alphaEarned || a.hotkey.localeCompare(b.hotkey))
+  }, [metagraph?.incentives, spend])
+  if (rows.length === 0) return <p className="pb-4 text-[13px] text-[var(--muted-2)]">No current Lab allocation or settlement data is available.</p>
+  return <div className="mb-4 overflow-hidden rounded-md border border-[var(--line)]"><div className="hidden grid-cols-[minmax(0,1fr)_130px_130px_130px_130px] gap-3 border-b border-[var(--line)] bg-[rgba(236,234,230,0.018)] px-3 py-2 font-mono text-[9.5px] uppercase tracking-[0.1em] text-[var(--muted-2)] md:grid"><span>Hotkey</span><span className="text-right">Metagraph</span><span className="text-right">Lab allocation</span><span className="text-right">Compute / repay</span><span className="text-right">Alpha earned</span></div>{rows.map((row) => <div key={row.hotkey} className="grid grid-cols-[minmax(0,1fr)_auto] gap-3 border-b border-[var(--line)] px-3 py-3 last:border-b-0 md:grid-cols-[minmax(0,1fr)_130px_130px_130px_130px] md:items-center"><span className="font-mono text-[11px] text-[var(--platinum)]">{shortHotkey(row.hotkey)}</span><span className="text-right font-mono text-[11px] text-[var(--muted)]">{formatLabAllocationPercent(row.metagraphPct)}</span><span className="hidden text-right font-mono text-[11px] text-[var(--muted)] md:block">{formatLabAllocationPercent(row.paidAlphaPct)}</span><span className="text-right font-mono text-[11px] text-[var(--muted)]">{formatUsd(row.computeSpendUsd)} / {formatUsd(row.reimbursementUsd)}</span><span className="hidden text-right font-mono text-[11px] text-[var(--muted)] md:block">{formatAlpha(row.alphaEarned)}</span></div>)}</div>
+}
+
+async function fetchJson(url: string): Promise<unknown> { const response = await fetch(url, { cache: 'no-store', headers: { Accept: 'application/json' } }); if (!response.ok) throw new Error(`Request failed (${response.status})`); return response.json() }
+async function fetchReleasedJson(url: string): Promise<{ state: 'available'; body: unknown } | { state: 'gated'; body: null }> { const response = await fetch(url, { cache: 'no-store', headers: { Accept: 'application/json' } }); if (response.status === 403) return { state: 'gated', body: null }; if (!response.ok) throw new Error(`Request failed (${response.status})`); return { state: 'available', body: await response.json() } }
+function asRecord(value: unknown): Record<string, unknown> | null { return value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null }
+function roundOptionLabel(round: CompetitionRoundSummary, competition: CompetitionSnapshot): string { const tags = [roundStatusLabel(round.status)]; if (round.roundId === competition.latestRound?.roundId) tags.push('latest'); if (round.roundId === competition.latestCompletedRound?.roundId) tags.push('last completed'); if (round.roundId === competition.openRound?.roundId) tags.push('open round'); return `${round.roundId} — ${tags.join(' · ')}` }
+function submissionStatusLabel(submission: CompetitionSubmission, round: CompetitionRoundSummary): string { if (submission.isChampion || submission.status === 'champion') return 'Champion'; if (submission.status === 'scored' && round.promotionStatus === 'pending') return 'Scored · promotion pending'; if (submission.status === 'scored' && round.status === 'published' && !submission.isBaseline) return 'Scored · not promoted'; return humanize(submission.status) }
+function roundStatusLabel(value: string): string { if (value === 'published') return 'Published result'; if (value === 'cancelled') return 'Cancelled round'; if (value === 'open') return 'Open for submissions'; return humanize(value) }
+function humanize(value: string): string { const normalized = value.trim().replaceAll('_', ' '); return normalized ? normalized[0].toUpperCase() + normalized.slice(1) : 'Unavailable' }
+function scoreLabel(value: number | null): string { return value === null ? '—' : value.toFixed(1) }
+function shortId(value: string): string { return value.length > 18 ? `${value.slice(0, 9)}…${value.slice(-6)}` : value }
+function shortHotkey(value: string): string { return value.length > 18 ? `${value.slice(0, 9)}…${value.slice(-6)}` : value }
+function formatUtc(value: string): string { const date = new Date(value); return Number.isFinite(date.getTime()) ? `${date.toISOString().slice(0, 16).replace('T', ' ')} UTC` : value }
 function formatUsd(value: number): string { if (!Number.isFinite(value) || value <= 0) return '$0.00'; if (value >= 1) return `$${value.toFixed(2)}`; return '<$0.01' }
 function formatAlpha(value: number): string { if (!Number.isFinite(value) || value <= 0) return '0.0000'; return value >= 1 ? value.toFixed(2) : value.toFixed(4) }
+function errorMessage(value: unknown, fallback: string): string { return value instanceof Error ? value.message : fallback }
