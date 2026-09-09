@@ -98,6 +98,8 @@ try {
   assert.match(component, /response\.status === 403/)
   assert.match(component, /icp\.position/)
   assert.match(component, /publicIcpStatus !== 'ready'/)
+  assert.match(component, /setInterval\(\(\) => void refresh\(false\), 60_000\)/)
+  assert.match(component, /selectedSubmissionIdRef\.current !== requestedSubmissionId/)
   assert.doesNotMatch(component, /slice\(10/)
   assert.doesNotMatch(component, /More 10 ICPs/)
   assert.doesNotMatch(component, /outputs|run_results|judge_evidence/)

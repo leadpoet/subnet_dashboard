@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { MetagraphData } from '@/lib/types'
 import { formatLabAllocationPercent } from '@/lib/research-lab-emissions'
 import {
@@ -78,9 +78,9 @@ export function ResearchLab({ onSync, metagraph }: { onSync?: () => void; metagr
       {selectedRound ? <><RoundSummary competition={competition} round={selectedRound} rounds={roundOptions} onSelectRound={setSelectedRoundId} /><RoundWorkspace round={selectedRound} /></> : <p className="border-b border-[var(--line)] py-12 text-[14px] text-[var(--muted)]">No production competition round is available.</p>}
       <details className="group mt-12 border-t border-[var(--line)] pt-1">
         <summary className="flex cursor-pointer list-none items-center justify-between gap-4 py-5 font-display text-[17px] text-[var(--muted)] focus:outline-none focus-visible:text-[var(--white)] [&::-webkit-details-marker]:hidden">
-          <span>Miner settlement and emissions</span><span aria-hidden className="font-mono text-[11px] text-[var(--muted-2)] transition-transform group-open:rotate-45">+</span>
+          <span>Competition settlement and emissions</span><span aria-hidden className="font-mono text-[11px] text-[var(--muted-2)] transition-transform group-open:rotate-45">+</span>
         </summary>
-        <p className="mb-5 max-w-2xl text-[12px] leading-relaxed text-[var(--muted-2)]">Current Lab allocation, metagraph emissions, reimbursement, and compute spend remain available for settlement review.</p>
+        <p className="mb-5 max-w-2xl text-[12px] leading-relaxed text-[var(--muted-2)]">Current competition allocation, metagraph emissions, reimbursement, and compute spend remain available for settlement review.</p>
         <LabEmissionSplit spend={settlement?.labMinerSpend ?? null} metagraph={metagraph} />
       </details>
       {error ? <p className="mt-5 text-[12px] text-[var(--muted-2)]">Latest refresh failed: {error}</p> : null}
@@ -123,9 +123,13 @@ function RoundSummary({ competition, round, rounds, onSelectRound }: { competiti
         <label className="block min-w-[250px]"><span className="mb-2 block font-mono text-[9.5px] uppercase tracking-[0.13em] text-[var(--muted-2)]">Competition round</span><select value={round.roundId} onChange={(event) => onSelectRound(event.target.value)} className="w-full rounded-md border border-[var(--line)] bg-[#0d0d0d] px-3 py-2.5 font-mono text-[11px] text-[var(--platinum)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand)]">{rounds.map((option) => <option key={option.roundId} value={option.roundId}>{roundOptionLabel(option, competition)}</option>)}</select></label>
       </div>
       <div className="mt-8 grid gap-px overflow-hidden rounded-md border border-[var(--line)] bg-[var(--line)] sm:grid-cols-3">
-        <SummaryMetric label="Baseline" value={round.baseline ? shortHotkey(round.baseline.minerHotkey) : 'Unavailable'} detail={scoreLabel(baselineScore)} />
-        <SummaryMetric label="Champion" value={round.champion ? shortHotkey(round.champion.minerHotkey) : 'Not published'} detail={round.champion ? `${humanize(round.champion.outcome ?? 'champion')} · ${scoreLabel(championScore)}` : 'No champion inferred'} />
-        <SummaryMetric label="Published" value={round.publishedAt ? formatUtc(round.publishedAt) : 'Not published'} detail={`${round.roundId} · ${humanize(round.promotionStatus ?? 'not required')}`} />
+        <SummaryMetric label="Current baseline" value="Pydantic" detail={round.baseline ? `${scoreLabel(baselineScore)} · ${shortHotkey(round.baseline.minerHotkey)}` : 'Score unavailable'} />
+        <SummaryMetric label="Round status" value={roundStatusLabel(round.status)} detail={round.publishedAt ? formatUtc(round.publishedAt) : round.createdAt ? `Created ${formatUtc(round.createdAt)}` : round.roundId} />
+        {round.champion
+          ? <SummaryMetric label="Champion" value={shortHotkey(round.champion.minerHotkey)} detail={`${humanize(round.champion.outcome ?? 'champion')} · ${scoreLabel(championScore)}`} />
+          : round.cancelReason
+            ? <SummaryMetric label="Cancellation" value={humanize(round.cancelReason)} detail="No champion was published" />
+            : <SummaryMetric label="Promotion" value={humanize(round.promotionStatus ?? 'not required')} detail="No champion was published" />}
       </div>
     </section>
   )
@@ -147,35 +151,60 @@ function RoundWorkspace({ round }: { round: CompetitionRoundSummary }) {
   const [code, setCode] = useState<CompetitionCode | null>(null)
   const [codeState, setCodeState] = useState<ReleaseState>('idle')
   const [selectedFile, setSelectedFile] = useState<string | null>(null)
+  const [roundRevision, setRoundRevision] = useState(0)
+  const roundRequestRef = useRef(0)
+  const selectedSubmissionIdRef = useRef<string | null>(null)
+  selectedSubmissionIdRef.current = selectedSubmissionId
+  const selectSubmission = useCallback((submissionId: string | null) => {
+    selectedSubmissionIdRef.current = submissionId
+    setSelectedSubmissionId(submissionId)
+  }, [])
 
   useEffect(() => {
-    let active = true
-    setRoundLoading(true); setRoundError(null); setBenchmark(null); setBenchmarkState('loading'); setSelectedSubmissionId(null)
-    Promise.allSettled([fetchReleasedJson(`/api/research-lab/rounds/${encodeURIComponent(round.roundId)}/submissions`), fetchReleasedJson(`/api/research-lab/rounds/${encodeURIComponent(round.roundId)}/benchmark`)]).then(([submissionRequest, benchmarkRequest]) => {
-      if (!active) return
+    setRoundLoading(true); setRoundError(null); setBenchmark(null); setBenchmarkState('loading'); setSubmissions([]); selectSubmission(null)
+    const refresh = async (initial: boolean) => {
+      const request = ++roundRequestRef.current
+      const [submissionRequest, benchmarkRequest] = await Promise.allSettled([
+        fetchReleasedJson(`/api/research-lab/rounds/${encodeURIComponent(round.roundId)}/submissions`),
+        fetchReleasedJson(`/api/research-lab/rounds/${encodeURIComponent(round.roundId)}/benchmark`),
+      ])
+      if (request !== roundRequestRef.current) return
       if (submissionRequest.status === 'fulfilled' && submissionRequest.value.state === 'available') {
-        const submissionResponse = submissionRequest.value
-        const next = normalizeCompetitionSubmissions(submissionResponse.body)
+        const next = normalizeCompetitionSubmissions(submissionRequest.value.body)
         setSubmissions(next)
-        setSelectedSubmissionId(next.find((submission) => submission.isBaseline)?.submissionId ?? next.find((submission) => submission.isChampion)?.submissionId ?? next[0]?.submissionId ?? null)
-      } else {
+        const current = selectedSubmissionIdRef.current
+        selectSubmission(current && next.some((submission) => submission.submissionId === current)
+          ? current
+          : next.find((submission) => submission.isBaseline)?.submissionId ?? next.find((submission) => submission.isChampion)?.submissionId ?? next[0]?.submissionId ?? null)
+        setRoundError(null)
+      } else if (initial) {
         setSubmissions([])
         if (submissionRequest.status === 'rejected') setRoundError(errorMessage(submissionRequest.reason, 'Submissions are temporarily unavailable.'))
       }
       if (benchmarkRequest.status === 'fulfilled' && benchmarkRequest.value.state === 'available') {
-        const benchmarkResponse = benchmarkRequest.value
-        const next = normalizeCompetitionBenchmark(benchmarkResponse.body)
+        const next = normalizeCompetitionBenchmark(benchmarkRequest.value.body)
         setBenchmark(next); setBenchmarkState(next ? 'available' : 'error')
-      } else setBenchmarkState(benchmarkRequest.status === 'fulfilled' ? benchmarkRequest.value.state : 'error')
-    }).finally(() => { if (active) setRoundLoading(false) })
-    return () => { active = false }
-  }, [round.roundId])
+      } else if (benchmarkRequest.status === 'fulfilled') {
+        setBenchmark(null); setBenchmarkState(benchmarkRequest.value.state)
+      } else if (initial) setBenchmarkState('error')
+      setRoundLoading(false)
+      setRoundRevision((current) => current + 1)
+    }
+    void refresh(true)
+    const interval = window.setInterval(() => void refresh(false), 60_000)
+    return () => { window.clearInterval(interval); roundRequestRef.current += 1 }
+  }, [round.roundId, selectSubmission])
 
   useEffect(() => {
     setResults(null); setCode(null); setCodeState('idle'); setSelectedFile(null)
     if (!selectedSubmissionId) { setResultsState('idle'); return }
-    let active = true
     setResultsState('loading')
+  }, [round.roundId, selectedSubmissionId])
+
+  useEffect(() => {
+    if (!selectedSubmissionId) return
+    let active = true
+    setResultsState((current) => current === 'available' ? current : 'loading')
     fetchReleasedJson(`/api/research-lab/rounds/${encodeURIComponent(round.roundId)}/results/${encodeURIComponent(selectedSubmissionId)}`).then((response) => {
       if (!active) return
       if (response.state !== 'available') { setResultsState(response.state); return }
@@ -183,25 +212,28 @@ function RoundWorkspace({ round }: { round: CompetitionRoundSummary }) {
       setResults(normalized); setResultsState(normalized ? 'available' : 'error')
     }).catch(() => { if (active) setResultsState('error') })
     return () => { active = false }
-  }, [round.roundId, selectedSubmissionId])
+  }, [round.roundId, roundRevision, selectedSubmissionId])
 
   const selectedSubmission = submissions.find((submission) => submission.submissionId === selectedSubmissionId) ?? null
   const selectedCodeFile = code?.files.find((file) => file.path === selectedFile) ?? code?.files[0] ?? null
   const requestCode = async () => {
     if (!selectedSubmission) return
+    const requestedSubmissionId = selectedSubmission.submissionId
     setCodeState('loading')
     try {
-      const response = await fetchReleasedJson(`/api/research-lab/submissions/${encodeURIComponent(selectedSubmission.submissionId)}/code`)
+      const response = await fetchReleasedJson(`/api/research-lab/submissions/${encodeURIComponent(requestedSubmissionId)}/code`)
+      if (selectedSubmissionIdRef.current !== requestedSubmissionId) return
       if (response.state !== 'available') { setCodeState(response.state); return }
       const normalized = normalizeCompetitionCode(response.body)
+      if (normalized?.submissionId !== requestedSubmissionId) { setCodeState('error'); return }
       setCode(normalized); setSelectedFile(normalized?.files[0]?.path ?? null); setCodeState(normalized ? 'available' : 'error')
-    } catch { setCodeState('error') }
+    } catch { if (selectedSubmissionIdRef.current === requestedSubmissionId) setCodeState('error') }
   }
 
   return (
     <section className="pt-10">
       <div className="mb-5 flex items-end justify-between gap-4"><div><h3 className="font-display text-[22px] font-medium tracking-[-0.025em] text-[var(--platinum)]">Submissions</h3><p className="mt-1 text-[12px] text-[var(--muted-2)]">Select a submission to inspect its published public-ICP scores and released source.</p></div><span className="font-mono text-[10px] text-[var(--muted-2)]">{submissions.length} total</span></div>
-      {roundLoading ? <div className="h-24 shimmer rounded-md" /> : roundError ? <InlineNotice>{roundError}</InlineNotice> : submissions.length === 0 ? <InlineNotice>No submissions are public for this round.</InlineNotice> : <SubmissionTable submissions={submissions} round={round} selectedId={selectedSubmissionId} onSelect={setSelectedSubmissionId} />}
+      {roundLoading ? <div className="h-24 shimmer rounded-md" /> : roundError ? <InlineNotice>{roundError}</InlineNotice> : submissions.length === 0 ? <InlineNotice>No submissions are public for this round.</InlineNotice> : <SubmissionTable submissions={submissions} round={round} selectedId={selectedSubmissionId} onSelect={selectSubmission} />}
       {selectedSubmission ? <div className="mt-8 grid gap-8 xl:grid-cols-[minmax(0,1.45fr)_minmax(300px,0.55fr)]"><PublishedResults benchmark={benchmark} benchmarkState={benchmarkState} results={results} resultsState={resultsState} round={round} submission={selectedSubmission} /><SourcePanel submission={selectedSubmission} code={code} codeState={codeState} selectedFile={selectedCodeFile} onSelectFile={setSelectedFile} onRequest={() => void requestCode()} /></div> : null}
     </section>
   )
@@ -253,8 +285,8 @@ function LabEmissionSplit({ spend, metagraph }: { spend: LabMinerSpendRollup | n
     const current = spend?.currentAllocation?.byHotkey ?? {}; const recent = spend?.byHotkey ?? {}; const allTime = spend?.allTime?.byHotkey ?? {}; const keys = new Set([...Object.keys(current), ...Object.keys(recent), ...Object.keys(allTime), ...Object.keys(metagraph?.incentives ?? {})])
     return Array.from(keys).map((hotkey) => ({ hotkey, metagraphPct: Math.max(0, Number(metagraph?.incentives?.[hotkey] ?? 0) * 100), paidAlphaPct: Math.max(0, Number(current[hotkey]?.paidAlphaPercent ?? 0)), computeSpendUsd: Math.max(0, Number(recent[hotkey]?.computeSpendUsd ?? 0)), reimbursementUsd: Math.max(0, Number(recent[hotkey]?.scheduledReimbursementUsd ?? 0)), alphaEarned: Math.max(0, Number(allTime[hotkey]?.alphaEarned ?? 0)) })).filter((row) => row.metagraphPct > 0 || row.paidAlphaPct > 0 || row.computeSpendUsd > 0 || row.alphaEarned > 0).sort((a, b) => b.metagraphPct - a.metagraphPct || b.alphaEarned - a.alphaEarned || a.hotkey.localeCompare(b.hotkey))
   }, [metagraph?.incentives, spend])
-  if (rows.length === 0) return <p className="pb-4 text-[13px] text-[var(--muted-2)]">No current Lab allocation or settlement data is available.</p>
-  return <div className="mb-4 overflow-hidden rounded-md border border-[var(--line)]"><div className="hidden grid-cols-[minmax(0,1fr)_130px_130px_130px_130px] gap-3 border-b border-[var(--line)] bg-[rgba(236,234,230,0.018)] px-3 py-2 font-mono text-[9.5px] uppercase tracking-[0.1em] text-[var(--muted-2)] md:grid"><span>Hotkey</span><span className="text-right">Metagraph</span><span className="text-right">Lab allocation</span><span className="text-right">Compute / repay</span><span className="text-right">Alpha earned</span></div>{rows.map((row) => <div key={row.hotkey} className="grid grid-cols-[minmax(0,1fr)_auto] gap-3 border-b border-[var(--line)] px-3 py-3 last:border-b-0 md:grid-cols-[minmax(0,1fr)_130px_130px_130px_130px] md:items-center"><span className="font-mono text-[11px] text-[var(--platinum)]">{shortHotkey(row.hotkey)}</span><span className="text-right font-mono text-[11px] text-[var(--muted)]">{formatLabAllocationPercent(row.metagraphPct)}</span><span className="hidden text-right font-mono text-[11px] text-[var(--muted)] md:block">{formatLabAllocationPercent(row.paidAlphaPct)}</span><span className="text-right font-mono text-[11px] text-[var(--muted)]">{formatUsd(row.computeSpendUsd)} / {formatUsd(row.reimbursementUsd)}</span><span className="hidden text-right font-mono text-[11px] text-[var(--muted)] md:block">{formatAlpha(row.alphaEarned)}</span></div>)}</div>
+  if (rows.length === 0) return <p className="pb-4 text-[13px] text-[var(--muted-2)]">No current competition allocation or settlement data is available.</p>
+  return <div className="mb-4 overflow-hidden rounded-md border border-[var(--line)]"><div className="hidden grid-cols-[minmax(0,1fr)_130px_130px_130px_130px] gap-3 border-b border-[var(--line)] bg-[rgba(236,234,230,0.018)] px-3 py-2 font-mono text-[9.5px] uppercase tracking-[0.1em] text-[var(--muted-2)] md:grid"><span>Hotkey</span><span className="text-right">Metagraph</span><span className="text-right">Competition</span><span className="text-right">Compute / repay</span><span className="text-right">Alpha earned</span></div>{rows.map((row) => <div key={row.hotkey} className="grid grid-cols-[minmax(0,1fr)_auto] gap-3 border-b border-[var(--line)] px-3 py-3 last:border-b-0 md:grid-cols-[minmax(0,1fr)_130px_130px_130px_130px] md:items-center"><span className="font-mono text-[11px] text-[var(--platinum)]">{shortHotkey(row.hotkey)}</span><span className="text-right font-mono text-[11px] text-[var(--muted)]">{formatLabAllocationPercent(row.metagraphPct)}</span><span className="hidden text-right font-mono text-[11px] text-[var(--muted)] md:block">{formatLabAllocationPercent(row.paidAlphaPct)}</span><span className="text-right font-mono text-[11px] text-[var(--muted)]">{formatUsd(row.computeSpendUsd)} / {formatUsd(row.reimbursementUsd)}</span><span className="hidden text-right font-mono text-[11px] text-[var(--muted)] md:block">{formatAlpha(row.alphaEarned)}</span></div>)}</div>
 }
 
 async function fetchJson(url: string): Promise<unknown> { const response = await fetch(url, { cache: 'no-store', headers: { Accept: 'application/json' } }); if (!response.ok) throw new Error(`Request failed (${response.status})`); return response.json() }
