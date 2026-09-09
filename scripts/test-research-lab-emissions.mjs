@@ -131,7 +131,7 @@ try {
   assert.equal(committedLabAlphaPercent(3, 5), 0, 'fulfillment subtraction must clamp at zero')
 
   const componentSource = await readFile(resolve('src/components/dashboard/ResearchLab.tsx'), 'utf8')
-  assert.match(componentSource, /Miner settlement and emissions/)
+  assert.match(componentSource, /Competition settlement and emissions/)
   assert.match(componentSource, /metagraph emissions/)
   assert.match(componentSource, /metagraph\?\.incentives/)
   assert.match(componentSource, /currentAllocation\?\.byHotkey/)
