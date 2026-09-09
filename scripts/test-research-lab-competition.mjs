@@ -95,6 +95,10 @@ try {
 
   const component = await readFile(resolve('src/components/dashboard/ResearchLab.tsx'), 'utf8')
   assert.match(component, /Public ICPs \(10\)/)
+  assert.match(component, /Improve the public agent and compete on the same daily ICPs\./)
+  assert.match(component, /7 weakest · 3 strongest, selected after baseline scoring\./)
+  assert.match(component, /value="PydanticAI"/)
+  assert.doesNotMatch(component, /server-held .* evaluation view/)
   assert.match(component, /response\.status === 403/)
   assert.match(component, /icp\.position/)
   assert.match(component, /publicIcpStatus !== 'ready'/)
