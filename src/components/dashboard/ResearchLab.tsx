@@ -120,7 +120,7 @@ function RoundSummary({ competition, round, rounds, onSelectRound }: { competiti
         <div>
           <div className="flex flex-wrap items-center gap-2 font-mono text-[10.5px] uppercase tracking-[0.13em] text-[var(--muted-2)]"><span>{roundStatusLabel(round.status)}</span>{round.cancelReason ? <><span aria-hidden>·</span><span>{humanize(round.cancelReason)}</span></> : null}</div>
           <div className="mt-4 font-display text-[clamp(42px,7vw,76px)] font-medium leading-[0.9] tracking-[-0.045em] text-[var(--platinum)]">{baselineScore === null ? 'Not published' : formatCompetitionScore(baselineScore)}{baselineScore === null ? null : <span className="ml-3 align-baseline text-[20px] tracking-normal text-[var(--faint)]">/100 baseline</span>}</div>
-          <p className="mt-5 max-w-[610px] text-[13px] leading-[1.7] text-[var(--muted)]">{baselineScore === null ? 'This production round has no published baseline score. No score is inferred from shadow or test networks.' : 'Final score for the public baseline in this production round.'}</p>
+          <p className="mt-5 max-w-[610px] text-[13px] leading-[1.7] text-[var(--muted)]">{baselineScore === null ? 'No final baseline score has been published for this round.' : 'Final score for the public baseline in this production round.'}</p>
         </div>
         <label className="block min-w-[250px]"><span className="mb-2 block font-mono text-[9.5px] uppercase tracking-[0.13em] text-[var(--muted-2)]">Competition round</span><select value={round.roundId} onChange={(event) => onSelectRound(event.target.value)} className="w-full rounded-md border border-[var(--line)] bg-[#0d0d0d] px-3 py-2.5 font-mono text-[11px] text-[var(--platinum)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand)]">{rounds.map((option) => <option key={option.roundId} value={option.roundId}>{roundOptionLabel(option, competition)}</option>)}</select></label>
       </div>
@@ -141,7 +141,9 @@ function RoundSummary({ competition, round, rounds, onSelectRound }: { competiti
 function CompetitionSchedule({ round }: { round: CompetitionRoundSummary }) {
   if (!round.icpSetDate && !round.evaluationDate && !round.publicAt) return null
   const submissionDate = utcCalendarDate(round.submissionOpen) ?? round.icpSetDate
-  const nextDay = isNextUtcDay(submissionDate, round.evaluationDate)
+  const nextDay = submissionDate === round.icpSetDate
+    && isNextUtcDay(submissionDate, round.evaluationDate)
+    && utcCalendarDate(round.publicAt) === round.evaluationDate
   return <div className="mt-8 grid gap-5 border-y border-[var(--line)] py-5 sm:grid-cols-2">
     <div><div className="font-mono text-[9.5px] uppercase tracking-[0.13em] text-[var(--muted-2)]">{nextDay ? 'Day 0 · Submissions' : 'Submissions'}</div><div className="mt-2 text-[14px] text-[var(--platinum)]">{formatUtcDate(submissionDate)}</div><div className="mt-1 text-[11px] text-[var(--muted-2)]">{round.submissionCutoff ? `Closes ${formatUtc(round.submissionCutoff)}` : 'Submit an agent for this ICP set.'}</div></div>
     <div><div className="font-mono text-[9.5px] uppercase tracking-[0.13em] text-[var(--muted-2)]">{nextDay ? 'Day 1 · Evaluation' : 'Evaluation'}</div><div className="mt-2 text-[14px] text-[var(--platinum)]">{formatUtcDate(round.evaluationDate)}</div><div className="mt-1 text-[11px] text-[var(--muted-2)]">{round.publicAt ? `ICPs publish ${formatUtc(round.publicAt)}. Source and scores follow after evaluation.` : 'ICPs publish first. Source and scores follow after evaluation.'}</div></div>

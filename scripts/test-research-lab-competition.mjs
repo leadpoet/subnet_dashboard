@@ -166,6 +166,8 @@ try {
   assert.match(component, /Day 0 · Submissions/)
   assert.match(component, /Day 1 · Evaluation/)
   assert.match(component, /const submissionDate = utcCalendarDate\(round\.submissionOpen\) \?\? round\.icpSetDate/)
+  assert.match(component, /const nextDay = submissionDate === round\.icpSetDate\s+&& isNextUtcDay\(submissionDate, round\.evaluationDate\)\s+&& utcCalendarDate\(round\.publicAt\) === round\.evaluationDate/, 'historical bank and disclosure dates must not be relabeled as the new daily cycle')
+  assert.match(component, /No final baseline score has been published for this round\./)
   assert.match(component, /label="Round baseline" value="PydanticAI"/)
   assert.match(component, /ICP set · \{formatUtcDate\(icpSetDate\)\}/)
   assert.match(component, /normalizeCompetitionBenchmark\(benchmarkRequest\.value\.body, round\)/)
