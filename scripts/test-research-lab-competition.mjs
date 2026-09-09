@@ -162,6 +162,8 @@ try {
   assert.match(component, /This round was cancelled\. Source code was not published\./)
   assert.match(component, /Scores and source code appear when evaluation is complete\./)
   assert.match(component, /<PendingIcpResults benchmark=\{benchmark\}>/)
+  assert.match(component, /if \(submission\.status === 'scoring_failed'\) return <PendingIcpResults benchmark=\{benchmark\}>Scoring failed\. No complete evaluation score is available\./, 'failed-run zero placeholders must not render as completed per-ICP evaluations')
+  assert.ok(component.indexOf("if (submission.status === 'scoring_failed')") < component.indexOf('const scores = submission.isBaseline'), 'failure status must gate baseline score rendering too')
   assert.doesNotMatch(component, /24.hour|24 hours|private ICP/i)
   assert.match(component, /Day 0 · Submissions/)
   assert.match(component, /Day 1 · Evaluation/)

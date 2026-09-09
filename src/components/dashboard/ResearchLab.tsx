@@ -291,6 +291,7 @@ function PublishedResults({ benchmark, benchmarkState, results, resultsState, ro
   if (benchmarkState === 'loading') return <ResultFrame><div className="h-24 shimmer rounded-md" /></ResultFrame>
   if (benchmarkState === 'gated') return <ResultFrame><InlineNotice>All 20 ICPs become public{round.publicAt ? ` at ${formatUtc(round.publicAt)}` : ' at the start of Day 1'}. Source code and scores follow after evaluation.</InlineNotice></ResultFrame>
   if (!benchmark || benchmarkState === 'error') return <ResultFrame><InlineNotice>Published public-ICP details are temporarily unavailable.</InlineNotice></ResultFrame>
+  if (submission.status === 'scoring_failed') return <PendingIcpResults benchmark={benchmark}>Scoring failed. No complete evaluation score is available.</PendingIcpResults>
   if (!submission.isBaseline && resultsState === 'error') return <PendingIcpResults benchmark={benchmark}>The ICPs are public. Published scores are temporarily unavailable.</PendingIcpResults>
   if (!submission.isBaseline && (resultsState === 'loading' || resultsState === 'gated' || !results || results.publicIcpStatus !== 'ready')) return <PendingIcpResults benchmark={benchmark}>Scores and source code appear when evaluation is complete.</PendingIcpResults>
   const scores = submission.isBaseline
