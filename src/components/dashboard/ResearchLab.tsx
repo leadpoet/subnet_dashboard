@@ -126,7 +126,7 @@ function RoundSummary({ competition, round, rounds, onSelectRound }: { competiti
         <SummaryMetric label="Current baseline" value="PydanticAI" detail={round.baseline ? `${scoreLabel(baselineScore)} · ${shortHotkey(round.baseline.minerHotkey)}` : 'Score unavailable'} />
         <SummaryMetric label="Round status" value={roundStatusLabel(round.status)} detail={round.publishedAt ? formatUtc(round.publishedAt) : round.createdAt ? `Created ${formatUtc(round.createdAt)}` : round.roundId} />
         {round.champion
-          ? <SummaryMetric label="Champion" value={shortHotkey(round.champion.minerHotkey)} detail={`${humanize(round.champion.outcome ?? 'champion')} · ${scoreLabel(championScore)}`} />
+          ? <SummaryMetric label="Champion" value={shortHotkey(round.champion.minerHotkey)} detail={championMetricDetail(round, championScore)} />
           : round.cancelReason
             ? <SummaryMetric label="Cancellation" value={humanize(round.cancelReason)} detail="No champion was published" />
             : <SummaryMetric label="Promotion" value={humanize(round.promotionStatus ?? 'not required')} detail="No champion was published" />}
@@ -312,7 +312,21 @@ async function fetchJson(url: string): Promise<unknown> { const response = await
 async function fetchReleasedJson(url: string): Promise<{ state: 'available'; body: unknown } | { state: 'gated'; body: null }> { const response = await fetch(url, { cache: 'no-store', headers: { Accept: 'application/json' } }); if (response.status === 403) return { state: 'gated', body: null }; if (!response.ok) throw new Error(`Request failed (${response.status})`); return { state: 'available', body: await response.json() } }
 function asRecord(value: unknown): Record<string, unknown> | null { return value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null }
 function roundOptionLabel(round: CompetitionRoundSummary, competition: CompetitionSnapshot): string { const tags = [roundStatusLabel(round.status)]; if (round.roundId === competition.latestRound?.roundId) tags.push('latest'); if (round.roundId === competition.latestCompletedRound?.roundId) tags.push('last completed'); if (round.roundId === competition.openRound?.roundId) tags.push('open round'); return `${round.roundId} — ${tags.join(' · ')}` }
-function submissionStatusLabel(submission: CompetitionSubmission, round: CompetitionRoundSummary): string { if (submission.isChampion || submission.status === 'champion') return 'Champion'; if (submission.status === 'scored' && round.promotionStatus === 'pending') return 'Scored · promotion pending'; if (submission.status === 'scored' && round.status === 'published' && !submission.isBaseline) return 'Scored · not promoted'; return humanize(submission.status) }
+function submissionStatusLabel(submission: CompetitionSubmission, round: CompetitionRoundSummary): string {
+  if (submission.isChampion || submission.status === 'champion') {
+    if (round.promotionStatus === 'pending') return 'Champion · promotion pending'
+    if (round.promotionStatus === 'promoted') return 'Champion · promoted'
+    return 'Champion'
+  }
+  if (submission.status === 'scored' && round.promotionStatus === 'pending') return 'Scored · promotion pending'
+  if (submission.status === 'scored' && round.status === 'published' && !submission.isBaseline) return 'Scored · not promoted'
+  return humanize(submission.status)
+}
+function championMetricDetail(round: CompetitionRoundSummary, championScore: number | null): string {
+  if (round.promotionStatus === 'promoted') return `Becomes next baseline · ${scoreLabel(championScore)}`
+  if (round.promotionStatus === 'pending') return `Promotion pending · ${scoreLabel(championScore)}`
+  return `${humanize(round.champion?.outcome ?? 'champion')} · ${scoreLabel(championScore)}`
+}
 function roundStatusLabel(value: string): string { if (value === 'published') return 'Published result'; if (value === 'cancelled') return 'Cancelled round'; if (value === 'open') return 'Open for submissions'; return humanize(value) }
 function humanize(value: string): string { const normalized = value.trim().replaceAll('_', ' '); return normalized ? normalized[0].toUpperCase() + normalized.slice(1) : 'Unavailable' }
 function scoreLabel(value: number | null): string { return value === null ? '—' : value.toFixed(1) }
