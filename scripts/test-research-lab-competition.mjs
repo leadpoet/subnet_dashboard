@@ -72,6 +72,12 @@ try {
     'Scored · not promoted',
     'a non-winning scored submission must not inherit the champion promotion state',
   )
+  assert.equal(
+    competitionSubmissionStatusLabel({ ...submissions[0], status: 'scoring_failed' }, pendingRound),
+    'Scoring failed',
+    'a failed submission must not look scored or promotable',
+  )
+  assert.equal(formatCompetitionScore(0), '0.00', 'a real zero score must remain published')
   const champion = { ...submissions[0], status: 'champion', isChampion: true }
   assert.equal(competitionSubmissionStatusLabel(champion, pendingRound), 'Champion · promotion pending')
   assert.equal(
@@ -153,6 +159,9 @@ try {
   assert.doesNotMatch(component, /24.hour|24 hours|private ICP/i)
   assert.match(component, /Day 0 · Submissions/)
   assert.match(component, /Day 1 · Evaluation/)
+  assert.match(component, /const submissionDate = utcCalendarDate\(round\.submissionOpen\) \?\? round\.icpSetDate/)
+  assert.match(component, /label="Round baseline" value="PydanticAI"/)
+  assert.match(component, /ICP set · \{formatUtcDate\(icpSetDate\)\}/)
   assert.match(component, /normalizeCompetitionBenchmark\(benchmarkRequest\.value\.body, round\)/)
   assert.match(component, /Some files are omitted from this preview\./)
   assert.match(component, /promotionStatus === 'promoted'[^]*Becomes next baseline/)
