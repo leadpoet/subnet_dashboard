@@ -12,6 +12,7 @@ import {
 } from '@/lib/research-lab-emissions'
 import { microusdToUsd, receiptEventCostMicrousd, roundUsd } from '@/lib/research-lab-compute-spend'
 import { runSingleFlight, type SingleFlightState } from '@/lib/single-flight'
+import { createAppendOnlyCache } from '@/lib/append-only-cache'
 import { normalizeResearchLabArenaSnapshot, type ResearchLabArenaSnapshot } from '@/lib/research-lab-arena'
 
 export const dynamic = 'force-dynamic'
@@ -124,6 +125,14 @@ type EmissionAllocationSnapshotRow = {
   lab_cap_alpha_percent?: number | string | null
 }
 
+type AllocationHistory = {
+  firstEpoch: number | null
+  latestEpoch: number | null
+  snapshotCount: number
+  byHotkey: Record<string, { alphaEarned: number; alphaAllocationCount: number }>
+  latestSnapshot: EmissionAllocationSnapshotRow | null
+}
+
 type FulfillmentLeaderboardRow = {
   miner_hotkey: string | null
   reward_pct: number | string | null
@@ -131,6 +140,11 @@ type FulfillmentLeaderboardRow = {
 
 let cache: CachedResponse | null = null
 const publicSnapshotFlight: SingleFlightState<ResearchLabPayload> = { current: null }
+// This public route has one configured database/role and no caller-specific
+// filters, just like its response cache. The database rejects updates/deletes
+// on these histories and on the receipt/ticket parents used for normalization.
+const readTerminalSpendHistory = createAppendOnlyCache<LabMinerTerminalSpendEvent[]>()
+const readAllocationHistory = createAppendOnlyCache<AllocationHistory>()
 
 function getSupabase() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL
@@ -222,7 +236,7 @@ function stringOrNull(value: unknown): string | null {
 
 async function fetchLabMinerSpend(supabase: ReturnType<typeof getSupabase>): Promise<LabMinerSpendRollup> {
   const empty = emptyLabMinerSpend()
-  const [computeSpend, scheduleResult, allAwardsResult, allocationResult] = await Promise.all([
+  const [computeSpend, scheduleResult, allAwardsResult, allocationHistory] = await Promise.all([
     fetchLabMinerComputeSpend(supabase),
     supabase
       .from('research_reimbursement_schedules')
@@ -234,11 +248,7 @@ async function fetchLabMinerSpend(supabase: ReturnType<typeof getSupabase>): Pro
       .from('research_reimbursement_awards')
       .select('award_id, miner_hotkey, target_reimbursement_microusd, reimbursement_epochs')
       .limit(5_000),
-    supabase
-      .from('research_lab_emission_allocation_snapshots')
-      .select('epoch, allocation_doc, created_at')
-      .order('epoch', { ascending: true, nullsFirst: false })
-      .limit(5_000),
+    fetchAllocationHistory(supabase),
   ])
 
   if (scheduleResult.error) {
@@ -247,22 +257,18 @@ async function fetchLabMinerSpend(supabase: ReturnType<typeof getSupabase>): Pro
   if (allAwardsResult.error) {
     console.error('[Research Lab API] all-time reimbursement award query failed:', allAwardsResult.error)
   }
-  if (allocationResult.error) {
-    console.error('[Research Lab API] emission allocation snapshot query failed:', allocationResult.error)
-  }
 
   const allTime = buildLabMinerAllTimeRollup(
     (allAwardsResult.data ?? []) as ReimbursementAwardRow[],
-    (allocationResult.data ?? []) as EmissionAllocationSnapshotRow[],
+    allocationHistory,
     computeSpend.allTime
   )
   const byHotkey = buildLabMinerSpendEntriesFromCompute(computeSpend.last24h)
-  const allocationSnapshots = (allocationResult.data ?? []) as EmissionAllocationSnapshotRow[]
   const latestPublishedWeightEpoch = await fetchLatestPublishedWeightEpoch(supabase)
   const currentAllocation = await fetchCurrentLabAllocation(
     supabase,
     latestPublishedWeightEpoch,
-    allocationSnapshots,
+    allocationHistory.latestSnapshot ? [allocationHistory.latestSnapshot] : [],
   )
   const fulfillmentRewards = await fetchCurrentFulfillmentRewards(
     supabase,
@@ -364,9 +370,87 @@ async function fetchLabMinerSpend(supabase: ReturnType<typeof getSupabase>): Pro
 async function fetchLabMinerComputeSpend(
   supabase: ReturnType<typeof getSupabase>
 ): Promise<LabMinerComputeSpendRollup> {
-  const empty = { allTime: {}, last24h: {} }
-  const terminalEvents = await fetchTerminalReceiptEvents(supabase)
-  if (terminalEvents.length === 0) return empty
+  const terminalEvents = await readTerminalSpendHistory(
+    () => fetchHistoryCount(supabase, 'research_loop_receipt_events'),
+    (expectedCount) => fetchNormalizedTerminalSpend(supabase, expectedCount),
+  )
+  const allTimeLatest = new Map<string, LabMinerTerminalSpendEvent>()
+  const last24hLatest = new Map<string, LabMinerTerminalSpendEvent>()
+  // Recompute on each 30-second response refresh, even without a history append.
+  const windowStartedAtMs = Date.now() - LAB_MINER_SPEND_WINDOW_MS
+  for (const event of terminalEvents) {
+    addLatestTerminalSpend(allTimeLatest, event)
+    if (event.createdAtMs >= windowStartedAtMs) addLatestTerminalSpend(last24hLatest, event)
+  }
+  return {
+    allTime: aggregateTerminalSpendByHotkey(allTimeLatest),
+    last24h: aggregateTerminalSpendByHotkey(last24hLatest),
+  }
+}
+
+async function fetchHistoryCount(
+  supabase: ReturnType<typeof getSupabase>,
+  table: 'research_loop_receipt_events' | 'research_lab_emission_allocation_snapshots',
+): Promise<number> {
+  const receipts = table === 'research_loop_receipt_events'
+  let query = supabase.from(table).select(receipts ? 'event_id' : 'allocation_id', { count: 'exact', head: true })
+  if (receipts) query = query.in('event_type', ['completed', 'failed'])
+  const { count, error } = await query
+  if (error || count === null) throw new Error(`Research Lab history count failed (${table})`)
+  return count
+}
+
+async function fetchAllocationHistory(
+  supabase: ReturnType<typeof getSupabase>,
+): Promise<AllocationHistory> {
+  return readAllocationHistory(
+    () => fetchHistoryCount(supabase, 'research_lab_emission_allocation_snapshots'),
+    async (expectedCount) => {
+      // Keep the aggregate and one fallback document, rather than retaining
+      // every historical allocation document in application memory.
+      const history: AllocationHistory = {
+        firstEpoch: null, latestEpoch: null, snapshotCount: 0, byHotkey: {}, latestSnapshot: null,
+      }
+      while (history.snapshotCount < expectedCount) {
+        const { data, error } = await supabase
+          .from('research_lab_emission_allocation_snapshots')
+          .select('epoch, allocation_doc, created_at')
+          .order('epoch', { ascending: true, nullsFirst: false })
+          .order('created_at', { ascending: true, nullsFirst: true })
+          .order('allocation_id', { ascending: true })
+          .range(history.snapshotCount, Math.min(history.snapshotCount + LAB_MINER_SPEND_BATCH_SIZE, expectedCount) - 1)
+        if (error || !data?.length) throw new Error('Research Lab allocation history query failed')
+        for (const snapshot of data as EmissionAllocationSnapshotRow[]) {
+          history.snapshotCount += 1
+          const epoch = numberOr(snapshot.epoch, NaN)
+          if (Number.isFinite(epoch)) {
+            history.firstEpoch = Math.min(history.firstEpoch ?? epoch, epoch)
+            history.latestEpoch = Math.max(history.latestEpoch ?? epoch, epoch)
+          }
+          // Equal-epoch snapshots arrive oldest first, with a stable ID tie-break.
+          if (!history.latestSnapshot || numberOr(snapshot.epoch, -Infinity) >= numberOr(history.latestSnapshot.epoch, -Infinity)) {
+            history.latestSnapshot = snapshot
+          }
+          for (const allocation of researchLabAllocationEntries(snapshot.allocation_doc ?? {})) {
+            const hotkey = allocation.miner_hotkey ? String(allocation.miner_hotkey) : ''
+            if (!hotkey) continue
+            const current = history.byHotkey[hotkey] ?? { alphaEarned: 0, alphaAllocationCount: 0 }
+            current.alphaEarned += numberOr(allocation.paid_alpha_percent ?? allocation.alpha_percent, 0)
+            current.alphaAllocationCount += 1
+            history.byHotkey[hotkey] = current
+          }
+        }
+      }
+      return history
+    },
+  )
+}
+
+async function fetchNormalizedTerminalSpend(
+  supabase: ReturnType<typeof getSupabase>,
+  expectedCount: number,
+): Promise<LabMinerTerminalSpendEvent[]> {
+  const terminalEvents = await fetchTerminalReceiptEvents(supabase, expectedCount)
 
   const ticketIds = uniqueStrings(terminalEvents.map((event) => event.ticket_id))
   const receiptIds = uniqueStrings(terminalEvents.map((event) => event.receipt_id))
@@ -375,23 +459,21 @@ async function fetchLabMinerComputeSpend(
     fetchReceiptRunIdsById(supabase, receiptIds),
   ])
 
-  const allTimeLatest = new Map<string, LabMinerTerminalSpendEvent>()
-  const last24hLatest = new Map<string, LabMinerTerminalSpendEvent>()
-  const windowStartedAtMs = Date.now() - LAB_MINER_SPEND_WINDOW_MS
+  const normalized: LabMinerTerminalSpendEvent[] = []
 
   for (const row of terminalEvents) {
     const ticketId = stringOr(row.ticket_id)
     const minerHotkey = ticketId ? ticketHotkeys.get(ticketId) : undefined
-    if (!minerHotkey) continue
+    if (!minerHotkey) throw new Error('Research Lab terminal receipt miner is missing')
 
     const receiptId = stringOr(row.receipt_id)
     const runId = stringOr(row.run_id) ?? (receiptId ? receiptRunIds.get(receiptId) : undefined)
-    if (!runId) continue
+    if (!runId) throw new Error('Research Lab terminal receipt run is missing')
 
     const createdAtMs = timestampOrZero(row.created_at)
-    if (createdAtMs <= 0) continue
+    if (createdAtMs <= 0) throw new Error('Research Lab terminal receipt timestamp is invalid')
 
-    const terminalSpend: LabMinerTerminalSpendEvent = {
+    normalized.push({
       minerHotkey,
       runId,
       createdAtMs,
@@ -402,22 +484,18 @@ async function fetchLabMinerComputeSpend(
           total_usd: row.total_usd,
         },
       }),
-    }
-    addLatestTerminalSpend(allTimeLatest, terminalSpend)
-    if (createdAtMs >= windowStartedAtMs) addLatestTerminalSpend(last24hLatest, terminalSpend)
+    })
   }
 
-  return {
-    allTime: aggregateTerminalSpendByHotkey(allTimeLatest),
-    last24h: aggregateTerminalSpendByHotkey(last24hLatest),
-  }
+  return normalized
 }
 
 async function fetchTerminalReceiptEvents(
-  supabase: ReturnType<typeof getSupabase>
+  supabase: ReturnType<typeof getSupabase>,
+  expectedCount: number,
 ): Promise<ResearchLoopReceiptEventRow[]> {
   const rows: ResearchLoopReceiptEventRow[] = []
-  for (let offset = 0; ; offset += LAB_MINER_SPEND_BATCH_SIZE) {
+  while (rows.length < expectedCount) {
     const { data, error } = await supabase
       .from('research_loop_receipt_events')
       .select(
@@ -428,18 +506,15 @@ async function fetchTerminalReceiptEvents(
       )
       .in('event_type', ['completed', 'failed'])
       .order('created_at', { ascending: false, nullsFirst: false })
-      .range(offset, offset + LAB_MINER_SPEND_BATCH_SIZE - 1)
+      .order('event_id', { ascending: true })
+      .range(rows.length, Math.min(rows.length + LAB_MINER_SPEND_BATCH_SIZE, expectedCount) - 1)
 
-    if (error) {
-      console.error('[Research Lab API] terminal receipt event query failed:', error)
-      return []
-    }
+    if (error || !data?.length) throw new Error('Research Lab terminal receipt event query failed')
 
     // PostgREST understands JSON-path aliases, but supabase-js's compile-time
     // select parser does not model this projection shape.
     const batch = (data ?? []) as unknown as ResearchLoopReceiptEventRow[]
     rows.push(...batch)
-    if (batch.length < LAB_MINER_SPEND_BATCH_SIZE) break
   }
   return rows
 }
@@ -458,10 +533,7 @@ async function fetchTicketHotkeysById(
       .select('ticket_id, miner_hotkey')
       .in('ticket_id', batch)
 
-    if (error) {
-      console.error('[Research Lab API] terminal receipt ticket query failed:', error)
-      return hotkeys
-    }
+    if (error || data?.length !== batch.length) throw new Error('Research Lab terminal receipt ticket query failed')
 
     for (const row of (data ?? []) as ResearchLoopTicketSpendRow[]) {
       const ticketId = stringOr(row.ticket_id)
@@ -486,10 +558,7 @@ async function fetchReceiptRunIdsById(
       .select('receipt_id, run_id')
       .in('receipt_id', batch)
 
-    if (error) {
-      console.error('[Research Lab API] terminal receipt run query failed:', error)
-      return runIds
-    }
+    if (error || data?.length !== batch.length) throw new Error('Research Lab terminal receipt run query failed')
 
     for (const row of (data ?? []) as ResearchLoopReceiptRunRow[]) {
       const receiptId = stringOr(row.receipt_id)
@@ -747,10 +816,14 @@ async function fetchFulfillmentLeaderboardRows(
 
 function buildLabMinerAllTimeRollup(
   awards: ReimbursementAwardRow[],
-  snapshots: EmissionAllocationSnapshotRow[],
+  allocationHistory: AllocationHistory,
   computeSpendByHotkey: Record<string, number>,
 ): LabMinerAllTimeRollup {
-  const byHotkey: Record<string, LabMinerAllTimeEntry> = {}
+  const byHotkey: Record<string, LabMinerAllTimeEntry> = Object.fromEntries(
+    Object.entries(allocationHistory.byHotkey).map(([hotkey, entry]) => [
+      hotkey, { ...emptyLabMinerAllTimeEntry(), ...entry },
+    ]),
+  )
   for (const award of awards) {
     const hotkey = award.miner_hotkey ? String(award.miner_hotkey) : ''
     if (!hotkey) continue
@@ -764,21 +837,6 @@ function buildLabMinerAllTimeRollup(
     byHotkey[hotkey] = current
   }
 
-  const epochs = snapshots
-    .map((snapshot) => numberOr(snapshot.epoch, NaN))
-    .filter((epoch) => Number.isFinite(epoch))
-  for (const snapshot of snapshots) {
-    const doc = snapshot.allocation_doc ?? {}
-    for (const allocation of researchLabAllocationEntries(doc)) {
-      const hotkey = allocation.miner_hotkey ? String(allocation.miner_hotkey) : ''
-      if (!hotkey) continue
-      const current = byHotkey[hotkey] ?? emptyLabMinerAllTimeEntry()
-      current.alphaEarned += numberOr(allocation.paid_alpha_percent ?? allocation.alpha_percent, 0)
-      current.alphaAllocationCount += 1
-      byHotkey[hotkey] = current
-    }
-  }
-
   for (const [hotkey, computeSpendUsd] of Object.entries(computeSpendByHotkey)) {
     if (!hotkey) continue
     const current = byHotkey[hotkey] ?? emptyLabMinerAllTimeEntry()
@@ -787,9 +845,9 @@ function buildLabMinerAllTimeRollup(
   }
 
   return {
-    firstEpoch: epochs.length ? Math.min(...epochs) : null,
-    latestEpoch: epochs.length ? Math.max(...epochs) : null,
-    allocationSnapshotCount: snapshots.length,
+    firstEpoch: allocationHistory.firstEpoch,
+    latestEpoch: allocationHistory.latestEpoch,
+    allocationSnapshotCount: allocationHistory.snapshotCount,
     byHotkey: Object.fromEntries(
       Object.entries(byHotkey).map(([hotkey, entry]) => [
         hotkey,
