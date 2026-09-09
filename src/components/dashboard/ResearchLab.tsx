@@ -153,6 +153,7 @@ function RoundWorkspace({ round }: { round: CompetitionRoundSummary }) {
   const [selectedFile, setSelectedFile] = useState<string | null>(null)
   const [roundRevision, setRoundRevision] = useState(0)
   const roundRequestRef = useRef(0)
+  const benchmarkReleasedRef = useRef(false)
   const selectedSubmissionIdRef = useRef<string | null>(null)
   selectedSubmissionIdRef.current = selectedSubmissionId
   const selectSubmission = useCallback((submissionId: string | null) => {
@@ -161,6 +162,7 @@ function RoundWorkspace({ round }: { round: CompetitionRoundSummary }) {
   }, [])
 
   useEffect(() => {
+    benchmarkReleasedRef.current = false
     setRoundLoading(true); setRoundError(null); setBenchmark(null); setBenchmarkState('loading'); setSubmissions([]); selectSubmission(null)
     const refresh = async (initial: boolean) => {
       const request = ++roundRequestRef.current
@@ -180,13 +182,21 @@ function RoundWorkspace({ round }: { round: CompetitionRoundSummary }) {
       } else if (initial) {
         setSubmissions([])
         if (submissionRequest.status === 'rejected') setRoundError(errorMessage(submissionRequest.reason, 'Submissions are temporarily unavailable.'))
+      } else {
+        setRoundError(submissionRequest.status === 'rejected'
+          ? `Latest submission refresh failed: ${errorMessage(submissionRequest.reason, 'request failed')}`
+          : 'Latest submission refresh did not return public data.')
       }
       if (benchmarkRequest.status === 'fulfilled' && benchmarkRequest.value.state === 'available') {
         const next = normalizeCompetitionBenchmark(benchmarkRequest.value.body)
+        benchmarkReleasedRef.current = next !== null
         setBenchmark(next); setBenchmarkState(next ? 'available' : 'error')
       } else if (benchmarkRequest.status === 'fulfilled') {
-        setBenchmark(null); setBenchmarkState(benchmarkRequest.value.state)
+        if (!benchmarkReleasedRef.current) {
+          setBenchmark(null); setBenchmarkState(benchmarkRequest.value.state)
+        } else if (!initial) setRoundError('Latest benchmark refresh failed. The last public snapshot remains shown.')
       } else if (initial) setBenchmarkState('error')
+      else setRoundError(`Latest benchmark refresh failed: ${errorMessage(benchmarkRequest.reason, 'request failed')}. The last public snapshot remains shown.`)
       setRoundLoading(false)
       setRoundRevision((current) => current + 1)
     }
@@ -203,13 +213,22 @@ function RoundWorkspace({ round }: { round: CompetitionRoundSummary }) {
 
   useEffect(() => {
     if (!selectedSubmissionId) return
+    const requestedRoundId = round.roundId
+    const requestedSubmissionId = selectedSubmissionId
     let active = true
     setResultsState((current) => current === 'available' ? current : 'loading')
-    fetchReleasedJson(`/api/research-lab/rounds/${encodeURIComponent(round.roundId)}/results/${encodeURIComponent(selectedSubmissionId)}`).then((response) => {
+    fetchReleasedJson(`/api/research-lab/rounds/${encodeURIComponent(requestedRoundId)}/results/${encodeURIComponent(requestedSubmissionId)}`).then((response) => {
       if (!active) return
       if (response.state !== 'available') { setResultsState(response.state); return }
       const normalized = normalizeCompetitionResults(response.body)
-      setResults(normalized); setResultsState(normalized ? 'available' : 'error')
+      if (
+        selectedSubmissionIdRef.current !== requestedSubmissionId
+        || normalized?.roundId !== requestedRoundId
+        || normalized.submissionId !== requestedSubmissionId
+      ) {
+        setResults(null); setResultsState('error'); return
+      }
+      setResults(normalized); setResultsState('available')
     }).catch(() => { if (active) setResultsState('error') })
     return () => { active = false }
   }, [round.roundId, roundRevision, selectedSubmissionId])
@@ -233,7 +252,7 @@ function RoundWorkspace({ round }: { round: CompetitionRoundSummary }) {
   return (
     <section className="pt-10">
       <div className="mb-5 flex items-end justify-between gap-4"><div><h3 className="font-display text-[22px] font-medium tracking-[-0.025em] text-[var(--platinum)]">Submissions</h3><p className="mt-1 text-[12px] text-[var(--muted-2)]">Select a submission to inspect its published public-ICP scores and released source.</p></div><span className="font-mono text-[10px] text-[var(--muted-2)]">{submissions.length} total</span></div>
-      {roundLoading ? <div className="h-24 shimmer rounded-md" /> : roundError ? <InlineNotice>{roundError}</InlineNotice> : submissions.length === 0 ? <InlineNotice>No submissions are public for this round.</InlineNotice> : <SubmissionTable submissions={submissions} round={round} selectedId={selectedSubmissionId} onSelect={selectSubmission} />}
+      {roundLoading ? <div className="h-24 shimmer rounded-md" /> : submissions.length === 0 ? <InlineNotice>{roundError ?? 'No submissions are public for this round.'}</InlineNotice> : <>{roundError ? <div className="mb-3"><InlineNotice>{roundError} Last known submissions are shown below.</InlineNotice></div> : null}<SubmissionTable submissions={submissions} round={round} selectedId={selectedSubmissionId} onSelect={selectSubmission} /></>}
       {selectedSubmission ? <div className="mt-8 grid gap-8 xl:grid-cols-[minmax(0,1.45fr)_minmax(300px,0.55fr)]"><PublishedResults benchmark={benchmark} benchmarkState={benchmarkState} results={results} resultsState={resultsState} round={round} submission={selectedSubmission} /><SourcePanel submission={selectedSubmission} code={code} codeState={codeState} selectedFile={selectedCodeFile} onSelectFile={setSelectedFile} onRequest={() => void requestCode()} /></div> : null}
     </section>
   )
@@ -271,10 +290,10 @@ function IcpDetail({ label, value, wide = false }: { label: string; value: strin
 
 function SourcePanel({ submission, code, codeState, selectedFile, onSelectFile, onRequest }: { submission: CompetitionSubmission; code: CompetitionCode | null; codeState: ReleaseState; selectedFile: CompetitionCode['files'][number] | null; onSelectFile: (path: string) => void; onRequest: () => void }) {
   const availableAt = submission.code.availableAt ? formatUtc(submission.code.availableAt) : null
-  return <aside><h3 className="font-display text-[19px] font-medium text-[var(--platinum)]">Source code</h3><p className="mt-2 text-[12px] leading-relaxed text-[var(--muted-2)]">Each submission stays private for 24 hours. The server releases a bounded, read-only source view after that gate.</p>
+  return <aside><h3 className="font-display text-[19px] font-medium text-[var(--platinum)]">Source code</h3><p className="mt-2 text-[12px] leading-relaxed text-[var(--muted-2)]">Code becomes public 24 hours after submission.</p>
     {codeState === 'idle' ? <div className="mt-4"><button type="button" disabled={!submission.code.available} onClick={onRequest} className="rounded-md border border-[var(--line-3)] px-3.5 py-2 font-mono text-[10px] uppercase tracking-[0.11em] text-[var(--platinum)] transition-colors hover:text-[var(--white)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand)] disabled:cursor-not-allowed disabled:opacity-45">{submission.code.available ? 'View released source' : 'Source locked'}</button>{!submission.code.available ? <p className="mt-2 font-mono text-[9.5px] text-[var(--muted-2)]">{availableAt ? `Available ${availableAt}` : 'Available after the 24-hour gate'}</p> : null}</div> : null}
     {codeState === 'loading' ? <div className="mt-4 h-20 shimmer rounded-md" /> : null}{codeState === 'gated' ? <div className="mt-4"><InlineNotice>Source is not public yet. The server will release it after the 24-hour gate.</InlineNotice></div> : null}{codeState === 'error' ? <div className="mt-4"><InlineNotice>Released source is temporarily unavailable.</InlineNotice></div> : null}
-    {codeState === 'available' && code ? <div className="mt-4 overflow-hidden rounded-md border border-[var(--line)]"><div className="max-h-36 overflow-y-auto border-b border-[var(--line)] bg-[#090909] p-1.5">{code.files.map((file) => <button key={file.path} type="button" onClick={() => onSelectFile(file.path)} className={`block w-full truncate rounded px-2 py-1.5 text-left font-mono text-[10px] focus:outline-none focus-visible:ring-1 focus-visible:ring-[var(--brand)] ${file.path === selectedFile?.path ? 'bg-[rgba(236,234,230,0.07)] text-[var(--white)]' : 'text-[var(--muted-2)] hover:text-[var(--platinum)]'}`} title={file.path}>{file.path}</button>)}</div>{selectedFile ? <pre className="max-h-[420px] overflow-auto bg-[#070707] p-3 text-[10px] leading-[1.65] text-[var(--muted)]"><code>{selectedFile.content}</code></pre> : <p className="p-3 text-[11px] text-[var(--muted-2)]">No text files were released.</p>}{code.truncated ? <p className="border-t border-[var(--line)] px-3 py-2 text-[10px] text-[var(--muted-2)]">The server truncated this source view at its public size limit.</p> : null}</div> : null}
+    {codeState === 'available' && code ? <div className="mt-4 overflow-hidden rounded-md border border-[var(--line)]"><div className="max-h-36 overflow-y-auto border-b border-[var(--line)] bg-[#090909] p-1.5">{code.files.map((file) => <button key={file.path} type="button" onClick={() => onSelectFile(file.path)} className={`block w-full truncate rounded px-2 py-1.5 text-left font-mono text-[10px] focus:outline-none focus-visible:ring-1 focus-visible:ring-[var(--brand)] ${file.path === selectedFile?.path ? 'bg-[rgba(236,234,230,0.07)] text-[var(--white)]' : 'text-[var(--muted-2)] hover:text-[var(--platinum)]'}`} title={file.path}>{file.path}</button>)}</div>{selectedFile ? <pre className="max-h-[420px] overflow-auto bg-[#070707] p-3 text-[10px] leading-[1.65] text-[var(--muted)]"><code>{selectedFile.content}</code></pre> : <p className="p-3 text-[11px] text-[var(--muted-2)]">No text files were released.</p>}{code.truncated ? <p className="border-t border-[var(--line)] px-3 py-2 text-[10px] text-[var(--muted-2)]">Some files are omitted from this preview.</p> : null}</div> : null}
   </aside>
 }
 
