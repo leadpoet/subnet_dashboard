@@ -37,7 +37,6 @@ export type EconomicsAllocationSummary = {
   createdAt: string
   allocationHash: string | null
   labCap: EconomicsMetric
-  sourceAdd: EconomicsMetric
   reimbursements: EconomicsMetric
   champions: EconomicsMetric
   queuedChampions: EconomicsMetric
@@ -49,7 +48,6 @@ export type EconomicsAllocationSummary = {
     reimbursements: number
     champions: number
     queuedChampions: number
-    sourceAdd: number
   }
 }
 
@@ -205,7 +203,6 @@ export type EconomicsEpochHistory = {
   reimbursements: number
   champions: number
   queuedChampions: number
-  sourceAdd: number
   unallocated: number
   paidMinerCount: number
   queuedRewardCount: number
@@ -269,12 +266,11 @@ export function buildEconomicsAllocationSummary(row: Record<string, unknown>): E
   const queuedEntries = records(doc?.queued_champion_allocations)
   const reimbursementEntries = records(doc?.reimbursement_allocations)
   const labCap = finiteNumber(row.lab_cap_alpha_percent) ?? 0
-  const sourceAdd = finiteNumber(row.source_add_alpha_percent) ?? 0
   const reimbursements = finiteNumber(row.reimbursement_alpha_percent) ?? 0
   const champions = finiteNumber(row.champion_alpha_percent) ?? 0
   const queuedChampions = finiteNumber(row.queued_champion_alpha_percent) ?? 0
   const unallocated = finiteNumber(row.unallocated_alpha_percent) ?? 0
-  const total = sourceAdd + reimbursements + champions + queuedChampions + unallocated
+  const total = reimbursements + champions + queuedChampions + unallocated
   const difference = round6(total - labCap)
 
   return {
@@ -284,19 +280,17 @@ export function buildEconomicsAllocationSummary(row: Record<string, unknown>): E
     createdAt: text(row.created_at) ?? new Date(0).toISOString(),
     allocationHash: text(row.allocation_hash),
     labCap: economicsMetric(labCap, 'alpha_percent', 'research_lab_emission_allocation_current', true, epoch),
-    sourceAdd: economicsMetric(sourceAdd, 'alpha_percent', 'research_lab_emission_allocation_current', true, epoch),
     reimbursements: economicsMetric(reimbursements, 'alpha_percent', 'research_lab_emission_allocation_current', true, epoch),
     champions: economicsMetric(champions, 'alpha_percent', 'research_lab_emission_allocation_current', true, epoch),
     queuedChampions: economicsMetric(queuedChampions, 'alpha_percent', 'research_lab_emission_allocation_current', true, epoch),
     unallocated: economicsMetric(unallocated, 'alpha_percent', 'research_lab_emission_allocation_current', true, epoch),
-    reconciliationTotal: economicsMetric(round6(total), 'alpha_percent', 'derived', false, epoch, 'SOURCE_ADD + reimbursements + champions + queued champions + unallocated'),
+    reconciliationTotal: economicsMetric(round6(total), 'alpha_percent', 'derived', false, epoch, 'reimbursements + champions + queued champions + unallocated'),
     reconciliationDifference: difference,
     reconciled: Math.abs(difference) <= 0.000001,
     minerCounts: {
       reimbursements: uniqueMinerCount(reimbursementEntries),
       champions: uniqueMinerCount(championEntries),
       queuedChampions: uniqueMinerCount(queuedEntries),
-      sourceAdd: sourceAdd > 0 ? 1 : 0,
     },
   }
 }
