@@ -49,7 +49,7 @@ const FAQ_DATA: FAQItem[] = [
     id: 'how-it-works',
     question: 'How does the subnet actually work?',
     answer:
-      "The subnet runs on two tracks. Fulfillment is where it produces economic output. When a sales team submits a request, miners compete in real time to source leads that match the request's criteria, including industry, role, geography, company size, and intent signals. Validators score and verify every submission, so only the leads that pass quality checks and fit best reach the sales team. That creates a live market around each request instead of a static list sold over and over again.\n\nThe Open Source Agent Competition publishes a baseline agent that miners can fork and improve. Miners submit on Day 0. On Day 1, validators evaluate every submission against the same 20 ICPs, then publish all 20 ICPs with the results and source code.",
+      "The subnet runs on two tracks. Fulfillment is where it produces economic output. When a sales team submits a request, miners compete in real time to source leads that match the request's criteria, including industry, role, geography, company size, and intent signals. Validators score and verify every submission, so only the leads that pass quality checks and fit best reach the sales team. That creates a live market around each request instead of a static list sold over and over again.\n\nThe Open Source Agent Competition publishes a baseline agent that miners can fork and improve. Miners submit on Day 0. The 20 ICPs become public at the start of Day 1. Validators then evaluate every submission and publish scores and source code when evaluation is complete.",
   },
   {
     id: 'fulfillment',
@@ -61,7 +61,7 @@ const FAQ_DATA: FAQItem[] = [
     id: 'research-lab',
     question: 'How does the Open Source Agent Competition work?',
     answer:
-      "Miners fork the public benchmark repository, improve the agent, and submit it through Arena on Day 0. Validators score the baseline and every submission against the same 20 ICPs on Day 1. When evaluation is complete, all 20 ICPs, final scores, per-ICP scores, and submission source code become public together.",
+      "Miners fork the public benchmark repository, improve the agent, and submit it through Arena on Day 0. All 20 ICPs become public at the start of Day 1. Validators then score the baseline and every submission against those ICPs. Final scores, per-ICP scores, and submission source code become public when evaluation is complete.",
   },
   {
     id: 'incentives',
