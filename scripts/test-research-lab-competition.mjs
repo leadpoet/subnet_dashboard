@@ -3,6 +3,10 @@ import { createRequire } from 'node:module'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { spawnSync } from 'node:child_process'
 import { join, resolve } from 'node:path'
+import vm from 'node:vm'
+import React from 'react'
+import { renderToStaticMarkup } from 'react-dom/server'
+import ts from 'typescript'
 
 const outDir = await mkdtemp(join(resolve('node_modules'), '.research-lab-competition-'))
 
@@ -141,6 +145,39 @@ try {
   assert.equal(code.truncated, true)
 
   const component = await readFile(resolve('src/components/dashboard/ResearchLab.tsx'), 'utf8')
+  const renderedModule = { exports: {} }
+  vm.runInNewContext(ts.transpileModule(component, {
+    compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX },
+  }).outputText + '\nexports.RoundSummary = RoundSummary;', {
+    module: renderedModule, exports: renderedModule.exports,
+    require(name) {
+      if (name === '@/lib/research-lab-competition') return require(join(outDir, 'research-lab-competition.js'))
+      // These imports belong to other panels, which this summary must not run.
+      if (name === '@/lib/hooks/useVisiblePolling' || name === '@/lib/research-lab-emissions') return {}
+      return require(name)
+    },
+  })
+  const renderSummary = (round) => renderToStaticMarkup(React.createElement(renderedModule.exports.RoundSummary, { round }))
+  for (const status of ['open', 'committed', 'stage1', 'stage1_scored', 'stage2', 'scored']) {
+    const markup = renderSummary({ ...snapshot.latestCompletedRound, status, publishedAt: null, baseline: null })
+    assert.match(markup, /Pending/, `${status} must not imply a final promotion decision`)
+    assert.match(markup, /Decision follows completed evaluation/)
+    assert.doesNotMatch(markup, /Not required|No champion was published|Stage1 scored/)
+    if (status === 'scored') assert.match(markup, /Publishing results/)
+    else if (status !== 'open') assert.match(markup, /Scoring/)
+  }
+  const finalMarkup = renderSummary(snapshot.latestCompletedRound)
+  assert.match(finalMarkup, /Not required/)
+  assert.match(finalMarkup, /No champion was published/)
+  assert.match(finalMarkup, /0\.00/, 'a published zero baseline is not pending')
+  assert.match(renderSummary(snapshot.latestRound), /Cancelled round/)
+  assert.doesNotMatch(renderSummary(snapshot.latestRound), /Decision follows completed evaluation/)
+  for (const promotionStatus of ['pending', 'promoted']) {
+    const markup = renderSummary({ ...snapshot.latestCompletedRound, promotionStatus,
+      champion: { submissionId: 'winner', minerHotkey: '5winner', finalScore: 51, outcome: 'new_king' } })
+    assert.match(markup, /Champion/)
+    assert.match(markup, promotionStatus === 'promoted' ? /Becomes next baseline/ : /Promotion pending/)
+  }
   assert.doesNotMatch(component, /if \(!competition\) return/, 'an Arena outage must not hide the independent settlement view')
   assert.match(component, /competition\?\.repoUrl \?\? DEFAULT_REPO_URL/)
   assert.match(component, /Competition data is temporarily unavailable\. This page will retry automatically\./)

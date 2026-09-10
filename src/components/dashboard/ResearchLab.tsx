@@ -112,6 +112,7 @@ function CompetitionHeader({ competition }: { competition: CompetitionSnapshot |
 function RoundSummary({ round }: { round: CompetitionRoundSummary }) {
   const baselineScore = round.baseline?.finalScore ?? null
   const championScore = round.champion?.finalScore ?? null
+  const evaluationComplete = round.status === 'published'
   return (
     <section className="border-b border-[var(--line)] py-10 md:py-12">
       <div className="flex flex-col justify-between gap-5 md:flex-row md:items-start">
@@ -129,7 +130,7 @@ function RoundSummary({ round }: { round: CompetitionRoundSummary }) {
           ? <SummaryMetric label="Champion" value={shortHotkey(round.champion.minerHotkey)} detail={championMetricDetail(round, championScore)} />
           : round.cancelReason
             ? <SummaryMetric label="Cancellation" value={humanize(round.cancelReason)} detail="No champion was published" />
-            : <SummaryMetric label="Promotion" value={humanize(round.promotionStatus ?? 'not required')} detail="No champion was published" />}
+            : <SummaryMetric label="Promotion" value={evaluationComplete ? humanize(round.promotionStatus ?? 'not required') : 'Pending'} detail={evaluationComplete ? 'No champion was published' : 'Decision follows completed evaluation'} />}
       </div>
     </section>
   )
@@ -336,7 +337,7 @@ function championMetricDetail(round: CompetitionRoundSummary, championScore: num
   if (round.promotionStatus === 'pending') return `Promotion pending · ${formatCompetitionScore(championScore)}`
   return `${humanize(round.champion?.outcome ?? 'champion')} · ${formatCompetitionScore(championScore)}`
 }
-function roundStatusLabel(value: string): string { if (value === 'published') return 'Published result'; if (value === 'cancelled') return 'Cancelled round'; if (value === 'open') return 'Open for submissions'; return humanize(value) }
+function roundStatusLabel(value: string): string { if (value === 'published') return 'Published result'; if (value === 'cancelled') return 'Cancelled round'; if (value === 'open') return 'Open for submissions'; if (['committed', 'stage1', 'stage1_scored', 'stage2'].includes(value)) return 'Scoring'; if (value === 'scored') return 'Publishing results'; return humanize(value) }
 function humanize(value: string): string { const normalized = value.trim().replaceAll('_', ' '); return normalized ? normalized[0].toUpperCase() + normalized.slice(1) : 'Unavailable' }
 function shortId(value: string): string { return value.length > 18 ? `${value.slice(0, 9)}…${value.slice(-6)}` : value }
 function shortHotkey(value: string): string { return value.length > 18 ? `${value.slice(0, 9)}…${value.slice(-6)}` : value }
