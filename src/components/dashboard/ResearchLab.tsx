@@ -100,7 +100,7 @@ function CompetitionHeader({ competition }: { competition: CompetitionSnapshot |
   return (
     <header className="flex flex-col justify-between gap-6 border-b border-[var(--line)] pb-8 md:flex-row md:items-end">
       <div>
-        <div className="font-mono text-[10.5px] uppercase tracking-[0.18em] text-[var(--muted-2)]">{competition ? `SN ${competition.netuid} · ${competition.networkName} · ${competition.mode}` : 'Public benchmark'}</div>
+        <div className="font-mono text-[10.5px] uppercase tracking-[0.18em] text-[var(--muted-2)]">{competition ? `SN ${competition.netuid}` : 'Public benchmark'}</div>
         <h2 className="mt-3 max-w-[760px] font-display text-[32px] font-medium leading-[1.04] tracking-[-0.035em] text-[var(--white)] md:text-[46px]">Open Source Agent Competition</h2>
         <p className="mt-4 max-w-[680px] text-[14px] leading-[1.7] text-[var(--muted)]">Improve the public agent and compete on the same daily ICPs.</p>
       </div>
