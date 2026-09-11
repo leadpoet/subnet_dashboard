@@ -3,6 +3,7 @@ import { createRequire } from 'node:module'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { spawnSync } from 'node:child_process'
 import { join, resolve } from 'node:path'
+import { createHash } from 'node:crypto'
 import vm from 'node:vm'
 import React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
@@ -26,10 +27,12 @@ try {
     competitionRoundOptions,
     formatCompetitionScore,
     normalizeCompetitionBenchmark,
+    normalizeCompetitionCommitment,
     normalizeCompetitionCode,
     normalizeCompetitionResults,
     normalizeCompetitionSnapshot,
     normalizeCompetitionSubmissions,
+    verifyCompetitionBenchmark,
   } = require(join(outDir, 'research-lab-competition.js'))
   assert.equal(DEFAULT_REPO_URL, 'https://github.com/leadpoet/pydantic-harness/tree/lab')
 
@@ -64,6 +67,100 @@ try {
     }],
   })
   assert.ok(legacySnapshot, 'historical same-day bank and evaluation dates remain valid')
+
+  const revealAt = '2026-09-14T00:00:00Z'
+  const committedAt = '2026-09-13T00:00:01Z'
+  const rawIcps = Array.from({ length: 20 }, (_, index) => ({
+    icp_id: `committed-${index}`,
+    prompt: index === 0 ? 'Find cafés in Montréal ☕' : `Committed ICP ${index}`,
+    industry: index % 2 === 0 ? 'Software' : null,
+    employee_count: ['11-50'],
+    qualification: { minimum_score: index + 0.5, required: true },
+  }))
+  const canonicalPreimages = rawIcps.map((icp, index) => canonicalJson({
+    schema_version: 'leadpoet.lab_arena.benchmark_leaf.v1', network_name: 'finney', netuid: 71,
+    round_id: 'arena-2026-09-13', icp_set_date: '2026-09-12', evaluation_date: '2026-09-13',
+    icp_position: index, nonce: index.toString(16).padStart(64, '0'), icp,
+  }))
+  const manifest = {
+    schema_version: 'leadpoet.lab_arena.benchmark_commitment.v1', network_name: 'finney', netuid: 71,
+    round_id: 'arena-2026-09-13', icp_set_date: '2026-09-12', evaluation_date: '2026-09-13',
+    public_at: revealAt, disclosure_policy: 'commit_reveal_day2_v1', icp_count: 20,
+    entries: canonicalPreimages.map((preimage, index) => ({ icp_position: index, icp_hash: sha256(preimage) })),
+  }
+  const canonicalManifest = canonicalJson(manifest)
+  const manifestHash = sha256(canonicalManifest)
+  const commitmentPayload = {
+    round_id: manifest.round_id, manifest, manifest_hash: manifestHash,
+    canonical_manifest: canonicalManifest, committed_at: committedAt,
+  }
+  const newRoundPayload = {
+    ...published, round_id: manifest.round_id, status: 'published', network_name: 'finney', netuid: 71,
+    icp_set_date: manifest.icp_set_date, evaluation_date: manifest.evaluation_date, public_at: revealAt,
+    submission_open: '2026-09-12T00:00:00Z', submission_cutoff: '2026-09-13T00:00:00Z',
+    disclosure_policy: 'commit_reveal_day2_v1', benchmark_state: 'reveal_available',
+    benchmark_commitment_hash: manifestHash, benchmark_committed_at: committedAt,
+  }
+  const newSnapshot = normalizeCompetitionSnapshot({
+    mode: 'live', network_name: 'finney', netuid: 71, rounds: [newRoundPayload], latest_round: newRoundPayload,
+  })
+  assert.ok(newSnapshot)
+  assert.equal(newSnapshot.latestRound.disclosurePolicy, 'commit_reveal_day2_v1')
+  assert.equal(newSnapshot.latestRound.benchmarkState, 'reveal_available')
+  assert.equal(normalizeCompetitionSnapshot({ mode: 'live', network_name: 'finney', netuid: 71, rounds: [{ ...newRoundPayload, disclosure_policy: 'future_policy' }] }).rounds.length, 0, 'unknown disclosure policies fail closed')
+  assert.equal(normalizeCompetitionSnapshot({ mode: 'live', network_name: 'finney', netuid: 71, rounds: [{ ...newRoundPayload, public_at: '2026-02-30T00:00:00Z' }] }).rounds.length, 0, 'UTC timestamps that roll into another date fail closed')
+  const commitment = normalizeCompetitionCommitment(commitmentPayload, newSnapshot.latestRound)
+  assert.ok(commitment)
+  assert.equal(commitment.manifest.entries.length, 20)
+  assert.equal(normalizeCompetitionCommitment({ ...commitmentPayload, extra: true }, newSnapshot.latestRound), null, 'the commitment envelope has an exact field set')
+  assert.equal(normalizeCompetitionCommitment({ ...commitmentPayload, canonical_manifest: canonicalJson({ ...manifest, netuid: 1 }) }, newSnapshot.latestRound), null, 'canonical manifest content must match the displayed manifest')
+
+  const sharedFixture = JSON.parse(await readFile(resolve('scripts/fixtures/benchmark_commit_reveal_v1.json'), 'utf8'))
+  const sharedManifest = sharedFixture.commitment.manifest
+  const sharedRound = {
+    ...newSnapshot.latestRound,
+    roundId: sharedManifest.round_id,
+    networkName: sharedManifest.network_name,
+    netuid: sharedManifest.netuid,
+    icpSetDate: sharedManifest.icp_set_date,
+    evaluationDate: sharedManifest.evaluation_date,
+    publicAt: sharedManifest.public_at,
+    benchmarkCommitmentHash: sharedFixture.commitment.manifest_hash,
+    benchmarkCommittedAt: sharedFixture.commitment.committed_at,
+  }
+  const sharedReveal = normalizeCompetitionBenchmark(sharedFixture.reveal, sharedRound)
+  assert.ok(sharedReveal, 'the shared Python commitment fixture must satisfy the dashboard parser')
+  assert.match(sharedFixture.reveal.verification.canonical_preimages[0], /café 日本/, 'the shared vector exercises exact UTF-8 bytes')
+  assert.match(sharedFixture.reveal.verification.canonical_preimages[0], /1e-07/, 'the shared vector preserves Python float serialization')
+  assert.deepEqual(await verifyCompetitionBenchmark(sharedReveal), { ok: true, message: 'Matches published commitment' }, 'Web Crypto verifies Python canonical bytes')
+  const permutedRevealPayload = structuredClone(sharedFixture.reveal)
+  ;[permutedRevealPayload.verification.canonical_preimages[0], permutedRevealPayload.verification.canonical_preimages[1]] = [permutedRevealPayload.verification.canonical_preimages[1], permutedRevealPayload.verification.canonical_preimages[0]]
+  const permutedReveal = normalizeCompetitionBenchmark(permutedRevealPayload, sharedRound)
+  assert.ok(permutedReveal)
+  assert.deepEqual(await verifyCompetitionBenchmark(permutedReveal), { ok: false, message: 'A benchmark preimage has the wrong round scope or position.' }, 'canonical preimages must remain in exact position order')
+  const sharedChangedRevealPayload = structuredClone(sharedFixture.reveal)
+  sharedChangedRevealPayload.icps[0].prompt = 'changed after reveal'
+  const sharedChangedReveal = normalizeCompetitionBenchmark(sharedChangedRevealPayload, sharedRound)
+  assert.ok(sharedChangedReveal)
+  assert.deepEqual(await verifyCompetitionBenchmark(sharedChangedReveal), { ok: false, message: 'ICP 1 does not match its committed preimage.' }, 'displayed raw ICP fields remain bound to the Python preimage')
+  const reusedNoncePayload = resignReveal(sharedFixture.reveal, (preimages) => { preimages[1].nonce = preimages[0].nonce })
+  const reusedNonceRound = { ...sharedRound, benchmarkCommitmentHash: reusedNoncePayload.commitment.manifest_hash }
+  const reusedNonceReveal = normalizeCompetitionBenchmark(reusedNoncePayload, reusedNonceRound)
+  assert.ok(reusedNonceReveal)
+  assert.deepEqual(await verifyCompetitionBenchmark(reusedNonceReveal), { ok: false, message: 'The revealed benchmark reuses a commitment nonce.' })
+  const reservedFieldPayload = resignReveal(sharedFixture.reveal, (preimages) => { preimages[2].icp.icp_position = 2 })
+  const reservedFieldRound = { ...sharedRound, benchmarkCommitmentHash: reservedFieldPayload.commitment.manifest_hash }
+  const reservedFieldReveal = normalizeCompetitionBenchmark(reservedFieldPayload, reservedFieldRound)
+  assert.ok(reservedFieldReveal)
+  assert.deepEqual(await verifyCompetitionBenchmark(reservedFieldReveal), { ok: false, message: 'A benchmark preimage does not match the public schema.' }, 'reserved display fields are forbidden inside committed raw ICPs')
+  const oversizedPreimagePayload = resignReveal(sharedFixture.reveal, (preimages) => {
+    preimages[4].icp.oversized = 'x'.repeat(256 * 1024)
+  })
+  oversizedPreimagePayload.icps[4].oversized = 'x'.repeat(256 * 1024)
+  const oversizedPreimageRound = { ...sharedRound, benchmarkCommitmentHash: oversizedPreimagePayload.commitment.manifest_hash }
+  const oversizedPreimageReveal = normalizeCompetitionBenchmark(oversizedPreimagePayload, oversizedPreimageRound)
+  assert.ok(oversizedPreimageReveal)
+  assert.deepEqual(await verifyCompetitionBenchmark(oversizedPreimageReveal), { ok: false, message: 'ICP 5 preimage exceeds the verification limit.' })
 
   const submissions = normalizeCompetitionSubmissions({ submissions: [{
     submission_id: 'miner-1', miner_hotkey: '5miner', is_baseline: false, status: 'scored',
@@ -115,6 +212,32 @@ try {
   assert.equal(normalizeCompetitionBenchmark({ ...benchmarkPayload, public_at: '2026-09-06T18:00:00Z' }, snapshot.latestCompletedRound), null, 'a mismatched release time must fail selected-round validation')
   assert.equal(normalizeCompetitionBenchmark({ ...benchmarkPayload, public_icp_count: 10 }), null, 'the retired 10-ICP projection must not render')
   assert.equal(normalizeCompetitionBenchmark({ ...benchmarkPayload, icps: [...benchmarkPayload.icps.slice(0, 19), { ...benchmarkPayload.icps[0] }] }), null, 'all 20 original positions must be unique')
+  assert.equal(normalizeCompetitionBenchmark({ ...benchmarkPayload, oversized: 'x'.repeat(8 * 1024 * 1024) }), null, 'oversized reveal documents fail closed')
+
+  const revealPayload = {
+    round_id: manifest.round_id, icp_set_date: manifest.icp_set_date, public_at: revealAt,
+    public_icp_count: 20, private_icp_count: 0, disclosure_policy: 'commit_reveal_day2_v1',
+    icps: rawIcps.map((icp, index) => ({ ...icp, icp_position: index, baseline_score: index })),
+    commitment: commitmentPayload,
+    verification: { manifest_hash: manifestHash, canonical_preimages: canonicalPreimages },
+  }
+  const reveal = normalizeCompetitionBenchmark(revealPayload, newSnapshot.latestRound)
+  assert.ok(reveal)
+  assert.deepEqual(reveal.icps[0].raw, rawIcps[0], 'display decorators stay outside the exact raw ICP')
+  assert.deepEqual(await verifyCompetitionBenchmark(reveal), { ok: true, message: 'Matches published commitment' })
+  const changedReveal = normalizeCompetitionBenchmark({
+    ...revealPayload,
+    icps: revealPayload.icps.map((icp, index) => index === 7 ? { ...icp, prompt: 'changed after commit' } : icp),
+  }, newSnapshot.latestRound)
+  assert.ok(changedReveal)
+  assert.deepEqual(await verifyCompetitionBenchmark(changedReveal), { ok: false, message: 'ICP 8 does not match its committed preimage.' })
+  const tamperedPreimages = [...canonicalPreimages]
+  tamperedPreimages[3] = canonicalPreimages[3].replace('Committed ICP 3', 'tampered ICP 3')
+  const tamperedReveal = normalizeCompetitionBenchmark({
+    ...revealPayload, verification: { manifest_hash: manifestHash, canonical_preimages: tamperedPreimages },
+  }, newSnapshot.latestRound)
+  assert.ok(tamperedReveal)
+  assert.deepEqual(await verifyCompetitionBenchmark(tamperedReveal), { ok: false, message: 'ICP 4 hash verification failed.' })
 
   const results = normalizeCompetitionResults({
     round_id: 'arena-2026-09-05', submission_id: 'miner-1', public_icp_status: 'ready',
@@ -132,6 +255,17 @@ try {
     round_id: 'arena-2026-09-05', submission_id: 'miner-1', public_icp_status: 'ready',
     scores: { stage_1: [{ icp_position: 2, per_icp_score: 99 }] }, submission_scores: { final: 99 },
   }), null, 'a partial ready result must fail closed')
+  const aggregateOnly = normalizeCompetitionResults({
+    round_id: manifest.round_id, submission_id: 'miner-1', public_icp_status: 'pending',
+    scores: {}, submission_scores: { stage_1: 72.25, final: 81.5 },
+  })
+  assert.ok(aggregateOnly)
+  assert.equal(aggregateOnly.finalScore, 81.5, 'Day 1 aggregate scores remain public before benchmark details')
+  assert.equal(aggregateOnly.publicScores.size, 0)
+  assert.equal(normalizeCompetitionResults({
+    round_id: manifest.round_id, submission_id: 'miner-1', public_icp_status: 'pending',
+    scores: { stage_1: [{ icp_position: 0, per_icp_score: 99 }] }, submission_scores: { final: 81.5 },
+  }), null, 'pending results fail closed if raw per-ICP details leak into the response')
   const incomplete = normalizeCompetitionResults({
     round_id: 'arena-2026-09-09', submission_id: 'miner-1', round_status: 'cancelled', incomplete: true,
     scores: { stage_1: [{ icp_position: 2, per_icp_score: 99 }] },
@@ -148,7 +282,7 @@ try {
   const renderedModule = { exports: {} }
   vm.runInNewContext(ts.transpileModule(component, {
     compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX },
-  }).outputText + '\nexports.RoundSummary = RoundSummary;', {
+  }).outputText + '\nexports.RoundSummary = RoundSummary; exports.PublishedResults = PublishedResults;', {
     module: renderedModule, exports: renderedModule.exports,
     require(name) {
       if (name === '@/lib/research-lab-competition') return require(join(outDir, 'research-lab-competition.js'))
@@ -172,6 +306,22 @@ try {
   assert.match(finalMarkup, /0\.00/, 'a published zero baseline is not pending')
   assert.match(renderSummary(snapshot.latestRound), /Cancelled round/)
   assert.doesNotMatch(renderSummary(snapshot.latestRound), /Decision follows completed evaluation/)
+  assert.match(renderSummary(newSnapshot.latestRound), /Day 2 · Benchmark reveal/)
+  assert.match(renderSummary(newSnapshot.latestRound), /Benchmark hashes publish before scoring/)
+  const day1ResultsMarkup = renderToStaticMarkup(React.createElement(renderedModule.exports.PublishedResults, {
+    benchmark: null, benchmarkState: 'gated', results: aggregateOnly, resultsState: 'available',
+    round: { ...newSnapshot.latestRound, status: 'published', benchmarkState: 'committed' },
+    submission: { ...submissions[0], finalScore: 81.5 }, verification: null, verifying: false, onVerify() {},
+  }))
+  assert.match(day1ResultsMarkup, /Published aggregate scores/)
+  assert.match(day1ResultsMarkup, /81\.50/, 'Day 1 aggregate scoring must render while plaintext remains gated')
+  assert.match(day1ResultsMarkup, /remain hidden until the round is terminal/)
+  const delayedMarkup = renderToStaticMarkup(React.createElement(renderedModule.exports.PublishedResults, {
+    benchmark: null, benchmarkState: 'gated', results: aggregateOnly, resultsState: 'available',
+    round: { ...newSnapshot.latestRound, status: 'stage2', benchmarkState: 'reveal_delayed' },
+    submission: { ...submissions[0], finalScore: 81.5 }, verification: null, verifying: false, onVerify() {},
+  }))
+  assert.match(delayedMarkup, /Reveal delayed: evaluation is still running\./)
   for (const promotionStatus of ['pending', 'promoted']) {
     const markup = renderSummary({ ...snapshot.latestCompletedRound, promotionStatus,
       champion: { submissionId: 'winner', minerHotkey: '5winner', finalScore: 51, outcome: 'new_king' } })
@@ -189,9 +339,9 @@ try {
   assert.match(component, /All 20 ICPs are public for this round\./)
   assert.match(component, /value="PydanticAI"/)
   assert.doesNotMatch(component, /server-held .* evaluation view/)
-  assert.match(component, /response\.status === 403/)
+  assert.match(component, /gatedStatuses\.includes\(response\.status\)/)
   assert.match(component, /icp\.position/)
-  assert.match(component, /publicIcpStatus !== 'ready'/)
+  assert.match(component, /results\?\.publicIcpStatus === 'ready'/)
   assert.match(component, /useVisiblePolling\(refreshRound, 60_000, \{ enabled: active \}\)/)
   assert.match(component, /selectedSubmissionIdRef\.current !== requestedSubmissionId/)
   assert.match(component, /Last known submissions are shown below/)
@@ -199,15 +349,16 @@ try {
   assert.match(component, /Code becomes public when Day 1 evaluation is complete\./)
   assert.match(component, /This round was cancelled\. Aggregate and per-ICP scores were not published\./)
   assert.match(component, /This round was cancelled\. Source code was not published\./)
-  assert.match(component, /Scores and source code appear when evaluation is complete\./)
-  assert.match(component, /<PendingIcpResults benchmark=\{benchmark\}>/)
-  assert.match(component, /if \(submission\.status === 'scoring_failed'\) return <PendingIcpResults benchmark=\{benchmark\}>Scoring failed\. No complete evaluation score is available\./, 'failed-run zero placeholders must not render as completed per-ICP evaluations')
-  assert.ok(component.indexOf("if (submission.status === 'scoring_failed')") < component.indexOf('const scores = submission.isBaseline'), 'failure status must gate baseline score rendering too')
+  assert.match(component, /Published aggregate scores/)
+  assert.match(component, /Plaintext ICPs are released separately from aggregate scores and source\./)
+  assert.match(component, /Reveal delayed: evaluation is still running\./)
+  assert.doesNotMatch(component, /Matches saved Day 1 commitment/)
   assert.doesNotMatch(component, /24.hour|24 hours|private ICP/i)
   assert.match(component, /Day 0 · Submissions/)
   assert.match(component, /Day 1 · Evaluation/)
   assert.match(component, /const submissionDate = utcCalendarDate\(round\.submissionOpen\) \?\? round\.icpSetDate/)
-  assert.match(component, /const nextDay = submissionDate === round\.icpSetDate\s+&& isNextUtcDay\(submissionDate, round\.evaluationDate\)\s+&& utcCalendarDate\(round\.publicAt\) === round\.evaluationDate/, 'historical bank and disclosure dates must not be relabeled as the new daily cycle')
+  assert.match(component, /const legacyDaily = submissionDate === round\.icpSetDate\s+&& isNextUtcDay\(submissionDate, round\.evaluationDate\)\s+&& utcCalendarDate\(round\.publicAt\) === round\.evaluationDate/, 'historical bank and disclosure dates must not be relabeled as the new daily cycle')
+  assert.match(component, /key=\{`\$\{selectedRound\.networkName\}:\$\{selectedRound\.netuid\}:\$\{selectedRound\.roundId\}`\}/, 'round and network switches must remount the release workspace')
   assert.match(component, /No final baseline score has been published for this round\./)
   assert.match(component, /label="Round baseline" value="PydanticAI"/)
   assert.match(component, /ICP set · \{formatUtcDate\(icpSetDate\)\}/)
@@ -227,6 +378,9 @@ try {
   const codeRoute = await readFile(resolve('src/app/api/research-lab/submissions/[submissionId]/code/route.ts'), 'utf8')
   assert.match(codeRoute, /publicArenaId/)
   assert.match(codeRoute, /encodeURIComponent\(submissionId\)/)
+  const commitmentRoute = await readFile(resolve('src/app/api/research-lab/rounds/[roundId]/benchmark-commitment/route.ts'), 'utf8')
+  assert.match(commitmentRoute, /publicArenaId/)
+  assert.match(commitmentRoute, /benchmark-commitment/)
 
   const shell = await readFile(resolve('src/components/dashboard/DashboardClient.tsx'), 'utf8')
   assert.match(shell, /label="Open Source Agent Competition"/)
@@ -236,4 +390,26 @@ try {
   console.log('research-lab-competition: public projection, honest scores, release gates, and narrow proxy checks passed')
 } finally {
   await rm(outDir, { recursive: true, force: true })
+}
+
+function sha256(value) {
+  return `sha256:${createHash('sha256').update(value, 'utf8').digest('hex')}`
+}
+
+function canonicalJson(value) {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`
+  if (value && typeof value === 'object') return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`).join(',')}}`
+  return JSON.stringify(value)
+}
+
+function resignReveal(source, mutate) {
+  const reveal = structuredClone(source)
+  const preimages = reveal.verification.canonical_preimages.map((value) => JSON.parse(value))
+  mutate(preimages)
+  reveal.verification.canonical_preimages = preimages.map(canonicalJson)
+  reveal.commitment.manifest.entries = reveal.verification.canonical_preimages.map((value, index) => ({ icp_position: index, icp_hash: sha256(value) }))
+  reveal.commitment.canonical_manifest = canonicalJson(reveal.commitment.manifest)
+  reveal.commitment.manifest_hash = sha256(reveal.commitment.canonical_manifest)
+  reveal.verification.manifest_hash = reveal.commitment.manifest_hash
+  return reveal
 }

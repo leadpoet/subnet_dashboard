@@ -10,11 +10,15 @@ import {
   competitionRoundOptions,
   formatCompetitionScore,
   normalizeCompetitionBenchmark,
+  normalizeCompetitionCommitment,
   normalizeCompetitionCode,
   normalizeCompetitionResults,
   normalizeCompetitionSnapshot,
   normalizeCompetitionSubmissions,
+  verifyCompetitionBenchmark,
   type CompetitionBenchmark,
+  type CompetitionBenchmarkCommitment,
+  type CompetitionBenchmarkVerificationResult,
   type CompetitionCode,
   type CompetitionIcp,
   type CompetitionRoundSummary,
@@ -75,7 +79,7 @@ export function ResearchLab({
   return (
     <div className="w-full">
       <CompetitionHeader competition={competition} />
-      {!competition ? <Unavailable message="Competition data is temporarily unavailable. This page will retry automatically." /> : selectedRound ? <><RoundSummary round={selectedRound} /><RoundWorkspace round={selectedRound} active={active} /></> : <p className="border-b border-[var(--line)] py-12 text-[14px] text-[var(--muted)]">No production competition round is available.</p>}
+      {!competition ? <Unavailable message="Competition data is temporarily unavailable. This page will retry automatically." /> : selectedRound ? <><RoundSummary round={selectedRound} /><RoundWorkspace key={`${selectedRound.networkName}:${selectedRound.netuid}:${selectedRound.roundId}`} round={selectedRound} active={active} /></> : <p className="border-b border-[var(--line)] py-12 text-[14px] text-[var(--muted)]">No production competition round is available.</p>}
       <details className="group mt-12 border-t border-[var(--line)] pt-1">
         <summary className="flex cursor-pointer list-none items-center justify-between gap-4 py-5 font-display text-[17px] text-[var(--muted)] focus:outline-none focus-visible:text-[var(--white)] [&::-webkit-details-marker]:hidden">
           <span>Competition settlement and emissions</span><span aria-hidden className="font-mono text-[11px] text-[var(--muted-2)] transition-transform group-open:rotate-45">+</span>
@@ -139,12 +143,17 @@ function RoundSummary({ round }: { round: CompetitionRoundSummary }) {
 function CompetitionSchedule({ round }: { round: CompetitionRoundSummary }) {
   if (!round.icpSetDate && !round.evaluationDate && !round.publicAt) return null
   const submissionDate = utcCalendarDate(round.submissionOpen) ?? round.icpSetDate
-  const nextDay = submissionDate === round.icpSetDate
+  const legacyDaily = submissionDate === round.icpSetDate
     && isNextUtcDay(submissionDate, round.evaluationDate)
     && utcCalendarDate(round.publicAt) === round.evaluationDate
-  return <div className="mt-8 grid gap-5 border-y border-[var(--line)] py-5 sm:grid-cols-2">
-    <div><div className="font-mono text-[9.5px] uppercase tracking-[0.13em] text-[var(--muted-2)]">{nextDay ? 'Day 0 · Submissions' : 'Submissions'}</div><div className="mt-2 text-[14px] text-[var(--platinum)]">{formatUtcDate(submissionDate)}</div><div className="mt-1 text-[11px] text-[var(--muted-2)]">{round.submissionCutoff ? `Closes ${formatUtc(round.submissionCutoff)}` : 'Submit an agent for this ICP set.'}</div></div>
-    <div><div className="font-mono text-[9.5px] uppercase tracking-[0.13em] text-[var(--muted-2)]">{nextDay ? 'Day 1 · Evaluation' : 'Evaluation'}</div><div className="mt-2 text-[14px] text-[var(--platinum)]">{formatUtcDate(round.evaluationDate)}</div><div className="mt-1 text-[11px] text-[var(--muted-2)]">{round.publicAt ? `ICPs publish ${formatUtc(round.publicAt)}. Source and scores follow after evaluation.` : 'ICPs publish first. Source and scores follow after evaluation.'}</div></div>
+  const delayedReveal = round.disclosurePolicy === 'commit_reveal_day2_v1'
+    && submissionDate === round.icpSetDate
+    && isNextUtcDay(submissionDate, round.evaluationDate)
+    && isNextUtcDay(round.evaluationDate, utcCalendarDate(round.publicAt))
+  return <div className={`mt-8 grid gap-5 border-y border-[var(--line)] py-5 ${delayedReveal ? 'sm:grid-cols-3' : 'sm:grid-cols-2'}`}>
+    <div><div className="font-mono text-[9.5px] uppercase tracking-[0.13em] text-[var(--muted-2)]">{legacyDaily || delayedReveal ? 'Day 0 · Submissions' : 'Submissions'}</div><div className="mt-2 text-[14px] text-[var(--platinum)]">{formatUtcDate(submissionDate)}</div><div className="mt-1 text-[11px] text-[var(--muted-2)]">{round.submissionCutoff ? `Closes ${formatUtc(round.submissionCutoff)}` : 'Submit an agent for this ICP set.'}</div></div>
+    <div><div className="font-mono text-[9.5px] uppercase tracking-[0.13em] text-[var(--muted-2)]">{legacyDaily || delayedReveal ? 'Day 1 · Evaluation' : 'Evaluation'}</div><div className="mt-2 text-[14px] text-[var(--platinum)]">{formatUtcDate(round.evaluationDate)}</div><div className="mt-1 text-[11px] text-[var(--muted-2)]">{delayedReveal ? 'Benchmark hashes publish before scoring. Aggregate scores and source follow after evaluation.' : round.publicAt ? `ICPs publish ${formatUtc(round.publicAt)}. Source and scores follow after evaluation.` : 'ICPs publish first. Source and scores follow after evaluation.'}</div></div>
+    {delayedReveal ? <div><div className="font-mono text-[9.5px] uppercase tracking-[0.13em] text-[var(--muted-2)]">Day 2 · Benchmark reveal</div><div className="mt-2 text-[14px] text-[var(--platinum)]">{formatUtcDate(utcCalendarDate(round.publicAt))}</div><div className="mt-1 text-[11px] text-[var(--muted-2)]">{round.publicAt ? `Expected ${formatUtc(round.publicAt)} after evaluation is terminal.` : 'Reveal follows terminal evaluation.'}</div></div> : null}
   </div>
 }
 
@@ -156,6 +165,10 @@ function RoundWorkspace({ round, active }: { round: CompetitionRoundSummary; act
   const [submissions, setSubmissions] = useState<CompetitionSubmission[]>([])
   const [benchmark, setBenchmark] = useState<CompetitionBenchmark | null>(null)
   const [benchmarkState, setBenchmarkState] = useState<ReleaseState>('loading')
+  const [commitment, setCommitment] = useState<CompetitionBenchmarkCommitment | null>(null)
+  const [commitmentState, setCommitmentState] = useState<ReleaseState>(round.disclosurePolicy === 'commit_reveal_day2_v1' ? 'loading' : 'idle')
+  const [verification, setVerification] = useState<CompetitionBenchmarkVerificationResult | null>(null)
+  const [verifying, setVerifying] = useState(false)
   const [selectedSubmissionId, setSelectedSubmissionId] = useState<string | null>(null)
   const [roundLoading, setRoundLoading] = useState(true)
   const [roundError, setRoundError] = useState<string | null>(null)
@@ -178,16 +191,19 @@ function RoundWorkspace({ round, active }: { round: CompetitionRoundSummary; act
   useEffect(() => {
     benchmarkReleasedRef.current = false
     roundSnapshotRef.current = false
-    setRoundLoading(true); setRoundError(null); setBenchmark(null); setBenchmarkState('loading'); setSubmissions([]); selectSubmission(null)
+    setRoundLoading(true); setRoundError(null); setBenchmark(null); setBenchmarkState('loading'); setCommitment(null); setCommitmentState(round.disclosurePolicy === 'commit_reveal_day2_v1' ? 'loading' : 'idle'); setVerification(null); setSubmissions([]); selectSubmission(null)
     return () => { roundRequestRef.current += 1 }
-  }, [round.roundId, selectSubmission])
+  }, [round.disclosurePolicy, round.networkName, round.netuid, round.roundId, selectSubmission])
 
   const refreshRound = useCallback(async () => {
     const initial = !roundSnapshotRef.current
     const request = ++roundRequestRef.current
-    const [submissionRequest, benchmarkRequest] = await Promise.allSettled([
+    const [submissionRequest, benchmarkRequest, commitmentRequest] = await Promise.allSettled([
       fetchReleasedJson(`/api/research-lab/rounds/${encodeURIComponent(round.roundId)}/submissions`),
       fetchReleasedJson(`/api/research-lab/rounds/${encodeURIComponent(round.roundId)}/benchmark`),
+      round.disclosurePolicy === 'commit_reveal_day2_v1'
+        ? fetchReleasedJson(`/api/research-lab/rounds/${encodeURIComponent(round.roundId)}/benchmark-commitment`, [403, 409])
+        : Promise.resolve({ state: 'gated' as const, body: null }),
     ])
     if (request !== roundRequestRef.current) return
     if (submissionRequest.status === 'fulfilled' && submissionRequest.value.state === 'available') {
@@ -209,13 +225,22 @@ function RoundWorkspace({ round, active }: { round: CompetitionRoundSummary; act
     if (benchmarkRequest.status === 'fulfilled' && benchmarkRequest.value.state === 'available') {
       const next = normalizeCompetitionBenchmark(benchmarkRequest.value.body, round)
       benchmarkReleasedRef.current = next !== null
-      setBenchmark(next); setBenchmarkState(next ? 'available' : 'error')
+      setBenchmark(next); setBenchmarkState(next ? 'available' : 'error'); setVerification(null)
+      if (next?.commitment) { setCommitment(next.commitment); setCommitmentState('available') }
     } else if (benchmarkRequest.status === 'fulfilled') {
       if (!benchmarkReleasedRef.current) {
         setBenchmark(null); setBenchmarkState(benchmarkRequest.value.state)
       } else if (!initial) setRoundError('Latest benchmark refresh failed. The last public snapshot remains shown.')
     } else if (initial) setBenchmarkState('error')
     else setRoundError(`Latest benchmark refresh failed: ${errorMessage(benchmarkRequest.reason, 'request failed')}. The last public snapshot remains shown.`)
+    if (round.disclosurePolicy === 'commit_reveal_day2_v1') {
+      if (commitmentRequest.status === 'fulfilled' && commitmentRequest.value.state === 'available') {
+        const next = normalizeCompetitionCommitment(commitmentRequest.value.body, round)
+        setCommitment(next); setCommitmentState(next ? 'available' : 'error')
+      } else if (commitmentRequest.status === 'fulfilled') {
+        setCommitment(null); setCommitmentState(commitmentRequest.value.state)
+      } else setCommitmentState('error')
+    }
     roundSnapshotRef.current = true
     setRoundLoading(false)
     setRoundRevision((current) => current + 1)
@@ -253,6 +278,13 @@ function RoundWorkspace({ round, active }: { round: CompetitionRoundSummary; act
 
   const selectedSubmission = submissions.find((submission) => submission.submissionId === selectedSubmissionId) ?? null
   const selectedCodeFile = code?.files.find((file) => file.path === selectedFile) ?? code?.files[0] ?? null
+  const verifyBenchmark = async () => {
+    if (!benchmark) return
+    setVerifying(true); setVerification(null)
+    try { setVerification(await verifyCompetitionBenchmark(benchmark)) }
+    catch { setVerification({ ok: false, message: 'Benchmark verification could not be completed.' }) }
+    finally { setVerifying(false) }
+  }
   const requestCode = async () => {
     if (!selectedSubmission) return
     const requestedSubmissionId = selectedSubmission.submissionId
@@ -271,7 +303,8 @@ function RoundWorkspace({ round, active }: { round: CompetitionRoundSummary; act
     <section className="pt-10">
       <div className="mb-5 flex items-end justify-between gap-4"><div><h3 className="font-display text-[22px] font-medium tracking-[-0.025em] text-[var(--platinum)]">Submissions</h3><p className="mt-1 text-[12px] text-[var(--muted-2)]">Select a submission to inspect its published public-ICP scores and released source.</p></div><span className="font-mono text-[10px] text-[var(--muted-2)]">{submissions.length} total</span></div>
       {roundLoading ? <div className="h-24 shimmer rounded-md" /> : submissions.length === 0 ? <InlineNotice>{roundError ?? 'No submissions are public for this round.'}</InlineNotice> : <>{roundError ? <div className="mb-3"><InlineNotice>{roundError} Last known submissions are shown below.</InlineNotice></div> : null}<SubmissionTable submissions={submissions} round={round} selectedId={selectedSubmissionId} onSelect={selectSubmission} /></>}
-      {selectedSubmission ? <div className="mt-8 grid gap-8 xl:grid-cols-[minmax(0,1.45fr)_minmax(300px,0.55fr)]"><PublishedResults benchmark={benchmark} benchmarkState={benchmarkState} results={results} resultsState={resultsState} round={round} submission={selectedSubmission} /><SourcePanel submission={selectedSubmission} cancelled={round.status === 'cancelled'} code={code} codeState={codeState} selectedFile={selectedCodeFile} onSelectFile={setSelectedFile} onRequest={() => void requestCode()} /></div> : null}
+      {round.disclosurePolicy === 'commit_reveal_day2_v1' ? <CommitmentPanel round={round} commitment={commitment} state={commitmentState} /> : null}
+      {selectedSubmission ? <div className="mt-8 grid gap-8 xl:grid-cols-[minmax(0,1.45fr)_minmax(300px,0.55fr)]"><PublishedResults benchmark={benchmark} benchmarkState={benchmarkState} results={results} resultsState={resultsState} round={round} submission={selectedSubmission} verification={verification} verifying={verifying} onVerify={() => void verifyBenchmark()} /><SourcePanel submission={selectedSubmission} cancelled={round.status === 'cancelled'} code={code} codeState={codeState} selectedFile={selectedCodeFile} onSelectFile={setSelectedFile} onRequest={() => void requestCode()} /></div> : null}
     </section>
   )
 }
@@ -284,23 +317,42 @@ function SubmissionTable({ submissions, round, selectedId, onSelect }: { submiss
   )
 }
 
-function PublishedResults({ benchmark, benchmarkState, results, resultsState, round, submission }: { benchmark: CompetitionBenchmark | null; benchmarkState: ReleaseState; results: CompetitionSubmissionResults | null; resultsState: ReleaseState; round: CompetitionRoundSummary; submission: CompetitionSubmission }) {
-  if (round.status === 'cancelled' || results?.incomplete) return <ResultFrame><InlineNotice>This round was cancelled. Aggregate and per-ICP scores were not published.</InlineNotice>{benchmarkState === 'available' && benchmark ? <div className="mt-5"><IcpList title="Public ICPs (20)" icpSetDate={benchmark.icpSetDate} icps={benchmark.icps} scores={new Map()} /></div> : null}</ResultFrame>
-  if (benchmarkState === 'loading') return <ResultFrame><div className="h-24 shimmer rounded-md" /></ResultFrame>
-  if (benchmarkState === 'gated') return <ResultFrame><InlineNotice>All 20 ICPs become public{round.publicAt ? ` at ${formatUtc(round.publicAt)}` : ' at the start of Day 1'}. Source code and scores follow after evaluation.</InlineNotice></ResultFrame>
-  if (!benchmark || benchmarkState === 'error') return <ResultFrame><InlineNotice>Published public-ICP details are temporarily unavailable.</InlineNotice></ResultFrame>
-  if (submission.status === 'scoring_failed') return <PendingIcpResults benchmark={benchmark}>Scoring failed. No complete evaluation score is available.</PendingIcpResults>
-  if (!submission.isBaseline && resultsState === 'error') return <PendingIcpResults benchmark={benchmark}>The ICPs are public. Published scores are temporarily unavailable.</PendingIcpResults>
-  if (!submission.isBaseline && (resultsState === 'loading' || resultsState === 'gated' || !results || results.publicIcpStatus !== 'ready')) return <PendingIcpResults benchmark={benchmark}>Scores and source code appear when evaluation is complete.</PendingIcpResults>
-  const scores = submission.isBaseline
+function CommitmentPanel({ round, commitment, state }: { round: CompetitionRoundSummary; commitment: CompetitionBenchmarkCommitment | null; state: ReleaseState }) {
+  return <section className="mt-8 border-y border-[var(--line)] py-6"><div className="flex flex-wrap items-start justify-between gap-4"><div><h3 className="font-display text-[19px] font-medium text-[var(--platinum)]">Day 1 benchmark commitment</h3><p className="mt-2 max-w-2xl text-[12px] leading-relaxed text-[var(--muted-2)]">The published manifest binds all 20 benchmark positions without revealing their contents.</p></div>{commitment ? <button type="button" onClick={() => downloadJson(`${round.roundId}-benchmark-commitment.json`, commitment.download)} className="rounded-md border border-[var(--line-3)] px-3.5 py-2 font-mono text-[10px] uppercase tracking-[0.11em] text-[var(--platinum)] hover:text-[var(--white)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand)]">Download commitment</button> : null}</div>
+    {state === 'loading' ? <div className="mt-4 h-20 shimmer rounded-md" /> : null}
+    {state === 'gated' ? <div className="mt-4"><InlineNotice>The benchmark commitment will appear after submissions close and the round is committed.</InlineNotice></div> : null}
+    {state === 'error' ? <div className="mt-4"><InlineNotice>The benchmark commitment is temporarily unavailable.</InlineNotice></div> : null}
+    {state === 'available' && commitment ? <div className="mt-4"><div className="mb-3 grid gap-2 font-mono text-[10px] text-[var(--muted-2)] sm:grid-cols-2"><span title={commitment.manifestHash}>Manifest {shortHash(commitment.manifestHash)}</span><span>Gateway timestamp {formatUtc(commitment.committedAt)}</span><span>Reveal expected {formatUtc(commitment.manifest.publicAt)}</span><span>{commitment.manifest.icpCount} committed positions</span></div><div className="grid gap-px overflow-hidden rounded-md border border-[var(--line)] bg-[var(--line)] sm:grid-cols-2">{commitment.manifest.entries.map((entry) => <div key={entry.icpPosition} className="min-w-0 bg-[#090909] px-3 py-2.5 font-mono text-[10px]"><span className="mr-3 text-[var(--muted-2)]">{String(entry.icpPosition + 1).padStart(2, '0')}</span><span className="text-[var(--muted)]" title={entry.icpHash}>{shortHash(entry.icpHash)}</span></div>)}</div></div> : null}
+  </section>
+}
+
+function PublishedResults({ benchmark, benchmarkState, results, resultsState, round, submission, verification, verifying, onVerify }: { benchmark: CompetitionBenchmark | null; benchmarkState: ReleaseState; results: CompetitionSubmissionResults | null; resultsState: ReleaseState; round: CompetitionRoundSummary; submission: CompetitionSubmission; verification: CompetitionBenchmarkVerificationResult | null; verifying: boolean; onVerify: () => void }) {
+  const cancelled = round.status === 'cancelled' || results?.incomplete
+  const aggregateAvailable = !cancelled && submission.status !== 'scoring_failed'
+    && (submission.isBaseline ? submission.finalScore !== null : resultsState === 'available' && results !== null)
+  const scores = benchmark && submission.isBaseline
     ? new Map(benchmark.icps.flatMap((icp) => icp.baselineScore === null ? [] : [[icp.position, icp.baselineScore] as const]))
     : results?.publicScores ?? new Map<number, number>()
-  return <ResultFrame><div className="mb-5 flex flex-wrap gap-5 font-mono text-[10.5px] text-[var(--muted-2)]"><span>Final {formatCompetitionScore(results?.finalScore ?? submission.finalScore)}</span><span>{submission.isBaseline ? 'Public baseline' : shortHotkey(submission.minerHotkey)}</span></div><IcpList title="Public ICPs (20)" icpSetDate={benchmark.icpSetDate} icps={benchmark.icps} scores={scores} /></ResultFrame>
+  const showPerIcpScores = !cancelled && submission.status !== 'scoring_failed'
+    && (submission.isBaseline || results?.publicIcpStatus === 'ready')
+  return <ResultFrame>
+    {cancelled ? <InlineNotice>This round was cancelled. Aggregate and per-ICP scores were not published.</InlineNotice> : aggregateAvailable ? <AggregateScores submission={submission} results={results} /> : submission.status === 'scoring_failed' ? <InlineNotice>Scoring failed. No complete evaluation score is available.</InlineNotice> : resultsState === 'error' ? <InlineNotice>Published aggregate scores are temporarily unavailable.</InlineNotice> : <InlineNotice>Aggregate scores appear when evaluation is complete. No score is inferred from incomplete results.</InlineNotice>}
+    <div className="mt-6 border-t border-[var(--line)] pt-6">
+      <div className="mb-4 flex flex-wrap items-start justify-between gap-3"><div><h4 className="font-display text-[17px] text-[var(--platinum)]">Benchmark details</h4><p className="mt-1 text-[11px] text-[var(--muted-2)]">Plaintext ICPs are released separately from aggregate scores and source.</p></div>{benchmark?.disclosurePolicy === 'commit_reveal_day2_v1' ? <div className="flex flex-wrap gap-2"><button type="button" onClick={() => downloadJson(`${benchmark.roundId}-benchmark-reveal.json`, benchmark.download)} className="rounded-md border border-[var(--line-3)] px-3 py-2 font-mono text-[9.5px] uppercase tracking-[0.1em] text-[var(--platinum)] hover:text-[var(--white)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand)]">Download reveal</button><button type="button" disabled={verifying} onClick={onVerify} className="rounded-md border border-[var(--line-3)] px-3 py-2 font-mono text-[9.5px] uppercase tracking-[0.1em] text-[var(--platinum)] hover:text-[var(--white)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand)] disabled:opacity-50">{verifying ? 'Verifying…' : 'Verify reveal'}</button></div> : null}</div>
+      {verification ? <p role="status" className={`mb-4 rounded-md border px-3 py-2 text-[11px] ${verification.ok ? 'border-[var(--line-3)] text-[var(--platinum)]' : 'border-red-900/60 text-red-300'}`}>{verification.message}</p> : null}
+      {benchmarkState === 'loading' ? <div className="h-24 shimmer rounded-md" /> : null}
+      {benchmarkState === 'gated' ? <InlineNotice>{benchmarkGateMessage(round)}</InlineNotice> : null}
+      {benchmarkState === 'error' || (benchmarkState === 'available' && !benchmark) ? <InlineNotice>Published benchmark details are temporarily unavailable.</InlineNotice> : null}
+      {benchmarkState === 'available' && benchmark ? <IcpList title="Public ICPs (20)" icpSetDate={benchmark.icpSetDate} icps={benchmark.icps} scores={showPerIcpScores ? scores : new Map()} /> : null}
+    </div>
+  </ResultFrame>
 }
 
 function ResultFrame({ children }: { children: ReactNode }) { return <div><h3 className="font-display text-[19px] font-medium text-[var(--platinum)]">Published results</h3><div className="mt-4">{children}</div></div> }
 
-function PendingIcpResults({ benchmark, children }: { benchmark: CompetitionBenchmark; children: ReactNode }) { return <ResultFrame><InlineNotice>{children}</InlineNotice><div className="mt-5"><IcpList title="Public ICPs (20)" icpSetDate={benchmark.icpSetDate} icps={benchmark.icps} scores={new Map()} /></div></ResultFrame> }
+function AggregateScores({ submission, results }: { submission: CompetitionSubmission; results: CompetitionSubmissionResults | null }) {
+  return <div><div className="font-mono text-[9.5px] uppercase tracking-[0.12em] text-[var(--muted-2)]">Published aggregate scores</div><div className="mt-3 flex flex-wrap gap-5 font-mono text-[10.5px] text-[var(--muted-2)]"><span>Stage 1 {formatCompetitionScore(results?.stage1Score ?? submission.stage1Score)}</span><span>Final {formatCompetitionScore(results?.finalScore ?? submission.finalScore)}</span><span>{submission.isBaseline ? 'Public baseline' : shortHotkey(submission.minerHotkey)}</span></div></div>
+}
 
 function IcpList({ title, icpSetDate, icps, scores }: { title: string; icpSetDate: string; icps: CompetitionIcp[]; scores: Map<number, number> }) {
   return <div><div className="mb-1 flex flex-wrap items-center justify-between gap-2 font-mono text-[9.5px] uppercase tracking-[0.12em] text-[var(--muted-2)]"><span>{title}</span><span>ICP set · {formatUtcDate(icpSetDate)}</span></div><p className="mb-3 text-[11px] text-[var(--muted-2)]">All 20 ICPs are public for this round.</p><div className="overflow-hidden rounded-md border border-[var(--line)]">{icps.map((icp) => <details key={`${icp.position}-${icp.id}`} className="group border-b border-[var(--line)] last:border-b-0"><summary className="grid cursor-pointer list-none grid-cols-[36px_minmax(0,1fr)_52px_16px] items-center gap-2 px-3 py-3 focus:outline-none focus-visible:bg-[rgba(236,234,230,0.04)] [&::-webkit-details-marker]:hidden"><span className="font-mono text-[10px] text-[var(--muted-2)]">{String(icp.position + 1).padStart(2, '0')}</span><span className="truncate text-[12px] text-[var(--platinum)]">{icp.prompt}</span><span className="text-right font-mono text-[11px] text-[var(--white)]">{formatCompetitionScore(scores.get(icp.position) ?? null)}</span><span aria-hidden className="font-mono text-[11px] text-[var(--muted-2)] transition-transform group-open:rotate-45">+</span></summary><div className="border-t border-[var(--line)] bg-[#090909] px-4 py-4"><dl className="grid gap-x-5 gap-y-3 sm:grid-cols-2"><IcpDetail label="Industry" value={[icp.industry, icp.subIndustry].filter(Boolean).join(' · ')} /><IcpDetail label="Geography" value={icp.geography ?? icp.country} /><IcpDetail label="Company size" value={icp.employeeCount.join(', ')} /><IcpDetail label="Company stage" value={icp.companyStage} /><IcpDetail label="Product or service" value={icp.productService} /><IcpDetail label="Required attribute" value={icp.requiredAttribute} /><IcpDetail label={icp.intentCategory ? `Intent · ${humanize(icp.intentCategory)}` : 'Intent'} value={icp.intentSignal} wide /></dl></div></details>)}</div></div>
@@ -330,7 +382,7 @@ function LabEmissionSplit({ spend, metagraph }: { spend: LabMinerSpendRollup | n
 }
 
 async function fetchJson(url: string): Promise<unknown> { const response = await fetch(url, { cache: 'no-store', headers: { Accept: 'application/json' } }); if (!response.ok) throw new Error(`Request failed (${response.status})`); return response.json() }
-async function fetchReleasedJson(url: string): Promise<{ state: 'available'; body: unknown } | { state: 'gated'; body: null }> { const response = await fetch(url, { cache: 'no-store', headers: { Accept: 'application/json' } }); if (response.status === 403) return { state: 'gated', body: null }; if (!response.ok) throw new Error(`Request failed (${response.status})`); return { state: 'available', body: await response.json() } }
+async function fetchReleasedJson(url: string, gatedStatuses: number[] = [403]): Promise<{ state: 'available'; body: unknown } | { state: 'gated'; body: null }> { const response = await fetch(url, { cache: 'no-store', headers: { Accept: 'application/json' } }); if (gatedStatuses.includes(response.status)) return { state: 'gated', body: null }; if (!response.ok) throw new Error(`Request failed (${response.status})`); return { state: 'available', body: await response.json() } }
 function asRecord(value: unknown): Record<string, unknown> | null { return value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null }
 function championMetricDetail(round: CompetitionRoundSummary, championScore: number | null): string {
   if (round.promotionStatus === 'promoted') return `Becomes next baseline · ${formatCompetitionScore(championScore)}`
@@ -338,9 +390,15 @@ function championMetricDetail(round: CompetitionRoundSummary, championScore: num
   return `${humanize(round.champion?.outcome ?? 'champion')} · ${formatCompetitionScore(championScore)}`
 }
 function roundStatusLabel(value: string): string { if (value === 'published') return 'Published result'; if (value === 'cancelled') return 'Cancelled round'; if (value === 'open') return 'Open for submissions'; if (['committed', 'stage1', 'stage1_scored', 'stage2'].includes(value)) return 'Scoring'; if (value === 'scored') return 'Publishing results'; return humanize(value) }
+function benchmarkGateMessage(round: CompetitionRoundSummary): string {
+  if (round.benchmarkState === 'reveal_delayed') return 'Reveal delayed: evaluation is still running.'
+  if (round.disclosurePolicy === 'commit_reveal_day2_v1') return `The 20 ICPs remain hidden until the round is terminal and the expected reveal time${round.publicAt ? `, ${formatUtc(round.publicAt)}` : ''}.`
+  return `All 20 ICPs become public${round.publicAt ? ` at ${formatUtc(round.publicAt)}` : ' at the start of Day 1'}. Source code and scores follow after evaluation.`
+}
 function humanize(value: string): string { const normalized = value.trim().replaceAll('_', ' '); return normalized ? normalized[0].toUpperCase() + normalized.slice(1) : 'Unavailable' }
 function shortId(value: string): string { return value.length > 18 ? `${value.slice(0, 9)}…${value.slice(-6)}` : value }
 function shortHotkey(value: string): string { return value.length > 18 ? `${value.slice(0, 9)}…${value.slice(-6)}` : value }
+function shortHash(value: string): string { return value.length > 30 ? `${value.slice(0, 17)}…${value.slice(-10)}` : value }
 function formatUtc(value: string): string { const date = new Date(value); return Number.isFinite(date.getTime()) ? `${date.toISOString().slice(0, 16).replace('T', ' ')} UTC` : value }
 function formatUtcDate(value: string | null): string { if (!value) return 'Date unavailable'; const date = new Date(`${value}T00:00:00Z`); return Number.isFinite(date.getTime()) ? `${new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' }).format(date)} · UTC` : value }
 function utcCalendarDate(value: string | null): string | null { if (!value) return null; const date = new Date(value); return Number.isFinite(date.getTime()) ? date.toISOString().slice(0, 10) : null }
@@ -348,3 +406,4 @@ function isNextUtcDay(start: string | null, end: string | null): boolean { if (!
 function formatUsd(value: number): string { if (!Number.isFinite(value) || value <= 0) return '$0.00'; if (value >= 1) return `$${value.toFixed(2)}`; return '<$0.01' }
 function formatAlpha(value: number): string { if (!Number.isFinite(value) || value <= 0) return '0.0000'; return value >= 1 ? value.toFixed(2) : value.toFixed(4) }
 function errorMessage(value: unknown, fallback: string): string { return value instanceof Error ? value.message : fallback }
+function downloadJson(filename: string, value: unknown): void { const url = URL.createObjectURL(new Blob([`${JSON.stringify(value, null, 2)}\n`], { type: 'application/json' })); const anchor = document.createElement('a'); anchor.href = url; anchor.download = filename; anchor.click(); URL.revokeObjectURL(url) }
