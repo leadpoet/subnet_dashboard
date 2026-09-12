@@ -148,7 +148,7 @@ try {
   const renderedModule = { exports: {} }
   vm.runInNewContext(ts.transpileModule(component, {
     compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX },
-  }).outputText + '\nexports.RoundSummary = RoundSummary;', {
+  }).outputText + '\nexports.RoundSummary = RoundSummary; exports.SubmissionTable = SubmissionTable; exports.PublishedResults = PublishedResults;', {
     module: renderedModule, exports: renderedModule.exports,
     require(name) {
       if (name === '@/lib/research-lab-competition') return require(join(outDir, 'research-lab-competition.js'))
@@ -178,6 +178,89 @@ try {
     assert.match(markup, /Champion/)
     assert.match(markup, promotionStatus === 'promoted' ? /Becomes next baseline/ : /Promotion pending/)
   }
+
+  // Public September 12 state, reduced to fields needed for status rendering.
+  const credentialFixture = JSON.parse(await readFile(resolve('scripts/fixtures/competition-credential-error-20260912.json'), 'utf8'))
+  const submissionsRouteSource = await readFile(resolve('src/app/api/research-lab/rounds/[roundId]/submissions/route.ts'), 'utf8')
+  const proxySource = await readFile(resolve('src/lib/arena-public-proxy.ts'), 'utf8')
+  async function projectSubmissions(detail = credentialFixture.failed_result, detailStatus = 200) {
+    const calls = []
+    const proxyModule = { exports: {} }
+    vm.runInNewContext(ts.transpileModule(proxySource, {
+      compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
+    }).outputText, {
+      module: proxyModule, exports: proxyModule.exports, require, process: { env: {} }, AbortSignal,
+      fetch: async (url, options) => {
+        calls.push(url)
+        assert.equal(options.cache, 'no-store')
+        assert.equal(options.method ?? 'GET', 'GET', 'status lookup must be read-only')
+        return url.endsWith('/submissions')
+          ? Response.json(credentialFixture.submissions)
+          : Response.json(detail, { status: detailStatus })
+      },
+    })
+    const routeModule = { exports: {} }
+    vm.runInNewContext(ts.transpileModule(submissionsRouteSource, {
+      compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
+    }).outputText, {
+      module: routeModule, exports: routeModule.exports,
+      require: (name) => name === '@/lib/arena-public-proxy' ? proxyModule.exports : require(name),
+    })
+    const response = await routeModule.exports.GET(null, { params: Promise.resolve({ roundId: credentialFixture.submissions.round_id }) })
+    assert.equal(response.status, 200)
+    assert.equal(response.headers.get('cache-control'), 'no-store, max-age=0, must-revalidate')
+    assert.deepEqual(calls, [
+      `${credentialFixture.source}/submissions`,
+      `${credentialFixture.source}/results/${credentialFixture.failed_result.submission_id}`,
+    ], 'only the failed submission needs a detail lookup')
+    return response.json()
+  }
+  const projected = await projectSubmissions()
+  const liveSubmissions = normalizeCompetitionSubmissions(projected)
+  const failedSubmission = liveSubmissions.find((row) => row.submissionId === credentialFixture.failed_result.submission_id)
+  assert.equal(failedSubmission.status, 'scoring_failed', 'the competition status must stay unchanged')
+  assert.equal(failedSubmission.finalScore, null)
+  assert.equal(competitionSubmissionStatusLabel(failedSubmission, credentialFixture.round), 'Provider credential error')
+  for (let index = 0; index < projected.submissions.length; index++) {
+    const { failure_reason, ...unchanged } = projected.submissions[index]
+    assert.deepEqual(unchanged, credentialFixture.submissions.submissions[index], 'scores, code access, and other submission fields stay unchanged')
+    if (liveSubmissions[index] !== failedSubmission) {
+      assert.equal(failure_reason, undefined)
+      assert.equal(competitionSubmissionStatusLabel(liveSubmissions[index], credentialFixture.round), liveSubmissions[index].isBaseline ? 'Scored' : 'Scored · not promoted')
+    }
+  }
+  const tableMarkup = renderToStaticMarkup(React.createElement(renderedModule.exports.SubmissionTable, {
+    submissions: liveSubmissions, round: credentialFixture.round, selectedId: failedSubmission.submissionId, onSelect() {},
+  }))
+  assert.match(tableMarkup, /Provider credential error/)
+  assert.doesNotMatch(tableMarkup, /Scoring failed/)
+  const renderFailedResults = (submission) => renderToStaticMarkup(React.createElement(renderedModule.exports.PublishedResults, {
+    submission, round: credentialFixture.round, benchmark, benchmarkState: 'available', results: null, resultsState: 'error',
+  }))
+  assert.match(renderFailedResults(failedSubmission), /Provider credential error\. No complete evaluation score is available\./)
+  assert.doesNotMatch(renderFailedResults(failedSubmission), />0\.00</, 'failed-run placeholders must remain hidden')
+  for (const [detail, status] of [
+    [{ error: 'temporarily unavailable' }, 503],
+    [{ ...credentialFixture.failed_result, round_id: 'different-round' }, 200],
+    [{ ...credentialFixture.failed_result, submission_id: 'different-submission' }, 200],
+    [{ ...credentialFixture.failed_result, run_results: [null, { terminal_status: 'provider_error' }, { terminal_status: 'model_error' }] }, 200],
+    [{ ...credentialFixture.failed_result, run_results: null }, 200],
+  ]) {
+    const fallback = await projectSubmissions(detail, status)
+    assert.deepEqual(fallback, credentialFixture.submissions, 'unverified and other failures keep the original projection')
+    const submission = normalizeCompetitionSubmissions(fallback).find((row) => row.submissionId === failedSubmission.submissionId)
+    assert.equal(competitionSubmissionStatusLabel(submission, credentialFixture.round), 'Scoring failed')
+    assert.match(renderFailedResults(submission), /Scoring failed\. No complete evaluation score is available\./)
+  }
+  for (const status of ['queued', 'running', 'accepted', 'failed', 'scored', 'champion', 'cancelled', 'not_selected']) {
+    for (const isBaseline of [false, true]) {
+      for (const promotionStatus of ['pending', 'promoted', 'not_required']) {
+        const submission = { ...submissions[0], status, isBaseline }
+        const round = { ...pendingRound, promotionStatus }
+        assert.equal(competitionSubmissionStatusLabel({ ...submission, failureReason: 'credential_error' }, round), competitionSubmissionStatusLabel(submission, round), `${status} must not inherit a historical credential failure`)
+      }
+    }
+  }
   assert.doesNotMatch(component, /if \(!competition\) return/, 'an Arena outage must not hide the independent settlement view')
   assert.match(component, /competition\?\.repoUrl \?\? DEFAULT_REPO_URL/)
   assert.match(component, /Competition data is temporarily unavailable\. This page will retry automatically\./)
@@ -201,7 +284,7 @@ try {
   assert.match(component, /This round was cancelled\. Source code was not published\./)
   assert.match(component, /Scores and source code appear when evaluation is complete\./)
   assert.match(component, /<PendingIcpResults benchmark=\{benchmark\}>/)
-  assert.match(component, /if \(submission\.status === 'scoring_failed'\) return <PendingIcpResults benchmark=\{benchmark\}>Scoring failed\. No complete evaluation score is available\./, 'failed-run zero placeholders must not render as completed per-ICP evaluations')
+  assert.match(component, /if \(submission\.status === 'scoring_failed'\) return <PendingIcpResults benchmark=\{benchmark\}>\{competitionSubmissionStatusLabel\(submission, round\)\}\. No complete evaluation score is available\./, 'failed-run zero placeholders must not render as completed per-ICP evaluations')
   assert.ok(component.indexOf("if (submission.status === 'scoring_failed')") < component.indexOf('const scores = submission.isBaseline'), 'failure status must gate baseline score rendering too')
   assert.doesNotMatch(component, /24.hour|24 hours|private ICP/i)
   assert.match(component, /Day 0 · Submissions/)

@@ -39,6 +39,7 @@ export type CompetitionSubmission = {
   minerHotkey: string
   isBaseline: boolean
   status: string
+  failureReason?: 'credential_error' | null
   submittedAt: string | null
   stage1Score: number | null
   finalScore: number | null
@@ -134,6 +135,7 @@ export function normalizeCompetitionSubmissions(value: unknown): CompetitionSubm
       minerHotkey,
       isBaseline: row.is_baseline === true,
       status: text(row.status) || 'queued',
+      failureReason: row.failure_reason === 'credential_error' ? 'credential_error' as const : null,
       submittedAt: nullableText(row.submitted_at),
       stage1Score: score(row.stage1_score),
       finalScore: score(row.final_score),
@@ -250,7 +252,7 @@ export function competitionRoundOptions(snapshot: CompetitionSnapshot): Competit
 }
 
 export function competitionSubmissionStatusLabel(
-  submission: Pick<CompetitionSubmission, 'isBaseline' | 'isChampion' | 'status'>,
+  submission: Pick<CompetitionSubmission, 'isBaseline' | 'isChampion' | 'status' | 'failureReason'>,
   round: Pick<CompetitionRoundSummary, 'promotionStatus' | 'status'>,
 ): string {
   if (submission.isChampion || submission.status === 'champion') {
@@ -260,6 +262,9 @@ export function competitionSubmissionStatusLabel(
   }
   if (submission.status === 'scored' && round.status === 'published' && !submission.isBaseline) {
     return 'Scored · not promoted'
+  }
+  if (submission.status === 'scoring_failed' && submission.failureReason === 'credential_error') {
+    return 'Provider credential error'
   }
   return humanizeStatus(submission.status)
 }
