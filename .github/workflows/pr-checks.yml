@@ -39,9 +39,4 @@ jobs:
       - name: Test suite (unit + real-PostgreSQL RPC fixtures)
         run: npm test
       - name: Production build
-        env:
-          # Build-time env: placeholder Supabase values so page data collection
-          # constructs clients without contacting anything real.
-          NEXT_PUBLIC_SUPABASE_URL: https://example.supabase.co
-          NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-anon-key
         run: npm run build

@@ -3,11 +3,15 @@ const path = require("node:path");
 
 const nextDistDir = process.env.NEXT_DIST_DIR || ".next";
 const runtimeSecretKeys = [
-  "SUPABASE_SECRET_KEY",
-  "OPENROUTER_KEY",
   "ADMIN_USER",
   "ADMIN_PASS",
   "ADMIN_SESSION_SECRET",
+];
+// Keep retired keys in the PM2 filter so a rolling reload removes values left
+// in process metadata by an older release.
+const retiredSecretKeys = [
+  "SUPABASE_SECRET_KEY",
+  "OPENROUTER_KEY",
   "RESEARCH_LAB_ALERT_DISCORD_WEBHOOK_URL",
   "RESEARCH_LAB_ALERT_RESEND_API_KEY",
   "RESEARCH_LAB_ALERT_EMAIL_FROM",
@@ -25,8 +29,8 @@ module.exports = {
       exec_mode: "cluster",
       instances: 1,
       autorestart: true,
-      // The Next.js worker normally holds roughly 1 GB RSS after warming the
-      // dashboard caches. The old 700 MB limit monitored only an `npm` wrapper;
+      // The Next.js worker normally holds roughly 1 GB RSS after startup.
+      // The old 700 MB limit monitored only an `npm` wrapper;
       // after migrating PM2 to the real Next.js process it caused a restart loop.
       max_memory_restart: "1400M",
       listen_timeout: 30000,
@@ -35,7 +39,7 @@ module.exports = {
       // The launcher retrieves these after PM2 creates the worker. Excluding
       // them here prevents an older CLI-injected copy from surviving in PM2's
       // process metadata or its reboot snapshot.
-      filter_env: runtimeSecretKeys,
+      filter_env: [...runtimeSecretKeys, ...retiredSecretKeys],
       env: {
         NODE_ENV: "production",
         NODE_OPTIONS: "--max-old-space-size=512",
@@ -43,13 +47,6 @@ module.exports = {
         AWS_REGION: "us-east-1",
         AWS_DEFAULT_REGION: "us-east-1",
         SUBNET_DASHBOARD_SECRET_ID: "leadpoet/prod/subnet-dashboard/env",
-        RESEARCH_LAB_ALERT_MONITOR_ENABLED: "true",
-        RESEARCH_LAB_ALERT_MONITOR_INTERVAL_MS: "60000",
-        RESEARCH_LAB_ALERT_SIGNALS: "pcr0_mismatch,pcr0_missing,pcr0_stale,offchain_weight_bundle_missing,offchain_weight_bundle_stale,transparency_checkpoint_stale",
-        OPS_MONITORED_VALIDATOR_HOTKEYS: "5FNVgRnrxMibhcBGEAaajGrYjsaCn441a5HuGUBUNnxEBLo9",
-        RESEARCH_LAB_ALERT_DASHBOARD_URL: "https://subnet71.com/admin",
-        RESEARCH_LAB_ALERT_MINIMUM_SEVERITY: "warning",
-        RESEARCH_LAB_ALERT_TIMEOUT_MS: "10000",
       },
     },
   ],

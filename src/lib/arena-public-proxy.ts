@@ -2,7 +2,6 @@ import { NextResponse } from 'next/server'
 
 const ARENA_GATEWAY_URL = (
   process.env.LEADPOET_GATEWAY_URL?.trim()
-  || process.env.FULFILLMENT_GATEWAY_URL?.trim()
   || 'https://gateway.subnet71.com'
 ).replace(/\/+$/, '')
 
@@ -14,18 +13,24 @@ export function publicArenaId(value: string | null | undefined): string | null {
   return PUBLIC_ID.test(normalized) ? normalized : null
 }
 
+export async function fetchPublicArenaJson(
+  path: string,
+  timeoutMs = 8_000,
+): Promise<{ body: unknown; status: number }> {
+  const response = await fetch(`${ARENA_GATEWAY_URL}${path}`, {
+    cache: 'no-store',
+    headers: { Accept: 'application/json' },
+    signal: AbortSignal.timeout(timeoutMs),
+  })
+  const body = await response.json().catch(() => null)
+  if (body === null) throw new Error('Arena returned an invalid response.')
+  return { body, status: response.status }
+}
+
 export async function proxyPublicArenaJson(path: string): Promise<NextResponse> {
   try {
-    const response = await fetch(`${ARENA_GATEWAY_URL}${path}`, {
-      cache: 'no-store',
-      headers: { Accept: 'application/json' },
-      signal: AbortSignal.timeout(8_000),
-    })
-    const body = await response.json().catch(() => null)
-    if (body === null) {
-      return NextResponse.json({ error: 'Arena returned an invalid response.' }, { status: 502, headers: NO_STORE_HEADERS })
-    }
-    return NextResponse.json(body, { status: response.status, headers: NO_STORE_HEADERS })
+    const { body, status } = await fetchPublicArenaJson(path)
+    return NextResponse.json(body, { status, headers: NO_STORE_HEADERS })
   } catch {
     return NextResponse.json({ error: 'Arena is temporarily unavailable.' }, { status: 502, headers: NO_STORE_HEADERS })
   }

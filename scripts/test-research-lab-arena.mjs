@@ -109,17 +109,16 @@ try {
     ).publishedBaseline?.score, score)
   }
 
-  const routeSource = await readFile(resolve('src/app/api/research-lab/route.ts'), 'utf8')
+  const routeSource = await readFile(resolve('src/app/api/admin/research-lab/route.ts'), 'utf8')
   assert.match(routeSource, /https:\/\/gateway\.subnet71\.com/)
   assert.match(routeSource, /\/arena\/v1\/current/)
-  assert.match(routeSource, /\/arena\/v1\/rounds\/\$\{encodeURIComponent\(roundId\)\}/)
-  assert.match(routeSource, /Promise\.allSettled\(roundIds/)
-  assert.match(routeSource, /currentRecord\.published_round/)
-  assert.doesNotMatch(routeSource, /currentRecord\.king/)
+  assert.match(routeSource, /\/arena\/v1\/rounds\/\$\{encodeURIComponent\(id\)\}/)
+  assert.match(routeSource, /Promise\.all\(ids\.map/)
+  assert.match(routeSource, /root\.published_round/)
+  assert.doesNotMatch(routeSource, /root\.king/)
 
   const componentSource = await readFile(resolve('src/components/dashboard/ResearchLab.tsx'), 'utf8')
   assert.match(componentSource, /Open Source Agent Competition/)
-  assert.match(componentSource, /No score is inferred/)
   assert.doesNotMatch(componentSource, /Retired rebenchmark detail/)
   assert.match(componentSource, /Not published/)
 

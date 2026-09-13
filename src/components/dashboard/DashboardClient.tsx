@@ -1,22 +1,9 @@
 'use client'
 
-import { useState, useCallback, useEffect, useRef } from 'react'
-import { useVisiblePolling } from '@/lib/hooks/useVisiblePolling'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import {
-  Overview,
-  MinerTracker,
-  EpochAnalysis,
-  SubmissionTracker,
-  ResearchLab,
-  FAQ,
-} from '@/components/dashboard'
-import { Fulfillment } from '@/components/dashboard/Fulfillment'
+import { FAQ, ResearchLab } from '@/components/dashboard'
 import { ErrorBoundary } from '@/components/shared/ErrorBoundary'
-import type {
-  MetagraphData,
-} from '@/lib/types'
-import type { AllDashboardData } from '@/lib/db-precalc'
 import { cn } from '@/lib/utils'
 import {
   getDashboardTabs,
@@ -24,55 +11,17 @@ import {
   type DashboardTabKey,
 } from '@/lib/dashboard-tabs'
 
-// =================================================================
-// Tab routing config
-// =================================================================
-type TabKey = DashboardTabKey
+export function DashboardClient() {
+  const visibleTabs = getDashboardTabs()
+  const [activeTab, setActiveTab] = useState<DashboardTabKey>('research-lab')
+  const [mountedTabs, setMountedTabs] = useState<Set<DashboardTabKey>>(
+    () => new Set(['research-lab']),
+  )
+  const navWrapRef = useRef<HTMLDivElement>(null)
+  const tabIndicatorRef = useRef<HTMLSpanElement>(null)
 
-// Dashboard data from API
-interface DashboardData extends AllDashboardData {
-  hours: number
-  fetchedAt: number
-  serverRefreshedAt?: string
-  serverRelativeTime?: string
-  buildVersion?: string
-}
-
-// Props received from Server Component
-export interface DashboardClientProps {
-  initialData: DashboardData
-  metagraph: MetagraphData | null
-  isSubnet71Public: boolean
-}
-
-export function DashboardClient({
-  initialData,
-  metagraph: initialMetagraph,
-  isSubnet71Public,
-}: DashboardClientProps) {
-  // Dashboard data state (aggregated results only - no raw data!)
-  const [dashboardData, setDashboardData] = useState<DashboardData>(initialData)
-  const [metagraph, setMetagraph] = useState<MetagraphData | null>(initialMetagraph)
-
-  const [selectedMinerHotkey, setSelectedMinerHotkey] = useState<string | null>(null)
-  const [selectedEpochId, setSelectedEpochId] = useState<number | null>(null)
-
-  // -------------------------------------------------------------------
-  // Tab routing. Keep tab state in memory so the public URL stays clean.
-  // Older shared URLs with ?tab=... are honored once on mount, then cleaned.
-  // -------------------------------------------------------------------
-  const visibleTabs = getDashboardTabs(isSubnet71Public)
-  const defaultTab = visibleTabs[0] ?? 'research-lab'
-  const [activeTab, setActiveTab] = useState<TabKey>(defaultTab)
-  const [mountedTabs, setMountedTabs] = useState<Set<TabKey>>(() => new Set([defaultTab]))
-
-  const activateTab = useCallback((tab: TabKey) => {
-    setMountedTabs((prev) => {
-      if (prev.has(tab)) return prev
-      const next = new Set(prev)
-      next.add(tab)
-      return next
-    })
+  const activateTab = useCallback((tab: DashboardTabKey) => {
+    setMountedTabs((current) => new Set(current).add(tab))
     setActiveTab(tab)
   }, [])
 
@@ -80,27 +29,17 @@ export function DashboardClient({
     const params = new URLSearchParams(window.location.search)
     const tab = params.get('tab')
     if (tab) activateTab(normalizeDashboardTab(tab, visibleTabs))
-
     if (params.has('tab')) {
       params.delete('tab')
       const query = params.toString()
-      const next = `${window.location.pathname}${query ? `?${query}` : ''}${window.location.hash}`
-      window.history.replaceState(null, '', next)
+      window.history.replaceState(
+        null,
+        '',
+        `${window.location.pathname}${query ? `?${query}` : ''}${window.location.hash}`,
+      )
     }
   }, [activateTab, visibleTabs])
 
-  const handleTabChange = useCallback((value: string) => {
-    activateTab(normalizeDashboardTab(value, visibleTabs))
-  }, [activateTab, visibleTabs])
-
-  // -------------------------------------------------------------------
-  // Sliding tab underline. A single white indicator measures the active
-  // trigger and animates its left/width between tabs, instead of a static
-  // per-tab rule. Re-measures on tab change, container resize, and once
-  // web fonts settle (label widths shift after Space Grotesk loads).
-  // -------------------------------------------------------------------
-  const navWrapRef = useRef<HTMLDivElement>(null)
-  const tabIndicatorRef = useRef<HTMLSpanElement>(null)
   useEffect(() => {
     const wrap = navWrapRef.current
     const indicator = tabIndicatorRef.current
@@ -115,162 +54,20 @@ export function DashboardClient({
       indicator.style.left = `${active.offsetLeft}px`
       indicator.style.width = `${active.offsetWidth}px`
     }
-    // rAF so the measure runs after Radix has applied data-state and the
-    // browser has laid out the triggers (a synchronous call can race those).
     const raf = requestAnimationFrame(position)
-    const ro = new ResizeObserver(position)
-    ro.observe(wrap)
+    const observer = new ResizeObserver(position)
+    observer.observe(wrap)
     window.addEventListener('resize', position)
-    if (typeof document !== 'undefined' && document.fonts?.ready) {
-      document.fonts.ready.then(position).catch(() => {})
-    }
+    void document.fonts?.ready.then(position).catch(() => {})
     return () => {
       cancelAnimationFrame(raf)
-      ro.disconnect()
+      observer.disconnect()
       window.removeEventListener('resize', position)
     }
   }, [activeTab])
 
-  // Share the timer and visibility-resume path so slow refreshes cannot overlap.
-  const dashboardGeneration = useRef(0)
-  useEffect(() => {
-    const generation = ++dashboardGeneration.current
-    return () => { dashboardGeneration.current = generation + 1 }
-  }, [initialData.buildVersion])
-
-  const refreshDashboard = useCallback(async () => {
-    const generation = dashboardGeneration.current
-    try {
-      const [dashboardRes, metagraphRes] = await Promise.all([
-        fetch('/api/dashboard'),
-        fetch('/api/metagraph'),
-      ])
-      if (generation !== dashboardGeneration.current) return
-      if (dashboardRes.ok) {
-        const newData = await dashboardRes.json()
-        if (generation !== dashboardGeneration.current) return
-        if (initialData.buildVersion && newData.buildVersion &&
-            newData.buildVersion !== initialData.buildVersion) {
-          window.location.reload()
-          return
-        }
-        setDashboardData(newData)
-      }
-      if (metagraphRes.ok) {
-        const newMetagraph = await metagraphRes.json()
-        if (generation === dashboardGeneration.current) setMetagraph(newMetagraph)
-      }
-    } catch (error) {
-      if (process.env.NODE_ENV !== 'production') {
-        console.error('Auto-refresh failed:', error)
-      }
-    }
-  }, [initialData.buildVersion])
-
-  // Initial data was rendered on the server; wait one interval on first mount.
-  useVisiblePolling(refreshDashboard, 60_000, { immediate: false })
-
-  // Handle navigation from SubmissionTracker to MinerTracker
-  const handleUidClick = useCallback((uid: number) => {
-    // Find the hotkey for this UID
-    const hotkey = Object.entries(metagraph?.hotkeyToUid ?? {}).find(([, u]) => u === uid)?.[0]
-    if (hotkey) {
-      setSelectedMinerHotkey(hotkey)
-      setActiveTab('miner-tracker')
-    }
-  }, [metagraph?.hotkeyToUid])
-
-  // Handle navigation from SubmissionTracker to EpochAnalysis
-  const handleEpochClick = useCallback((epochId: number) => {
-    setSelectedEpochId(epochId)
-    setActiveTab('epoch-analysis')
-  }, [])
-
-
-  // Transform DB types to UI types
-  const metrics = {
-    total: dashboardData.summary.total_submissions,
-    accepted: dashboardData.summary.total_accepted,
-    rejected: dashboardData.summary.total_rejected,
-    pending: dashboardData.summary.total_pending,
-    acceptanceRate: dashboardData.summary.acceptance_rate,
-    avgRepScore: dashboardData.summary.avg_rep_score,
-  }
-
-  // Transform miner stats with metagraph data
-  const minerStats = dashboardData.minerStats.map(m => {
-    const uid = metagraph?.hotkeyToUid[m.miner_hotkey] ?? null
-    const btIncentive = metagraph?.incentives[m.miner_hotkey] ?? 0
-    const btEmission = metagraph?.emissions[m.miner_hotkey] ?? 0
-    const stake = metagraph?.stakes[m.miner_hotkey] ?? 0
-
-    return {
-      uid,
-      minerHotkey: m.miner_hotkey,
-      coldkey: m.coldkey || metagraph?.hotkeyToColdkey?.[m.miner_hotkey] || null,
-      minerShort: m.miner_hotkey,
-      total: m.total_submissions,
-      accepted: m.accepted,
-      rejected: m.rejected,
-      pending: m.pending,
-      acceptanceRate: m.acceptance_rate,
-      avgRepScore: m.avg_rep_score,
-      btIncentive: btIncentive * 100,
-      btEmission,
-      stake: Math.round(stake * 100) / 100,
-      // Epoch-specific stats (pre-calculated)
-      last20Accepted: m.last20_accepted,
-      last20Rejected: m.last20_rejected,
-      currentAccepted: m.current_accepted,
-      currentRejected: m.current_rejected,
-      // Per-miner detailed stats for MinerTracker
-      epochPerformance: (m.epoch_performance || []).map(ep => ({
-        epochId: ep.epoch_id,
-        accepted: ep.accepted,
-        rejected: ep.rejected,
-        acceptanceRate: ep.acceptance_rate,
-      })),
-      rejectionReasons: (m.rejection_reasons || []).map(rr => ({
-        reason: rr.reason,
-        count: rr.count,
-        percentage: rr.percentage,
-      })),
-    }
-  }).filter(m => !metagraph || Object.keys(metagraph.hotkeyToUid).length === 0 || m.uid !== null) // Only filter by metagraph if data available
-
-  // Epoch stats (already in correct format from db-precalc)
-  const epochStats = dashboardData.epochStats
-
-  // Transform lead inventory
-  const inventoryData = dashboardData.leadInventory.map(l => ({
-    date: l.date,
-    totalValidInventory: l.cumulative_leads,
-    newValidLeads: l.new_leads,
-  }))
-
-  // Weekly lead inventory (already in correct format from db-precalc)
-  const weeklyInventoryData = dashboardData.weeklyLeadInventory || []
-
-  // Transform rejection reasons
-  const rejectionReasons = dashboardData.rejectionReasons
-
-  // Get active miners from miner stats
-  const activeMiners = minerStats.map(m => m.minerHotkey)
-
-  // Get active miner count (miners with incentive > 0) directly from metagraph
-  const activeMinerCount = metagraph
-    ? Object.values(metagraph.incentives).filter(i => i > 0).length
-    : 0
-
-  // Handler for clicking on a miner hotkey in the leaderboard
-  const handleMinerClick = (minerHotkey: string) => {
-    setSelectedMinerHotkey(minerHotkey)
-    setActiveTab('miner-tracker')
-  }
-
   return (
     <div className="relative min-h-screen">
-      {/* Main Content */}
       <div className="relative z-10 max-w-[1500px] mx-auto px-5 py-4 md:py-6 overflow-auto">
         <header className="relative mb-7 md:mb-9 pt-6 md:pt-10 pb-6 md:pb-8 border-b border-[var(--line)]">
           <div className="flex items-center justify-between gap-4">
@@ -283,159 +80,33 @@ export function DashboardClient({
           </div>
         </header>
 
-        {/* Tabs: gated by the request host's public tab policy. */}
-        <Tabs value={activeTab} onValueChange={handleTabChange} className="space-y-4 md:space-y-6">
+        <Tabs
+          value={activeTab}
+          onValueChange={(value) => activateTab(normalizeDashboardTab(value, visibleTabs))}
+          className="space-y-4 md:space-y-6"
+        >
           <div ref={navWrapRef} className="relative">
-          <TabsList
-            className={cn(
-              'flex w-full justify-start gap-8 sm:gap-10 overflow-x-auto no-scrollbar rounded-none border-0 border-b border-[var(--line)] bg-transparent h-auto p-0'
-            )}
-          >
-            {visibleTabs.includes('research-lab') && (
-              <DashboardTabTrigger
-                value="research-lab"
-                label="Open Source Agent Competition"
-                shortLabel="Competition"
-              />
-            )}
-            {visibleTabs.includes('fulfillment') && (
-              <DashboardTabTrigger
-                value="fulfillment"
-                label="Fulfillment"
-              />
-            )}
-            {/* Legacy tabs stay registered in code, but are not publicly visible. */}
-            {visibleTabs.includes('overview') && (
-              <DashboardTabTrigger
-                value="overview"
-                label="Overview"
-              />
-            )}
-            {visibleTabs.includes('miner-tracker') && (
-              <DashboardTabTrigger
-                value="miner-tracker"
-                label="Miner Tracker"
-                shortLabel="Miner"
-              />
-            )}
-            {visibleTabs.includes('epoch-analysis') && (
-              <DashboardTabTrigger
-                value="epoch-analysis"
-                label="Epoch Analysis"
-                shortLabel="Epoch"
-              />
-            )}
-            {visibleTabs.includes('submission-tracker') && (
-              <DashboardTabTrigger
-                value="submission-tracker"
-                label="Lead Search"
-                shortLabel="Search"
-              />
-            )}
-            {visibleTabs.includes('faq') && (
-              <DashboardTabTrigger
-                value="faq"
-                label="FAQ"
-              />
-            )}
-          </TabsList>
-          <span
-            ref={tabIndicatorRef}
-            aria-hidden
-            className="pointer-events-none absolute bottom-[-0.5px] left-0 h-[1.5px] w-0 bg-[var(--white)] opacity-0 transition-[left,width,opacity] duration-300 ease-[cubic-bezier(0.16,1,0.3,1)]"
-          />
+            <TabsList className={cn('flex w-full justify-start gap-8 sm:gap-10 overflow-x-auto no-scrollbar rounded-none border-0 border-b border-[var(--line)] bg-transparent h-auto p-0')}>
+              <DashboardTabTrigger value="research-lab" label="Open Source Agent Competition" shortLabel="Competition" />
+              <DashboardTabTrigger value="faq" label="FAQ" />
+            </TabsList>
+            <span
+              ref={tabIndicatorRef}
+              aria-hidden
+              className="pointer-events-none absolute bottom-[-0.5px] left-0 h-[1.5px] w-0 bg-[var(--white)] opacity-0 transition-[left,width,opacity] duration-300 ease-[cubic-bezier(0.16,1,0.3,1)]"
+            />
           </div>
 
-          {/* Launch tabs stay mounted so switching tabs does not flash loading states. */}
-          {visibleTabs.includes('research-lab') && mountedTabs.has('research-lab') && (
-            <TabsContent
-              value="research-lab"
-              keepMounted
-              className="data-[state=active]:animate-in data-[state=active]:fade-in-0 data-[state=active]:duration-300"
-            >
+          {mountedTabs.has('research-lab') && (
+            <TabsContent value="research-lab" keepMounted className="data-[state=active]:animate-in data-[state=active]:fade-in-0 data-[state=active]:duration-300">
               <ErrorBoundary label="ResearchLab">
-                <ResearchLab metagraph={metagraph} active={activeTab === 'research-lab'} />
+                <ResearchLab active={activeTab === 'research-lab'} />
               </ErrorBoundary>
             </TabsContent>
           )}
-
-          {visibleTabs.includes('fulfillment') && mountedTabs.has('fulfillment') && (
-            <TabsContent
-              value="fulfillment"
-              keepMounted
-              className="data-[state=active]:animate-in data-[state=active]:fade-in-0 data-[state=active]:duration-300"
-            >
-              <ErrorBoundary label="Fulfillment">
-                <Fulfillment active={activeTab === 'fulfillment'} />
-              </ErrorBoundary>
-            </TabsContent>
-          )}
-
-          {visibleTabs.includes('faq') && mountedTabs.has('faq') && (
-            <TabsContent
-              value="faq"
-              keepMounted
-              className="data-[state=active]:animate-in data-[state=active]:fade-in-0 data-[state=active]:duration-300"
-            >
-              <ErrorBoundary label="FAQ">
-                <FAQ />
-              </ErrorBoundary>
-            </TabsContent>
-          )}
-
-          {/* Legacy tabs: keepMounted is intentional here so the
-              chart-heavy Overview / MinerTracker views don't lose state
-              if they are re-enabled later. */}
-          {visibleTabs.includes('overview') && (
-            <TabsContent value="overview" keepMounted>
-              <Overview
-                metrics={metrics}
-                minerStats={minerStats}
-                rejectionReasons={rejectionReasons}
-                activeMinerCount={activeMinerCount}
-                inventoryData={inventoryData}
-                weeklyInventoryData={weeklyInventoryData}
-                leadInventoryCount={dashboardData.leadInventoryCount}
-                alphaPrice={metagraph?.alphaPrice ?? null}
-                onMinerClick={handleMinerClick}
-                metagraph={metagraph}
-              />
-            </TabsContent>
-          )}
-
-          {visibleTabs.includes('miner-tracker') && (
-            <TabsContent value="miner-tracker" keepMounted>
-              <MinerTracker
-                minerStats={minerStats}
-                activeMiners={activeMiners}
-                metagraph={metagraph}
-                externalSelectedMiner={selectedMinerHotkey}
-                onMinerSelected={() => setSelectedMinerHotkey(null)}
-              />
-            </TabsContent>
-          )}
-
-          {visibleTabs.includes('epoch-analysis') && (
-            <TabsContent value="epoch-analysis" keepMounted>
-              <EpochAnalysis
-                epochStats={epochStats}
-                metagraph={metagraph}
-                onMinerClick={handleMinerClick}
-                externalSelectedEpoch={selectedEpochId}
-                onEpochSelected={() => setSelectedEpochId(null)}
-              />
-            </TabsContent>
-          )}
-
-          {visibleTabs.includes('submission-tracker') && (
-            <TabsContent value="submission-tracker" keepMounted>
-              <SubmissionTracker
-                minerStats={minerStats}
-                epochStats={epochStats}
-                metagraph={metagraph}
-                onUidClick={handleUidClick}
-                onEpochClick={handleEpochClick}
-              />
+          {mountedTabs.has('faq') && (
+            <TabsContent value="faq" keepMounted className="data-[state=active]:animate-in data-[state=active]:fade-in-0 data-[state=active]:duration-300">
+              <ErrorBoundary label="FAQ"><FAQ /></ErrorBoundary>
             </TabsContent>
           )}
         </Tabs>
@@ -444,17 +115,12 @@ export function DashboardClient({
   )
 }
 
-/* ============================================================
- * DashboardTabTrigger. Styled to match the editorial palette.
- * Gold active indicator, warm-neutral resting state, accessible
- * focus ring. Replaces the default muted Radix styling.
- * ============================================================ */
 function DashboardTabTrigger({
   value,
   label,
   shortLabel,
 }: {
-  value: string
+  value: DashboardTabKey
   label: string
   shortLabel?: string
 }) {
@@ -464,18 +130,12 @@ function DashboardTabTrigger({
       className={cn(
         'relative flex-none inline-flex items-center justify-center rounded-none border-0 bg-transparent',
         'h-10 px-1 font-mono text-[11px] uppercase tracking-[0.14em] whitespace-nowrap transition-colors duration-200',
-        // Resting state. The dark: variants are required so they win over the
-        // base trigger's own dark:text-muted-foreground — tailwind-merge keeps
-        // both variant groups, and the .dark-scoped one has higher specificity.
         'text-[var(--muted-2)] dark:text-[var(--muted-2)] hover:bg-transparent',
         'hover:text-[var(--platinum)] dark:hover:text-[var(--platinum)]',
         'focus:outline-none focus-visible:text-[var(--platinum)]',
-        // Active: brightest white text only. The sliding indicator in the nav
-        // wrapper draws the underline. Kill the base trigger's active box,
-        // shadow, border and text override in BOTH light and dark.
         'data-[state=active]:bg-transparent dark:data-[state=active]:bg-transparent',
         'data-[state=active]:text-[var(--white)] dark:data-[state=active]:text-[var(--white)]',
-        'data-[state=active]:shadow-none data-[state=active]:border-transparent dark:data-[state=active]:border-transparent'
+        'data-[state=active]:shadow-none data-[state=active]:border-transparent dark:data-[state=active]:border-transparent',
       )}
     >
       <span className="inline md:hidden">{shortLabel ?? label}</span>

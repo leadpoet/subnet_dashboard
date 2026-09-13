@@ -2,20 +2,12 @@ import { GetSecretValueCommand, SecretsManagerClient } from '@aws-sdk/client-sec
 import { pathToFileURL } from 'node:url'
 
 export const REQUIRED_RUNTIME_SECRET_KEYS = Object.freeze([
-  'SUPABASE_SECRET_KEY',
-  'OPENROUTER_KEY',
   'ADMIN_USER',
   'ADMIN_PASS',
   'ADMIN_SESSION_SECRET',
-  'RESEARCH_LAB_ALERT_DISCORD_WEBHOOK_URL',
 ])
 
-export const OPTIONAL_RUNTIME_SECRET_KEYS = Object.freeze([
-  'RESEARCH_LAB_ALERT_RESEND_API_KEY',
-  'RESEARCH_LAB_ALERT_EMAIL_FROM',
-  'RESEARCH_LAB_ALERT_EMAIL_TO',
-  'RESEARCH_LAB_ALERT_EMAIL_REPLY_TO',
-])
+export const OPTIONAL_RUNTIME_SECRET_KEYS = Object.freeze([])
 
 export const RUNTIME_SECRET_KEYS = Object.freeze([
   ...REQUIRED_RUNTIME_SECRET_KEYS,

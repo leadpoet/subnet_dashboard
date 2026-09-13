@@ -28,20 +28,19 @@ const requiredOnly = Object.fromEntries(
 assert.deepEqual(
   parseRuntimeSecret(JSON.stringify(requiredOnly)),
   requiredOnly,
-  'Research Lab alert delivery and Resend stay optional until configured',
+  'all dashboard runtime secrets are required',
 )
-assert.equal(OPTIONAL_RUNTIME_SECRET_KEYS.length, 4)
-assert.ok(!OPTIONAL_RUNTIME_SECRET_KEYS.includes('SOURCING_MODEL_GITHUB_TOKEN'))
+assert.equal(OPTIONAL_RUNTIME_SECRET_KEYS.length, 0)
 
 const shell = formatShellEnvironment(parsed)
-assert.match(shell, /^SUPABASE_SECRET_KEY='value-0'$/m)
+assert.match(shell, /^ADMIN_USER='value-0'$/m)
 assert.match(shell, /ADMIN_PASS='spaces \$dollar '\"'\"'quote'\"'\"'\nand newline'/)
 assert.doesNotMatch(shell, /IGNORED_EXTRA_KEY/)
 assert.equal(shell.trimEnd().split('\n').filter((line) => /^[A-Z0-9_]+=/.test(line)).length, RUNTIME_SECRET_KEYS.length)
 
 assert.throws(
-  () => parseRuntimeSecret(JSON.stringify({ ...document, OPENROUTER_KEY: '' })),
-  /missing non-empty OPENROUTER_KEY/,
+  () => parseRuntimeSecret(JSON.stringify({ ...document, ADMIN_SESSION_SECRET: '' })),
+  /missing non-empty ADMIN_SESSION_SECRET/,
 )
 assert.throws(
   () => parseRuntimeSecret(JSON.stringify({ ...document, ADMIN_USER: ' admin' })),
@@ -61,23 +60,16 @@ assert.doesNotMatch(launcher, /if \(process\.argv\[1\]/)
 
 const require = createRequire(import.meta.url)
 const ecosystem = require('../ecosystem.config.cjs')
-assert.deepEqual(ecosystem.apps[0].filter_env, [...RUNTIME_SECRET_KEYS])
+for (const key of RUNTIME_SECRET_KEYS) assert.ok(ecosystem.apps[0].filter_env.includes(key))
+for (const key of ['SUPABASE_SECRET_KEY', 'OPENROUTER_KEY', 'RESEARCH_LAB_ALERT_DISCORD_WEBHOOK_URL']) {
+  assert.ok(ecosystem.apps[0].filter_env.includes(key), `${key} must be scrubbed from stale PM2 metadata`)
+}
 assert.match(ecosystem.apps[0].script, /scripts\/start-production\.mjs$/)
-assert.equal(ecosystem.apps[0].env.RESEARCH_LAB_ALERT_MONITOR_ENABLED, 'true')
-assert.equal(ecosystem.apps[0].env.RESEARCH_LAB_EVENT_MONITOR_ENABLED, undefined)
+assert.equal(ecosystem.apps[0].env.NODE_ENV, 'production')
 
 const deployment = await readFile(new URL('../.github/workflows/deploy.yml', import.meta.url), 'utf8')
-assert.match(deployment, /scripts\/verify-runtime-monitors\.mjs/)
-assert.match(deployment, /VERIFY_MONITOR_AFTER/)
 assert.match(deployment, /Correcting stale slot pointer/)
-assert.match(deployment, /Runtime monitor verification failed; restoring \$ACTIVE_SLOT/)
-
-const runtimeMonitorVerifier = await readFile(
-  new URL('./verify-runtime-monitors.mjs', import.meta.url),
-  'utf8',
-)
-assert.match(runtimeMonitorVerifier, /research-lab-alerts:v1/)
-assert.doesNotMatch(runtimeMonitorVerifier, /research-lab-events:v1|ops_research_lab_event_monitor_state/)
+assert.doesNotMatch(deployment, /verify-runtime-monitors|RESEARCH_LAB_ALERT_MONITOR/)
 
 const runtimeSecretEnvironment = await readFile(
   new URL('../src/lib/runtime-secret-environment.ts', import.meta.url),

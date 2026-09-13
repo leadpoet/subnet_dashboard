@@ -19,21 +19,12 @@ jobs:
       - name: Stop abandoned legacy EC2 build
         uses: appleboy/ssh-action@v1.2.0
         timeout-minutes: 3
-        env:
-          RESEARCH_LAB_ALERT_MONITOR_ENABLED: "true"
-          RESEARCH_LAB_ALERT_MONITOR_INTERVAL_MS: "60000"
-          RESEARCH_LAB_ALERT_SIGNALS: pcr0_mismatch,pcr0_missing,pcr0_stale,offchain_weight_bundle_missing,offchain_weight_bundle_stale,transparency_checkpoint_stale
-          OPS_MONITORED_VALIDATOR_HOTKEYS: 5FNVgRnrxMibhcBGEAaajGrYjsaCn441a5HuGUBUNnxEBLo9
-          RESEARCH_LAB_ALERT_DASHBOARD_URL: https://subnet71.com/admin
-          RESEARCH_LAB_ALERT_MINIMUM_SEVERITY: warning
-          RESEARCH_LAB_ALERT_TIMEOUT_MS: "10000"
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ec2-user
           key: ${{ secrets.EC2_SSH_KEY }}
           timeout: 45s
           command_timeout: 2m
-          envs: RESEARCH_LAB_ALERT_MONITOR_ENABLED,RESEARCH_LAB_ALERT_MONITOR_INTERVAL_MS,RESEARCH_LAB_ALERT_SIGNALS,OPS_MONITORED_VALIDATOR_HOTKEYS,RESEARCH_LAB_ALERT_DASHBOARD_URL,RESEARCH_LAB_ALERT_MINIMUM_SEVERITY,RESEARCH_LAB_ALERT_TIMEOUT_MS
           script: |
             set -euo pipefail
 
@@ -85,8 +76,6 @@ jobs:
 
       - name: Build production artifact
         env:
-          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
-          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
           NODE_OPTIONS: --max-old-space-size=4096
         run: |
           set -euo pipefail
@@ -111,24 +100,16 @@ jobs:
         uses: appleboy/ssh-action@v1.2.0
         timeout-minutes: 12
         env:
-          RESEARCH_LAB_ALERT_MONITOR_ENABLED: "true"
-          RESEARCH_LAB_ALERT_MONITOR_INTERVAL_MS: "60000"
-          RESEARCH_LAB_ALERT_SIGNALS: pcr0_mismatch,pcr0_missing,pcr0_stale,offchain_weight_bundle_missing,offchain_weight_bundle_stale,transparency_checkpoint_stale
-          OPS_MONITORED_VALIDATOR_HOTKEYS: 5FNVgRnrxMibhcBGEAaajGrYjsaCn441a5HuGUBUNnxEBLo9
-          RESEARCH_LAB_ALERT_DASHBOARD_URL: https://subnet71.com/admin
-          RESEARCH_LAB_ALERT_MINIMUM_SEVERITY: warning
-          RESEARCH_LAB_ALERT_TIMEOUT_MS: "10000"
           AWS_REGION: us-east-1
           AWS_DEFAULT_REGION: us-east-1
           SUBNET_DASHBOARD_SECRET_ID: leadpoet/prod/subnet-dashboard/env
-          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ec2-user
           key: ${{ secrets.EC2_SSH_KEY }}
           timeout: 45s
           command_timeout: 12m
-          envs: RESEARCH_LAB_ALERT_MONITOR_ENABLED,RESEARCH_LAB_ALERT_MONITOR_INTERVAL_MS,RESEARCH_LAB_ALERT_SIGNALS,OPS_MONITORED_VALIDATOR_HOTKEYS,RESEARCH_LAB_ALERT_DASHBOARD_URL,RESEARCH_LAB_ALERT_MINIMUM_SEVERITY,RESEARCH_LAB_ALERT_TIMEOUT_MS,AWS_REGION,AWS_DEFAULT_REGION,SUBNET_DASHBOARD_SECRET_ID,NEXT_PUBLIC_SUPABASE_URL
+          envs: AWS_REGION,AWS_DEFAULT_REGION,SUBNET_DASHBOARD_SECRET_ID
           script: |
             set -euo pipefail
 
@@ -319,7 +300,7 @@ jobs:
             fi
 
             # Prove the new build can boot before changing the production worker.
-            RESEARCH_LAB_ALERT_MONITOR_ENABLED=false NEXT_DIST_DIR="$CANDIDATE_SLOT" \
+            NEXT_DIST_DIR="$CANDIDATE_SLOT" \
               pm2 start "$APP_ROOT/scripts/start-production.mjs" \
               --name subnet-dashboard-candidate \
               --cwd "$APP_ROOT" \
@@ -348,12 +329,11 @@ jobs:
             # The process was migrated to this committed cluster definition by
             # commit 7f468eb. A cluster reload starts the replacement worker before
             # retiring the old worker, keeping port 3000 continuously available.
-            MONITOR_VERIFY_AFTER="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
             NEXT_DIST_DIR="$CANDIDATE_SLOT" pm2 startOrReload "$APP_ROOT/ecosystem.config.cjs" --update-env
 
             production_healthy=false
-            # Cache warmup (metagraph fetch + dashboard transforms) can hold the
-            # reloaded worker past the old 60s budget; give it 4 minutes before
+            # Arena and metagraph startup can hold the reloaded worker past the
+            # old 60s budget; give it 4 minutes before
             # declaring failure and rolling back.
             for attempt in $(seq 1 120); do
               if curl --fail --silent --show-error --max-time 10 http://127.0.0.1:3000/api/health/ready > /dev/null; then
@@ -374,7 +354,7 @@ jobs:
             # A single successful request is not enough: the previous 700 MB
             # watchdog failure appeared about 30 seconds after boot. Require the
             # same production PID to remain healthy beyond that interval. The
-            # readiness endpoint includes a live database probe, so tolerate an
+            # readiness endpoint includes live Arena and metagraph probes, so tolerate an
             # isolated timeout while rejecting a restart or sustained failures.
             production_pid="$(pm2 pid subnet-dashboard)"
             production_stable=true
@@ -409,37 +389,6 @@ jobs:
               echo "Production worker restarted or became unhealthy during the stability window"
               pm2 status
               pm2 logs subnet-dashboard --lines 100 --nostream
-              NEXT_DIST_DIR="$ACTIVE_SLOT" pm2 startOrReload "$APP_ROOT/ecosystem.config.cjs" --update-env || true
-              exit 1
-            fi
-
-            # A healthy HTTP response does not prove the background schedulers
-            # started. Read the secret only inside this verification subshell,
-            # then require both durable monitor leases to be claimed by the new
-            # worker. Values never enter PM2's managed environment.
-            umask 077
-            RUNTIME_SECRET_FILE="$(mktemp "$HOME/.subnet-dashboard-runtime-secret.XXXXXX")"
-            cleanup_runtime_secret_file() {
-              rm -f "$RUNTIME_SECRET_FILE"
-            }
-            trap cleanup_runtime_secret_file EXIT
-            monitor_verified=true
-            if ! node "$APP_ROOT/scripts/load-runtime-secret.mjs" > "$RUNTIME_SECRET_FILE"; then
-              monitor_verified=false
-            elif ! (
-              set -a
-              . "$RUNTIME_SECRET_FILE"
-              set +a
-              VERIFY_MONITOR_AFTER="$MONITOR_VERIFY_AFTER" \
-                node "$APP_ROOT/scripts/verify-runtime-monitors.mjs"
-            ); then
-              monitor_verified=false
-            fi
-            cleanup_runtime_secret_file
-            trap - EXIT
-
-            if [ "$monitor_verified" != true ]; then
-              echo "Runtime monitor verification failed; restoring $ACTIVE_SLOT"
               NEXT_DIST_DIR="$ACTIVE_SLOT" pm2 startOrReload "$APP_ROOT/ecosystem.config.cjs" --update-env || true
               exit 1
             fi

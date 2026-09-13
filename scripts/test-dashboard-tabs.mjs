@@ -24,60 +24,22 @@ try {
   const {
     getDashboardTabs,
     isDashboardTab,
-    isSubnet71PublicRequest,
-    isSubnet71PublicHost,
     normalizeDashboardTab,
   } = require(join(outDir, 'dashboard-tabs.js'))
 
-  assert.equal(isSubnet71PublicHost('subnet71.com'), true)
-  assert.equal(isSubnet71PublicHost('www.subnet71.com:443'), true)
-  assert.equal(isSubnet71PublicHost('SUBNET71.COM.'), true)
-  assert.equal(isSubnet71PublicHost('subnet71.com, internal.proxy'), true)
-  assert.equal(isSubnet71PublicHost('internal.proxy, subnet71.com'), true)
-  assert.equal(isSubnet71PublicHost('subnet71.com.evil.example'), false)
-  assert.equal(isSubnet71PublicHost('localhost:3000'), false)
-  assert.equal(isSubnet71PublicHost('dashboard.leadpoet.com'), false)
-  assert.equal(
-    isSubnet71PublicRequest('subnet71.com', 'internal.proxy:3000'),
-    true,
-    'the browser-facing host must win when x-forwarded-host is an internal upstream host',
-  )
-  assert.equal(
-    isSubnet71PublicRequest('internal.proxy:3000', 'subnet71.com'),
-    true,
-    'the public forwarded host must still work when host is internal',
-  )
-  assert.equal(isSubnet71PublicRequest('localhost:3000', 'internal.proxy:3000'), false)
-
-  const publicTabs = getDashboardTabs(true)
-  const defaultTabs = getDashboardTabs(false)
-  assert.deepEqual(publicTabs, ['research-lab', 'faq'])
-  assert.deepEqual(defaultTabs, ['research-lab', 'fulfillment', 'faq'])
-  assert.equal(isDashboardTab('faq', publicTabs), true)
-  assert.equal(isDashboardTab('fulfillment', publicTabs), false)
-  assert.equal(normalizeDashboardTab('fulfillment', publicTabs), 'research-lab')
-  assert.equal(normalizeDashboardTab('faq', publicTabs), 'faq')
-  assert.equal(normalizeDashboardTab('fulfillment', defaultTabs), 'fulfillment')
+  const tabs = getDashboardTabs()
+  assert.deepEqual(tabs, ['research-lab', 'faq'])
+  assert.equal(isDashboardTab('faq', tabs), true)
+  assert.equal(isDashboardTab('fulfillment', tabs), false)
+  assert.equal(normalizeDashboardTab('fulfillment', tabs), 'research-lab')
+  assert.equal(normalizeDashboardTab('faq', tabs), 'faq')
 
   const pageSource = await readFile(resolve('src/app/page.tsx'), 'utf8')
   const clientSource = await readFile(resolve('src/components/dashboard/DashboardClient.tsx'), 'utf8')
-  assert.match(pageSource, /headers\(\)/)
-  assert.match(pageSource, /isSubnet71PublicRequest\(/)
-  assert.match(pageSource, /requestHeaders\.get\('host'\)/)
-  assert.match(pageSource, /requestHeaders\.get\('x-forwarded-host'\)/)
-  assert.match(clientSource, /getDashboardTabs\(isSubnet71Public\)/)
+  assert.match(pageSource, /<DashboardClient \/>/)
+  assert.match(clientSource, /getDashboardTabs\(\)/)
   assert.match(clientSource, /normalizeDashboardTab\(tab, visibleTabs\)/)
-  assert.match(
-    clientSource,
-    /\{visibleTabs\.includes\('fulfillment'\) && \(\s*<DashboardTabTrigger/,
-    'the Fulfillment trigger must use the host-specific tab policy',
-  )
-  assert.match(
-    clientSource,
-    /\{visibleTabs\.includes\('fulfillment'\) && mountedTabs\.has\('fulfillment'\) && \(/,
-    'the Fulfillment content must use the host-specific tab policy',
-  )
-  assert.doesNotMatch(clientSource, /window\.location\.hostname/)
+  assert.doesNotMatch(clientSource, /fulfillment|\/api\/dashboard/i)
 
   console.log('dashboard-tabs: hostname visibility and active-tab fallback checks passed')
 } finally {

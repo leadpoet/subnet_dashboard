@@ -125,14 +125,14 @@ try {
 
   const routeSource = await readFile(resolve('src/app/api/admin/research-lab/route.ts'), 'utf8')
   assert.match(routeSource, /fetchGatewayDeployment\(\{ gatewayUrl: GATEWAY_URL \}\)/)
-  assert.match(routeSource, /buildValidatorDeployment\(/)
-  assert.match(routeSource, /ops_attestation_current/)
+  assert.match(routeSource, /\/arena\/v1\/current/)
+  assert.doesNotMatch(routeSource, /buildValidatorDeployment\(|ops_attestation_current/)
   assert.doesNotMatch(routeSource, /github\.com|Sourcing_model|fetchLeadpoetCommitComparison|manifestHash/)
 
   const componentSource = await readFile(resolve('src/app/admin/_components/AdminResearchLab.tsx'), 'utf8')
-  assert.match(componentSource, /Gateway and validator/)
-  assert.match(componentSource, /Validator runtime/)
-  console.log('gateway-deployment: gateway deployment parsing and active validator status wiring passed')
+  assert.match(componentSource, /Gateway release/)
+  assert.doesNotMatch(componentSource, /Validator runtime/)
+  console.log('gateway-deployment: gateway deployment parsing and current Arena wiring passed')
 } finally {
   await rm(outDir, { recursive: true, force: true })
 }

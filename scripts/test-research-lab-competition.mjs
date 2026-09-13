@@ -153,7 +153,7 @@ try {
     require(name) {
       if (name === '@/lib/research-lab-competition') return require(join(outDir, 'research-lab-competition.js'))
       // These imports belong to other panels, which this summary must not run.
-      if (name === '@/lib/hooks/useVisiblePolling' || name === '@/lib/research-lab-emissions') return {}
+      if (name === '@/lib/hooks/useVisiblePolling') return {}
       return require(name)
     },
   })
@@ -261,10 +261,10 @@ try {
       }
     }
   }
-  assert.doesNotMatch(component, /if \(!competition\) return/, 'an Arena outage must not hide the independent settlement view')
+  assert.doesNotMatch(component, /if \(!competition\) return/, 'an Arena outage must render its retry state')
   assert.match(component, /competition\?\.repoUrl \?\? DEFAULT_REPO_URL/)
   assert.match(component, /Competition data is temporarily unavailable\. This page will retry automatically\./)
-  assert.match(component, /<LabEmissionSplit spend=\{settlement\?\.labMinerSpend \?\? null\}/)
+  assert.doesNotMatch(component, /settlement|LabEmissionSplit|\/api\/research-lab\?/)
   assert.match(component, /const selectedRound = roundOptions\[0\] \?\? null/, 'the displayed round must follow the automatic priority order on every refresh')
   assert.doesNotMatch(component, /selectedRoundId|setSelectedRoundId|onSelectRound|roundOptionLabel|Competition round/, 'manual round selection must remain absent')
   assert.match(component, /Public ICPs \(20\)/)
@@ -306,7 +306,7 @@ try {
   const proxy = await readFile(resolve('src/lib/arena-public-proxy.ts'), 'utf8')
   assert.match(proxy, /PUBLIC_ID/)
   assert.match(proxy, /cache: 'no-store'/)
-  assert.match(proxy, /AbortSignal\.timeout\(8_000\)/)
+  assert.match(proxy, /AbortSignal\.timeout\(timeoutMs\)/)
   const codeRoute = await readFile(resolve('src/app/api/research-lab/submissions/[submissionId]/code/route.ts'), 'utf8')
   assert.match(codeRoute, /publicArenaId/)
   assert.match(codeRoute, /encodeURIComponent\(submissionId\)/)

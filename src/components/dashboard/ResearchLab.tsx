@@ -1,9 +1,7 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { useVisiblePolling } from '@/lib/hooks/useVisiblePolling'
-import type { MetagraphData } from '@/lib/types'
-import { formatLabAllocationPercent } from '@/lib/research-lab-emissions'
 import {
   DEFAULT_REPO_URL,
   competitionSubmissionStatusLabel,
@@ -23,48 +21,30 @@ import {
   type CompetitionSubmissionResults,
 } from '@/lib/research-lab-competition'
 
-type ResearchLabData = { labMinerSpend: LabMinerSpendRollup; fetchedAt: string }
-type LabMinerSpendRollup = {
-  byHotkey: Record<string, LabMinerSpendEntry>
-  allTime: { byHotkey: Record<string, LabMinerAllTimeEntry> }
-  currentAllocation: { epoch: number | null; source: string; byHotkey: Record<string, LabMinerCurrentAllocationEntry> }
-}
-type LabMinerSpendEntry = { computeSpendUsd: number; scheduledReimbursementUsd: number; activeAwardCount: number; reimbursementEpochs: number | null }
-type LabMinerAllTimeEntry = { alphaEarned: number; computeSpendUsd: number; scheduledReimbursementUsd: number; awardCount: number; reimbursementEpochs: number | null; alphaAllocationCount: number }
-type LabMinerCurrentAllocationEntry = { paidAlphaPercent: number; intendedAlphaPercent: number; overpaidAlphaPercent: number; spendUsd: number; labBucketSharePercent: number; allocationCount: number; reasons: string[] }
 type ReleaseState = 'idle' | 'loading' | 'available' | 'gated' | 'error'
 
 export function ResearchLab({
   onSync,
-  metagraph,
   active = true,
-}: { onSync?: () => void; metagraph?: MetagraphData | null; active?: boolean } = {}) {
-  const [settlement, setSettlement] = useState<ResearchLabData | null>(null)
+}: { onSync?: () => void; active?: boolean } = {}) {
   const [competition, setCompetition] = useState<CompetitionSnapshot | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
   const fetchData = useCallback(async () => {
-    const [competitionRequest, settlementRequest] = await Promise.allSettled([
-      fetchJson('/api/research-lab/competition'),
-      fetchJson(`/api/research-lab?t=${Date.now()}`),
-    ])
-    let refreshed = false
-    if (competitionRequest.status === 'fulfilled') {
-      const normalized = normalizeCompetitionSnapshot(competitionRequest.value)
+    try {
+      const response = await fetchJson('/api/research-lab/competition')
+      const normalized = normalizeCompetitionSnapshot(response)
       if (normalized) {
         setCompetition(normalized)
         setError(null)
-        refreshed = true
+        onSync?.()
       } else setError('Competition data did not match the public contract.')
-    } else setError(errorMessage(competitionRequest.reason, 'Competition data is temporarily unavailable.'))
-    if (settlementRequest.status === 'fulfilled') {
-      const body = asRecord(settlementRequest.value)
-      if (body?.success === true && asRecord(body.data)) setSettlement(body.data as ResearchLabData)
-      refreshed = true
+    } catch (requestError) {
+      setError(errorMessage(requestError, 'Competition data is temporarily unavailable.'))
+    } finally {
+      setLoading(false)
     }
-    if (refreshed) onSync?.()
-    setLoading(false)
   }, [onSync])
 
   useVisiblePolling(fetchData, 60_000, { enabled: active })
@@ -76,13 +56,6 @@ export function ResearchLab({
     <div className="w-full">
       <CompetitionHeader competition={competition} />
       {!competition ? <Unavailable message="Competition data is temporarily unavailable. This page will retry automatically." /> : selectedRound ? <><RoundSummary round={selectedRound} /><RoundWorkspace round={selectedRound} active={active} /></> : <p className="border-b border-[var(--line)] py-12 text-[14px] text-[var(--muted)]">No production competition round is available.</p>}
-      <details className="group mt-12 border-t border-[var(--line)] pt-1">
-        <summary className="flex cursor-pointer list-none items-center justify-between gap-4 py-5 font-display text-[17px] text-[var(--muted)] focus:outline-none focus-visible:text-[var(--white)] [&::-webkit-details-marker]:hidden">
-          <span>Competition settlement and emissions</span><span aria-hidden className="font-mono text-[11px] text-[var(--muted-2)] transition-transform group-open:rotate-45">+</span>
-        </summary>
-        <p className="mb-5 max-w-2xl text-[12px] leading-relaxed text-[var(--muted-2)]">Current competition allocation, metagraph emissions, reimbursement, and compute spend remain available for settlement review.</p>
-        <LabEmissionSplit spend={settlement?.labMinerSpend ?? null} metagraph={metagraph} />
-      </details>
       {error && competition ? <p className="mt-5 text-[12px] text-[var(--muted-2)]">Latest refresh failed: {error}</p> : null}
     </div>
   )
@@ -320,18 +293,8 @@ function SourcePanel({ submission, cancelled, code, codeState, selectedFile, onS
 
 function InlineNotice({ children }: { children: ReactNode }) { return <p className="rounded-md border border-[var(--line)] bg-[#0a0a0a] px-4 py-4 text-[12px] leading-relaxed text-[var(--muted-2)]">{children}</p> }
 
-function LabEmissionSplit({ spend, metagraph }: { spend: LabMinerSpendRollup | null; metagraph?: MetagraphData | null }) {
-  const rows = useMemo(() => {
-    const current = spend?.currentAllocation?.byHotkey ?? {}; const recent = spend?.byHotkey ?? {}; const allTime = spend?.allTime?.byHotkey ?? {}; const keys = new Set([...Object.keys(current), ...Object.keys(recent), ...Object.keys(allTime), ...Object.keys(metagraph?.incentives ?? {})])
-    return Array.from(keys).map((hotkey) => ({ hotkey, metagraphPct: Math.max(0, Number(metagraph?.incentives?.[hotkey] ?? 0) * 100), paidAlphaPct: Math.max(0, Number(current[hotkey]?.paidAlphaPercent ?? 0)), computeSpendUsd: Math.max(0, Number(recent[hotkey]?.computeSpendUsd ?? 0)), reimbursementUsd: Math.max(0, Number(recent[hotkey]?.scheduledReimbursementUsd ?? 0)), alphaEarned: Math.max(0, Number(allTime[hotkey]?.alphaEarned ?? 0)) })).filter((row) => row.metagraphPct > 0 || row.paidAlphaPct > 0 || row.computeSpendUsd > 0 || row.alphaEarned > 0).sort((a, b) => b.metagraphPct - a.metagraphPct || b.alphaEarned - a.alphaEarned || a.hotkey.localeCompare(b.hotkey))
-  }, [metagraph?.incentives, spend])
-  if (rows.length === 0) return <p className="pb-4 text-[13px] text-[var(--muted-2)]">No current competition allocation or settlement data is available.</p>
-  return <div className="mb-4 overflow-hidden rounded-md border border-[var(--line)]"><div className="hidden grid-cols-[minmax(0,1fr)_130px_130px_130px_130px] gap-3 border-b border-[var(--line)] bg-[rgba(236,234,230,0.018)] px-3 py-2 font-mono text-[9.5px] uppercase tracking-[0.1em] text-[var(--muted-2)] md:grid"><span>Hotkey</span><span className="text-right">Metagraph</span><span className="text-right">Competition</span><span className="text-right">Compute / repay</span><span className="text-right">Alpha earned</span></div>{rows.map((row) => <div key={row.hotkey} className="grid grid-cols-[minmax(0,1fr)_auto] gap-3 border-b border-[var(--line)] px-3 py-3 last:border-b-0 md:grid-cols-[minmax(0,1fr)_130px_130px_130px_130px] md:items-center"><span className="font-mono text-[11px] text-[var(--platinum)]">{shortHotkey(row.hotkey)}</span><span className="text-right font-mono text-[11px] text-[var(--muted)]">{formatLabAllocationPercent(row.metagraphPct)}</span><span className="hidden text-right font-mono text-[11px] text-[var(--muted)] md:block">{formatLabAllocationPercent(row.paidAlphaPct)}</span><span className="text-right font-mono text-[11px] text-[var(--muted)]">{formatUsd(row.computeSpendUsd)} / {formatUsd(row.reimbursementUsd)}</span><span className="hidden text-right font-mono text-[11px] text-[var(--muted)] md:block">{formatAlpha(row.alphaEarned)}</span></div>)}</div>
-}
-
 async function fetchJson(url: string): Promise<unknown> { const response = await fetch(url, { cache: 'no-store', headers: { Accept: 'application/json' } }); if (!response.ok) throw new Error(`Request failed (${response.status})`); return response.json() }
 async function fetchReleasedJson(url: string): Promise<{ state: 'available'; body: unknown } | { state: 'gated'; body: null }> { const response = await fetch(url, { cache: 'no-store', headers: { Accept: 'application/json' } }); if (response.status === 403) return { state: 'gated', body: null }; if (!response.ok) throw new Error(`Request failed (${response.status})`); return { state: 'available', body: await response.json() } }
-function asRecord(value: unknown): Record<string, unknown> | null { return value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null }
 function championMetricDetail(round: CompetitionRoundSummary, championScore: number | null): string {
   if (round.promotionStatus === 'promoted') return `Becomes next baseline · ${formatCompetitionScore(championScore)}`
   if (round.promotionStatus === 'pending') return `Promotion pending · ${formatCompetitionScore(championScore)}`
@@ -345,6 +308,4 @@ function formatUtc(value: string): string { const date = new Date(value); return
 function formatUtcDate(value: string | null): string { if (!value) return 'Date unavailable'; const date = new Date(`${value}T00:00:00Z`); return Number.isFinite(date.getTime()) ? `${new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' }).format(date)} · UTC` : value }
 function utcCalendarDate(value: string | null): string | null { if (!value) return null; const date = new Date(value); return Number.isFinite(date.getTime()) ? date.toISOString().slice(0, 10) : null }
 function isNextUtcDay(start: string | null, end: string | null): boolean { if (!start || !end) return false; const startDate = new Date(`${start}T00:00:00Z`); const endDate = new Date(`${end}T00:00:00Z`); return endDate.getTime() - startDate.getTime() === 86_400_000 }
-function formatUsd(value: number): string { if (!Number.isFinite(value) || value <= 0) return '$0.00'; if (value >= 1) return `$${value.toFixed(2)}`; return '<$0.01' }
-function formatAlpha(value: number): string { if (!Number.isFinite(value) || value <= 0) return '0.0000'; return value >= 1 ? value.toFixed(2) : value.toFixed(4) }
 function errorMessage(value: unknown, fallback: string): string { return value instanceof Error ? value.message : fallback }
