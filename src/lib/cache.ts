@@ -84,7 +84,7 @@ export async function warmCache(): Promise<void> {
   try {
     // Import here to avoid circular dependencies
     const { fetchMetagraph } = await import('./metagraph')
-    const { fetchAllDashboardData, warmLatestLeadsCache } = await import('./db-precalc')
+    const { fetchAllDashboardData } = await import('./db-precalc')
 
     // Fetch metagraph first (needed for dashboard data)
     const metagraph = await fetchMetagraph()
@@ -93,10 +93,6 @@ export async function warmCache(): Promise<void> {
     // Fetch dashboard data (forceRefresh=true to transform and cache)
     await fetchAllDashboardData(0, metagraph, true)
     console.log('[Cache] Dashboard data cached')
-
-    // Warm latest leads cache
-    await warmLatestLeadsCache(metagraph)
-    console.log('[Cache] Latest leads cached')
 
     // Set the background refresh timestamp
     setBackgroundRefreshTimestamp()
@@ -144,7 +140,7 @@ async function doRefresh(): Promise<void> {
 
   try {
     const { fetchMetagraphFresh, setMetagraphCache } = await import('./metagraph')
-    const { fetchAllDashboardData, warmLatestLeadsCache } = await import('./db-precalc')
+    const { fetchAllDashboardData } = await import('./db-precalc')
 
     // Fetch first, then atomically replace the cache while retaining any
     // last-known validator names that the identity enrichment omitted.
@@ -156,9 +152,6 @@ async function doRefresh(): Promise<void> {
 
     // Refresh dashboard data (forceRefresh=true to re-transform)
     await fetchAllDashboardData(0, newMetagraph, true)
-
-    // Refresh latest leads
-    await warmLatestLeadsCache(newMetagraph)
 
     // Set the background refresh timestamp
     setBackgroundRefreshTimestamp()
