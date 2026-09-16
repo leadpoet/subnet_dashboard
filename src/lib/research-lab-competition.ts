@@ -44,11 +44,20 @@ export type CompetitionSubmission = {
   stage1Score: number | null
   finalScore: number | null
   isChampion: boolean
+  codeReview: CompetitionCodeReview
   code: {
     available: boolean
     availableAt: string | null
     url: string | null
   }
+}
+
+export type CompetitionCodeReview = {
+  status: string | null
+  errorCode: string | null
+  providerHttpStatus: number | null
+  retryable: boolean | null
+  attempts: number | null
 }
 
 export type CompetitionBenchmark = {
@@ -129,21 +138,31 @@ export function normalizeCompetitionSubmissions(value: unknown): CompetitionSubm
     const submissionId = text(row.submission_id)
     const minerHotkey = text(row.miner_hotkey)
     if (!submissionId || !minerHotkey) return null
+    const status = text(row.status) || 'queued'
+    const reviewExcluded = isReviewExcludedStatus(status)
     const code = record(row.code)
+    const codeReview = record(row.code_review)
     return {
       submissionId,
       minerHotkey,
       isBaseline: row.is_baseline === true,
-      status: text(row.status) || 'queued',
+      status,
       failureReason: row.failure_reason === 'credential_error' ? 'credential_error' as const : null,
       submittedAt: nullableText(row.submitted_at),
-      stage1Score: score(row.stage1_score),
-      finalScore: score(row.final_score),
-      isChampion: row.is_champion === true,
+      stage1Score: reviewExcluded ? null : score(row.stage1_score),
+      finalScore: reviewExcluded ? null : score(row.final_score),
+      isChampion: reviewExcluded ? false : row.is_champion === true,
+      codeReview: {
+        status: nullableText(codeReview?.status),
+        errorCode: nullableText(codeReview?.error_code),
+        providerHttpStatus: httpStatus(codeReview?.provider_http_status),
+        retryable: typeof codeReview?.retryable === 'boolean' ? codeReview.retryable : null,
+        attempts: integer(codeReview?.attempts),
+      },
       code: {
-        available: code?.available === true,
-        availableAt: nullableText(code?.available_at),
-        url: nullableText(code?.url),
+        available: reviewExcluded ? false : code?.available === true,
+        availableAt: reviewExcluded ? null : nullableText(code?.available_at),
+        url: reviewExcluded ? null : nullableText(code?.url),
       },
     }
   }).filter(isPresent)
@@ -252,9 +271,11 @@ export function competitionRoundOptions(snapshot: CompetitionSnapshot): Competit
 }
 
 export function competitionSubmissionStatusLabel(
-  submission: Pick<CompetitionSubmission, 'isBaseline' | 'isChampion' | 'status' | 'failureReason'>,
+  submission: Pick<CompetitionSubmission, 'isBaseline' | 'isChampion' | 'status' | 'failureReason' | 'codeReview'>,
   round: Pick<CompetitionRoundSummary, 'promotionStatus' | 'status'>,
 ): string {
+  if (submission.status === 'review_failed') return 'Code review could not complete'
+  if (submission.status === 'review_rejected') return 'Code review rejected'
   if (submission.isChampion || submission.status === 'champion') {
     if (round.promotionStatus === 'pending') return 'Champion · promotion pending'
     if (round.promotionStatus === 'promoted') return 'Champion · promoted'
@@ -266,7 +287,31 @@ export function competitionSubmissionStatusLabel(
   if (submission.status === 'scoring_failed' && submission.failureReason === 'credential_error') {
     return 'Provider credential error'
   }
+  if (submission.status === 'queued' || submission.status === 'accepted') {
+    const reviewIssue = codeReviewIssueLabel(submission.codeReview)
+    if (reviewIssue) return reviewIssue
+  }
   return humanizeStatus(submission.status)
+}
+
+export function isCompetitionReviewExcluded(
+  submission: Pick<CompetitionSubmission, 'status'>,
+): boolean {
+  return isReviewExcludedStatus(submission.status)
+}
+
+export function competitionSubmissionEvaluationNotice(
+  submission: Pick<CompetitionSubmission, 'isBaseline' | 'isChampion' | 'status' | 'failureReason' | 'codeReview'>,
+  round: Pick<CompetitionRoundSummary, 'promotionStatus' | 'status'>,
+): string | null {
+  if (isCompetitionReviewExcluded(submission)) {
+    return `${competitionSubmissionStatusLabel(submission, round)}. This submission was not evaluated.`
+  }
+  if (submission.status === 'queued' || submission.status === 'accepted') {
+    const reviewIssue = codeReviewIssueLabel(submission.codeReview)
+    return reviewIssue ? `${reviewIssue}. This submission has not been evaluated yet.` : null
+  }
+  return null
 }
 
 export function formatCompetitionScore(value: number | null): string {
@@ -371,8 +416,33 @@ function humanizeStatus(value: string): string {
   return normalized ? normalized[0].toUpperCase() + normalized.slice(1) : 'Unavailable'
 }
 
+function isReviewExcludedStatus(value: string): boolean {
+  return value === 'review_failed' || value === 'review_rejected'
+}
+
+function codeReviewIssueLabel(review: CompetitionCodeReview): string | null {
+  if (review.status === 'reviewing') return 'Code review in progress'
+  if (review.status !== 'error') return null
+  if (
+    review.errorCode === 'code_review_provider_authentication'
+    || review.providerHttpStatus === 401
+    || review.providerHttpStatus === 403
+  ) return 'Provider credential error'
+  if (review.errorCode === 'code_review_provider_credit' || review.providerHttpStatus === 402) {
+    return 'Insufficient provider credit'
+  }
+  if (review.retryable === true) return 'Code review unavailable · retrying'
+  if (review.status === 'error' || review.errorCode) return 'Code review unavailable'
+  return null
+}
+
 function integer(value: unknown): number | null {
   return typeof value === 'number' && Number.isInteger(value) && value >= 0 ? value : null
+}
+
+function httpStatus(value: unknown): number | null {
+  const normalized = integer(value)
+  return normalized !== null && normalized >= 100 && normalized <= 599 ? normalized : null
 }
 
 function score(value: unknown): number | null {

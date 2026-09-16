@@ -22,6 +22,7 @@ try {
   const require = createRequire(import.meta.url)
   const {
     DEFAULT_REPO_URL,
+    competitionSubmissionEvaluationNotice,
     competitionSubmissionStatusLabel,
     competitionRoundOptions,
     formatCompetitionScore,
@@ -30,6 +31,7 @@ try {
     normalizeCompetitionResults,
     normalizeCompetitionSnapshot,
     normalizeCompetitionSubmissions,
+    isCompetitionReviewExcluded,
   } = require(join(outDir, 'research-lab-competition.js'))
   assert.equal(DEFAULT_REPO_URL, 'https://github.com/leadpoet/pydantic-harness/tree/lab')
 
@@ -72,6 +74,9 @@ try {
   }] })
   assert.equal(submissions[0].stage1Score, 0)
   assert.equal(submissions[0].finalScore, null)
+  assert.deepEqual(submissions[0].codeReview, {
+    status: null, errorCode: null, providerHttpStatus: null, retryable: null, attempts: null,
+  })
   const pendingRound = { ...snapshot.latestCompletedRound, promotionStatus: 'pending' }
   assert.equal(
     competitionSubmissionStatusLabel(submissions[0], pendingRound),
@@ -148,7 +153,7 @@ try {
   const renderedModule = { exports: {} }
   vm.runInNewContext(ts.transpileModule(component, {
     compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX },
-  }).outputText + '\nexports.RoundSummary = RoundSummary; exports.SubmissionTable = SubmissionTable; exports.PublishedResults = PublishedResults;', {
+  }).outputText + '\nexports.RoundSummary = RoundSummary; exports.SubmissionTable = SubmissionTable; exports.PublishedResults = PublishedResults; exports.SourcePanel = SourcePanel;', {
     module: renderedModule, exports: renderedModule.exports,
     require(name) {
       if (name === '@/lib/research-lab-competition') return require(join(outDir, 'research-lab-competition.js'))
@@ -178,6 +183,90 @@ try {
     assert.match(markup, /Champion/)
     assert.match(markup, promotionStatus === 'promoted' ? /Becomes next baseline/ : /Promotion pending/)
   }
+
+  // Public Madara status on September 16, reduced to the fields needed to
+  // verify the new public-list projection and miner-facing copy.
+  const madaraFixture = JSON.parse(await readFile(resolve('scripts/fixtures/competition-madara-review-failure-20260916.json'), 'utf8'))
+  const [madaraReviewFailure] = normalizeCompetitionSubmissions({ submissions: [{
+    submission_id: madaraFixture.public_status.submission_id,
+    miner_hotkey: '5MadaraMiner',
+    is_baseline: false,
+    status: madaraFixture.expected_public_list_status,
+    submitted_at: '2026-09-15T03:48:00Z',
+    stage1_score: 72,
+    final_score: 81,
+    is_champion: true,
+    code: { available: true, available_at: '2026-09-16T00:44:44Z', url: '/must-not-render' },
+    code_review: {
+      ...madaraFixture.public_status.code_review,
+      provider_http_status: null,
+      attempts: 3,
+    },
+  }] })
+  assert.equal(madaraReviewFailure.status, 'review_failed')
+  assert.equal(madaraReviewFailure.stage1Score, null, 'review exclusion must fail closed over an inconsistent upstream score')
+  assert.equal(madaraReviewFailure.finalScore, null, 'review exclusion must never render a fake or stale score')
+  assert.equal(madaraReviewFailure.isChampion, false, 'review exclusion must never imply a winning outcome')
+  assert.deepEqual(madaraReviewFailure.code, { available: false, availableAt: null, url: null })
+  assert.deepEqual(madaraReviewFailure.codeReview, {
+    status: 'error', errorCode: 'code_review_provider_unavailable', providerHttpStatus: null,
+    retryable: null, attempts: 3,
+  })
+  assert.equal('costStatus' in madaraReviewFailure.codeReview, false, 'internal review cost state must not enter the UI model')
+  assert.equal(isCompetitionReviewExcluded(madaraReviewFailure), true)
+  assert.equal(competitionSubmissionStatusLabel(madaraReviewFailure, pendingRound), 'Code review could not complete')
+  assert.equal(
+    competitionSubmissionEvaluationNotice(madaraReviewFailure, pendingRound),
+    'Code review could not complete. This submission was not evaluated.',
+  )
+
+  const reviewRejected = { ...madaraReviewFailure, status: 'review_rejected' }
+  assert.equal(competitionSubmissionStatusLabel(reviewRejected, pendingRound), 'Code review rejected')
+  assert.equal(
+    competitionSubmissionEvaluationNotice(reviewRejected, pendingRound),
+    'Code review rejected. This submission was not evaluated.',
+  )
+  const normalizePendingReview = (codeReview) => normalizeCompetitionSubmissions({ submissions: [{
+    submission_id: 'pending-review', miner_hotkey: '5Pending', status: 'queued',
+    is_baseline: false, stage1_score: null, final_score: null, is_champion: false,
+    code: { available: false, available_at: null, url: null }, code_review: codeReview,
+  }] })[0]
+  const authPending = normalizePendingReview({ status: 'error', error_code: 'code_review_provider_authentication', provider_http_status: 401, attempts: 1 })
+  const creditPending = normalizePendingReview({ status: 'error', error_code: 'code_review_provider_credit', provider_http_status: 402, attempts: 1 })
+  const retryingPending = normalizePendingReview({ status: 'error', error_code: 'code_review_provider_rate_limited', provider_http_status: 429, retryable: true, attempts: 2 })
+  const legacyPending = normalizePendingReview({ status: 'error', error_code: 'code_review_provider_unavailable' })
+  const reviewingWithStaleError = normalizePendingReview({ status: 'reviewing', error_code: 'code_review_provider_unavailable', provider_http_status: 503, retryable: true, attempts: 2 })
+  const passedWithStaleError = normalizePendingReview({ status: 'passed', error_code: 'code_review_provider_authentication', provider_http_status: 401, retryable: true, attempts: 2 })
+  assert.equal(competitionSubmissionStatusLabel(authPending, pendingRound), 'Provider credential error')
+  assert.equal(competitionSubmissionStatusLabel(creditPending, pendingRound), 'Insufficient provider credit')
+  assert.equal(competitionSubmissionStatusLabel(retryingPending, pendingRound), 'Code review unavailable · retrying')
+  assert.equal(competitionSubmissionStatusLabel(legacyPending, pendingRound), 'Code review unavailable')
+  assert.doesNotMatch(competitionSubmissionStatusLabel(legacyPending, pendingRound), /credential|retrying/i, 'legacy generic failures must not invent a cause or retry state')
+  assert.equal(competitionSubmissionStatusLabel(reviewingWithStaleError, pendingRound), 'Code review in progress')
+  assert.equal(competitionSubmissionStatusLabel(passedWithStaleError, pendingRound), 'Queued')
+  assert.equal(competitionSubmissionEvaluationNotice(passedWithStaleError, pendingRound), null, 'a passed review must ignore an old error document')
+
+  const reviewRowsMarkup = renderToStaticMarkup(React.createElement(renderedModule.exports.SubmissionTable, {
+    submissions: [madaraReviewFailure, reviewRejected, authPending, creditPending, retryingPending, legacyPending],
+    round: pendingRound, selectedId: madaraReviewFailure.submissionId, onSelect() {},
+  }))
+  assert.match(reviewRowsMarkup, /Code review could not complete/)
+  assert.match(reviewRowsMarkup, /Code review rejected/)
+  assert.match(reviewRowsMarkup, /Provider credential error/)
+  assert.match(reviewRowsMarkup, /Insufficient provider credit/)
+  assert.match(reviewRowsMarkup, /Code review unavailable · retrying/)
+  assert.doesNotMatch(reviewRowsMarkup, />0\.00</, 'review failures must not render a zero score')
+  const reviewResultsMarkup = renderToStaticMarkup(React.createElement(renderedModule.exports.PublishedResults, {
+    submission: madaraReviewFailure, round: pendingRound, benchmark, benchmarkState: 'available', results: null, resultsState: 'idle',
+  }))
+  assert.match(reviewResultsMarkup, /This submission was not evaluated/)
+  assert.doesNotMatch(reviewResultsMarkup, /provider_unavailable|cost_status|uncertain|72\.00|81\.00/)
+  const reviewSourceMarkup = renderToStaticMarkup(React.createElement(renderedModule.exports.SourcePanel, {
+    submission: madaraReviewFailure, cancelled: false, code: null, codeState: 'idle', selectedFile: null,
+    onSelectFile() {}, onRequest() {},
+  }))
+  assert.match(reviewSourceMarkup, /Source was not published because this submission was not evaluated/)
+  assert.doesNotMatch(reviewSourceMarkup, /View released source|Source locked|Available after evaluation/)
 
   // Public September 12 state, reduced to fields needed for status rendering.
   const credentialFixture = JSON.parse(await readFile(resolve('scripts/fixtures/competition-credential-error-20260912.json'), 'utf8'))
@@ -277,6 +366,8 @@ try {
   assert.match(component, /publicIcpStatus !== 'ready'/)
   assert.match(component, /useVisiblePolling\(refreshRound, 60_000, \{ enabled: active \}\)/)
   assert.match(component, /selectedSubmissionIdRef\.current !== requestedSubmissionId/)
+  assert.match(component, /if \(!selectedSubmissionId \|\| reviewExcluded\) return/, 'terminal review failures must not request a result')
+  assert.ok(component.indexOf('if (!selectedSubmissionId || reviewExcluded) return') < component.indexOf('fetchReleasedJson(`/api/research-lab/rounds/${encodeURIComponent(requestedRoundId)}/results/'), 'the review exclusion gate must run before the result request')
   assert.match(component, /Last known submissions are shown below/)
   assert.match(component, /normalized\?\.roundId !== requestedRoundId/)
   assert.match(component, /Code becomes public when Day 1 evaluation is complete\./)

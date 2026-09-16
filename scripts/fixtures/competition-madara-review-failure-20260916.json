@@ -1,0 +1,17 @@
+{
+  "source": "https://gateway.subnet71.com/arena/v1/submissions/sub-3c67802803dcabc7844267cba4e84d76",
+  "round_id": "arena-2026-09-16",
+  "expected_public_list_status": "review_failed",
+  "public_status": {
+    "submission_id": "sub-3c67802803dcabc7844267cba4e84d76",
+    "status": "rejected",
+    "rejection_rule": "code_review_incomplete",
+    "replaces_submission_id": "sub-56f89db592c3afa5527402aa381d9616",
+    "replaced_by_submission_id": null,
+    "code_review": {
+      "status": "error",
+      "cost_status": "uncertain",
+      "error_code": "code_review_provider_unavailable"
+    }
+  }
+}

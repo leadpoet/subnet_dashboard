@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { useVisiblePolling } from '@/lib/hooks/useVisiblePolling'
 import {
   DEFAULT_REPO_URL,
+  competitionSubmissionEvaluationNotice,
   competitionSubmissionStatusLabel,
   competitionRoundOptions,
   formatCompetitionScore,
@@ -12,6 +13,7 @@ import {
   normalizeCompetitionResults,
   normalizeCompetitionSnapshot,
   normalizeCompetitionSubmissions,
+  isCompetitionReviewExcluded,
   type CompetitionBenchmark,
   type CompetitionCode,
   type CompetitionIcp,
@@ -202,8 +204,11 @@ function RoundWorkspace({ round, active }: { round: CompetitionRoundSummary; act
     setResultsState('loading')
   }, [round.roundId, selectedSubmissionId])
 
+  const selectedSubmission = submissions.find((submission) => submission.submissionId === selectedSubmissionId) ?? null
+  const reviewExcluded = selectedSubmission ? isCompetitionReviewExcluded(selectedSubmission) : false
+
   useEffect(() => {
-    if (!selectedSubmissionId) return
+    if (!selectedSubmissionId || reviewExcluded) return
     const requestedRoundId = round.roundId
     const requestedSubmissionId = selectedSubmissionId
     let active = true
@@ -222,9 +227,8 @@ function RoundWorkspace({ round, active }: { round: CompetitionRoundSummary; act
       setResults(normalized); setResultsState('available')
     }).catch(() => { if (active) setResultsState('error') })
     return () => { active = false }
-  }, [round.roundId, roundRevision, selectedSubmissionId])
+  }, [reviewExcluded, round.roundId, roundRevision, selectedSubmissionId])
 
-  const selectedSubmission = submissions.find((submission) => submission.submissionId === selectedSubmissionId) ?? null
   const selectedCodeFile = code?.files.find((file) => file.path === selectedFile) ?? code?.files[0] ?? null
   const requestCode = async () => {
     if (!selectedSubmission) return
@@ -258,10 +262,13 @@ function SubmissionTable({ submissions, round, selectedId, onSelect }: { submiss
 }
 
 function PublishedResults({ benchmark, benchmarkState, results, resultsState, round, submission }: { benchmark: CompetitionBenchmark | null; benchmarkState: ReleaseState; results: CompetitionSubmissionResults | null; resultsState: ReleaseState; round: CompetitionRoundSummary; submission: CompetitionSubmission }) {
+  const evaluationNotice = competitionSubmissionEvaluationNotice(submission, round)
+  if (isCompetitionReviewExcluded(submission)) return <ResultFrame><InlineNotice>{evaluationNotice}</InlineNotice>{benchmarkState === 'available' && benchmark ? <div className="mt-5"><IcpList title="Public ICPs (20)" icpSetDate={benchmark.icpSetDate} icps={benchmark.icps} scores={new Map()} /></div> : null}</ResultFrame>
   if (round.status === 'cancelled' || results?.incomplete) return <ResultFrame><InlineNotice>This round was cancelled. Aggregate and per-ICP scores were not published.</InlineNotice>{benchmarkState === 'available' && benchmark ? <div className="mt-5"><IcpList title="Public ICPs (20)" icpSetDate={benchmark.icpSetDate} icps={benchmark.icps} scores={new Map()} /></div> : null}</ResultFrame>
   if (benchmarkState === 'loading') return <ResultFrame><div className="h-24 shimmer rounded-md" /></ResultFrame>
   if (benchmarkState === 'gated') return <ResultFrame><InlineNotice>All 20 ICPs become public{round.publicAt ? ` at ${formatUtc(round.publicAt)}` : ' at the start of Day 1'}. Source code and scores follow after evaluation.</InlineNotice></ResultFrame>
   if (!benchmark || benchmarkState === 'error') return <ResultFrame><InlineNotice>Published public-ICP details are temporarily unavailable.</InlineNotice></ResultFrame>
+  if (evaluationNotice) return <PendingIcpResults benchmark={benchmark}>{evaluationNotice}</PendingIcpResults>
   if (submission.status === 'scoring_failed') return <PendingIcpResults benchmark={benchmark}>{competitionSubmissionStatusLabel(submission, round)}. No complete evaluation score is available.</PendingIcpResults>
   if (!submission.isBaseline && resultsState === 'error') return <PendingIcpResults benchmark={benchmark}>The ICPs are public. Published scores are temporarily unavailable.</PendingIcpResults>
   if (!submission.isBaseline && (resultsState === 'loading' || resultsState === 'gated' || !results || results.publicIcpStatus !== 'ready')) return <PendingIcpResults benchmark={benchmark}>Scores and source code appear when evaluation is complete.</PendingIcpResults>
@@ -282,6 +289,7 @@ function IcpList({ title, icpSetDate, icps, scores }: { title: string; icpSetDat
 function IcpDetail({ label, value, wide = false }: { label: string; value: string | null; wide?: boolean }) { if (!value) return null; return <div className={wide ? 'sm:col-span-2' : ''}><dt className="font-mono text-[9px] uppercase tracking-[0.1em] text-[var(--muted-2)]">{label}</dt><dd className="mt-1 text-[11.5px] leading-relaxed text-[var(--muted)]">{value}</dd></div> }
 
 function SourcePanel({ submission, cancelled, code, codeState, selectedFile, onSelectFile, onRequest }: { submission: CompetitionSubmission; cancelled: boolean; code: CompetitionCode | null; codeState: ReleaseState; selectedFile: CompetitionCode['files'][number] | null; onSelectFile: (path: string) => void; onRequest: () => void }) {
+  if (isCompetitionReviewExcluded(submission)) return <aside><h3 className="font-display text-[19px] font-medium text-[var(--platinum)]">Source code</h3><div className="mt-4"><InlineNotice>Source was not published because this submission was not evaluated.</InlineNotice></div></aside>
   if (cancelled) return <aside><h3 className="font-display text-[19px] font-medium text-[var(--platinum)]">Source code</h3><div className="mt-4"><InlineNotice>This round was cancelled. Source code was not published.</InlineNotice></div></aside>
   const availableAt = submission.code.availableAt ? formatUtc(submission.code.availableAt) : null
   return <aside><h3 className="font-display text-[19px] font-medium text-[var(--platinum)]">Source code</h3><p className="mt-2 text-[12px] leading-relaxed text-[var(--muted-2)]">Code becomes public when Day 1 evaluation is complete.</p>
