@@ -105,7 +105,7 @@ export type CompetitionCode = {
 
 type JsonRecord = Record<string, unknown>
 
-export const DEFAULT_REPO_URL = 'https://github.com/leadpoet/pydantic-harness/tree/lab'
+export const DEFAULT_REPO_URL = 'https://github.com/leadpoet/champion_model/tree/lab'
 
 export function normalizeCompetitionSnapshot(value: unknown): CompetitionSnapshot | null {
   const source = record(value)
@@ -458,7 +458,8 @@ function safeHttpUrl(value: unknown): string | null {
     const parsed = new URL(text(value))
     return parsed.protocol === 'https:'
       && parsed.hostname === 'github.com'
-      && parsed.pathname.startsWith('/leadpoet/pydantic-harness')
+      && (parsed.pathname === '/leadpoet/champion_model'
+        || parsed.pathname.startsWith('/leadpoet/champion_model/'))
       ? parsed.toString()
       : null
   } catch {
