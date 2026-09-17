@@ -34,7 +34,7 @@ try {
     normalizeCompetitionSubmissions,
     isCompetitionReviewExcluded,
   } = require(join(outDir, 'research-lab-competition.js'))
-  assert.equal(DEFAULT_REPO_URL, 'https://github.com/leadpoet/champion_model/tree/lab')
+  assert.equal(DEFAULT_REPO_URL, 'https://github.com/leadpoet/leadpoet-sales-agent/tree/lab')
 
   const published = {
     round_id: 'arena-2026-09-05', status: 'published', mode: 'live', network_name: 'finney', netuid: 71,
@@ -53,7 +53,7 @@ try {
   }
   const snapshot = normalizeCompetitionSnapshot({
     mode: 'live', network_name: 'finney', netuid: 71,
-    repo_url: 'https://github.com/leadpoet/champion_model/tree/lab',
+    repo_url: 'https://github.com/leadpoet/leadpoet-sales-agent/tree/lab',
     open_round: null, latest_round: cancelled, latest_completed_round: published,
     rounds: [cancelled, published],
   })
@@ -61,11 +61,11 @@ try {
   assert.equal(snapshot.repoUrl, DEFAULT_REPO_URL)
   assert.equal(normalizeCompetitionSnapshot({
     mode: 'live', network_name: 'finney', netuid: 71,
-    repo_url: 'https://github.com/leadpoet/champion_model/tree/main', rounds: [],
-  }).repoUrl, 'https://github.com/leadpoet/champion_model/tree/main')
+    repo_url: 'https://github.com/leadpoet/leadpoet-sales-agent/tree/main', rounds: [],
+  }).repoUrl, 'https://github.com/leadpoet/leadpoet-sales-agent/tree/main')
   assert.equal(normalizeCompetitionSnapshot({
     mode: 'live', network_name: 'finney', netuid: 71,
-    repo_url: 'https://github.com/leadpoet/champion_model-unrelated/tree/lab', rounds: [],
+    repo_url: 'https://github.com/leadpoet/leadpoet-sales-agent-unrelated/tree/lab', rounds: [],
   }).repoUrl, DEFAULT_REPO_URL)
   assert.equal(snapshot.latestCompletedRound.baseline.finalScore, 0, 'zero is a real score, not missing data')
   assert.equal(snapshot.latestCompletedRound.evaluationDate, '2026-09-05')
