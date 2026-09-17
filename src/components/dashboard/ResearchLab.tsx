@@ -8,6 +8,7 @@ import {
   competitionSubmissionStatusLabel,
   competitionRoundOptions,
   formatCompetitionScore,
+  latestPublishedBaselineRound,
   normalizeCompetitionBenchmark,
   normalizeCompetitionCode,
   normalizeCompetitionResults,
@@ -54,10 +55,11 @@ export function ResearchLab({
   if (loading && !competition) return <ResearchLabLoading />
   const roundOptions = competition ? competitionRoundOptions(competition) : []
   const selectedRound = roundOptions[0] ?? null
+  const publishedBaselineRound = competition ? latestPublishedBaselineRound(competition, selectedRound) : null
   return (
     <div className="w-full">
       <CompetitionHeader competition={competition} />
-      {!competition ? <Unavailable message="Competition data is temporarily unavailable. This page will retry automatically." /> : selectedRound ? <><RoundSummary round={selectedRound} /><RoundWorkspace round={selectedRound} active={active} /></> : <p className="border-b border-[var(--line)] py-12 text-[14px] text-[var(--muted)]">No production competition round is available.</p>}
+      {!competition ? <Unavailable message="Competition data is temporarily unavailable. This page will retry automatically." /> : selectedRound ? <>{publishedBaselineRound ? <LatestPublishedBaseline round={publishedBaselineRound} /> : null}<RoundSummary round={selectedRound} /><RoundWorkspace round={selectedRound} active={active} /></> : <p className="border-b border-[var(--line)] py-12 text-[14px] text-[var(--muted)]">No production competition round is available.</p>}
       {error && competition ? <p className="mt-5 text-[12px] text-[var(--muted-2)]">Latest refresh failed: {error}</p> : null}
     </div>
   )
@@ -99,13 +101,28 @@ function RoundSummary({ round }: { round: CompetitionRoundSummary }) {
       </div>
       <CompetitionSchedule round={round} />
       <div className="mt-8 grid gap-px overflow-hidden rounded-md border border-[var(--line)] bg-[var(--line)] sm:grid-cols-3">
-        <SummaryMetric label="Round baseline" value="PydanticAI" detail={round.baseline ? `${formatCompetitionScore(baselineScore)} · ${shortHotkey(round.baseline.minerHotkey)}` : 'Score unavailable'} />
+        <SummaryMetric label="Round baseline" value="Public agent" detail={round.baseline ? `${formatCompetitionScore(baselineScore)} · ${shortHotkey(round.baseline.minerHotkey)}` : 'Score unavailable'} />
         <SummaryMetric label="Round status" value={roundStatusLabel(round.status)} detail={round.publishedAt ? formatUtc(round.publishedAt) : round.createdAt ? `Created ${formatUtc(round.createdAt)}` : round.roundId} />
         {round.champion
           ? <SummaryMetric label="Champion" value={shortHotkey(round.champion.minerHotkey)} detail={championMetricDetail(round, championScore)} />
           : round.cancelReason
             ? <SummaryMetric label="Cancellation" value={humanize(round.cancelReason)} detail="No champion was published" />
             : <SummaryMetric label="Promotion" value={evaluationComplete ? humanize(round.promotionStatus ?? 'not required') : 'Pending'} detail={evaluationComplete ? 'No champion was published' : 'Decision follows completed evaluation'} />}
+      </div>
+    </section>
+  )
+}
+
+function LatestPublishedBaseline({ round }: { round: CompetitionRoundSummary }) {
+  const score = round.baseline?.finalScore ?? null
+  return (
+    <section aria-label="Latest published baseline" className="border-b border-[var(--line)] py-5">
+      <div className="flex flex-col justify-between gap-3 rounded-md border border-[var(--line)] bg-[#0b0b0b] px-4 py-4 sm:flex-row sm:items-center">
+        <div>
+          <div className="font-mono text-[9.5px] uppercase tracking-[0.13em] text-[var(--muted-2)]">Latest published baseline</div>
+          <div className="mt-2 text-[12px] text-[var(--muted)]">Public agent · Evaluation {formatUtcDate(round.evaluationDate)} · Round <span className="font-mono">{round.roundId}</span></div>
+        </div>
+        <div className="shrink-0 font-display text-[28px] font-medium tracking-[-0.025em] text-[var(--platinum)]">{formatCompetitionScore(score)}<span className="ml-2 font-mono text-[11px] tracking-normal text-[var(--muted-2)]">/100</span></div>
       </div>
     </section>
   )

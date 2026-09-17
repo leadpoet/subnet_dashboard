@@ -26,6 +26,7 @@ try {
     competitionSubmissionStatusLabel,
     competitionRoundOptions,
     formatCompetitionScore,
+    latestPublishedBaselineRound,
     normalizeCompetitionBenchmark,
     normalizeCompetitionCode,
     normalizeCompetitionResults,
@@ -69,6 +70,44 @@ try {
   assert.equal(snapshot.latestCompletedRound.baseline.finalScore, 0, 'zero is a real score, not missing data')
   assert.equal(snapshot.latestCompletedRound.evaluationDate, '2026-09-05')
   assert.deepEqual(competitionRoundOptions(snapshot).map((round) => round.roundId), ['arena-2026-09-09', 'arena-2026-09-05'])
+  assert.equal(
+    latestPublishedBaselineRound(snapshot, snapshot.latestRound)?.roundId,
+    'arena-2026-09-05',
+    'a cancelled newer round must retain its workspace while the older published baseline stays visible',
+  )
+  assert.equal(
+    latestPublishedBaselineRound(snapshot, snapshot.latestRound)?.baseline?.finalScore,
+    0,
+    'a published zero remains a real latest baseline score',
+  )
+  assert.equal(
+    latestPublishedBaselineRound(snapshot, snapshot.latestCompletedRound),
+    null,
+    'the selected published round must not duplicate its own baseline summary',
+  )
+  assert.equal(
+    latestPublishedBaselineRound({ ...snapshot, latestCompletedRound: { ...snapshot.latestCompletedRound, baseline: null } }, snapshot.latestRound),
+    null,
+    'a missing published baseline score must fail closed',
+  )
+  assert.equal(
+    latestPublishedBaselineRound({ ...snapshot, latestCompletedRound: { ...snapshot.latestCompletedRound, baseline: { ...snapshot.latestCompletedRound.baseline, finalScore: null } } }, snapshot.latestRound),
+    null,
+    'a null published baseline score must fail closed',
+  )
+  assert.equal(
+    latestPublishedBaselineRound({ ...snapshot, latestCompletedRound: { ...snapshot.latestCompletedRound, status: 'scored' } }, snapshot.latestRound),
+    null,
+    'an unpublished completed round must not expose a baseline score',
+  )
+  const activeRound = { ...snapshot.latestRound, roundId: 'arena-2026-09-10', status: 'stage2', cancelReason: null }
+  const activeSnapshot = { ...snapshot, latestRound: activeRound }
+  assert.equal(competitionRoundOptions(activeSnapshot)[0].roundId, activeRound.roundId, 'the newer active round must remain selected')
+  assert.equal(
+    latestPublishedBaselineRound(activeSnapshot, activeRound)?.roundId,
+    'arena-2026-09-05',
+    'a newer active round must not hide the latest real published baseline',
+  )
   const legacySnapshot = normalizeCompetitionSnapshot({
     mode: 'live', network_name: 'finney', netuid: 71, rounds: [{
       ...published, round_id: 'arena-legacy', icp_set_date: '2026-09-05', evaluation_date: '2026-09-05',
@@ -162,7 +201,7 @@ try {
   const renderedModule = { exports: {} }
   vm.runInNewContext(ts.transpileModule(component, {
     compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX },
-  }).outputText + '\nexports.RoundSummary = RoundSummary; exports.SubmissionTable = SubmissionTable; exports.PublishedResults = PublishedResults; exports.SourcePanel = SourcePanel;', {
+  }).outputText + '\nexports.RoundSummary = RoundSummary; exports.LatestPublishedBaseline = LatestPublishedBaseline; exports.SubmissionTable = SubmissionTable; exports.PublishedResults = PublishedResults; exports.SourcePanel = SourcePanel;', {
     module: renderedModule, exports: renderedModule.exports,
     require(name) {
       if (name === '@/lib/research-lab-competition') return require(join(outDir, 'research-lab-competition.js'))
@@ -186,6 +225,12 @@ try {
   assert.match(finalMarkup, /0\.00/, 'a published zero baseline is not pending')
   assert.match(renderSummary(snapshot.latestRound), /Cancelled round/)
   assert.doesNotMatch(renderSummary(snapshot.latestRound), /Decision follows completed evaluation/)
+  const publishedBaselineMarkup = renderToStaticMarkup(React.createElement(renderedModule.exports.LatestPublishedBaseline, { round: snapshot.latestCompletedRound }))
+  assert.match(publishedBaselineMarkup, /Latest published baseline/)
+  assert.match(publishedBaselineMarkup, /Public agent/)
+  assert.match(publishedBaselineMarkup, /Evaluation Sep 5, 2026 · UTC/)
+  assert.match(publishedBaselineMarkup, /arena-2026-09-05/)
+  assert.match(publishedBaselineMarkup, /0\.00/)
   for (const promotionStatus of ['pending', 'promoted']) {
     const markup = renderSummary({ ...snapshot.latestCompletedRound, promotionStatus,
       champion: { submissionId: 'winner', minerHotkey: '5winner', finalScore: 51, outcome: 'new_king' } })
@@ -364,11 +409,12 @@ try {
   assert.match(component, /Competition data is temporarily unavailable\. This page will retry automatically\./)
   assert.doesNotMatch(component, /settlement|LabEmissionSplit|\/api\/research-lab\?/)
   assert.match(component, /const selectedRound = roundOptions\[0\] \?\? null/, 'the displayed round must follow the automatic priority order on every refresh')
+  assert.ok(component.indexOf('<LatestPublishedBaseline') < component.indexOf('<RoundSummary'), 'the separate published baseline must appear before the selected round details')
   assert.doesNotMatch(component, /selectedRoundId|setSelectedRoundId|onSelectRound|roundOptionLabel|Competition round/, 'manual round selection must remain absent')
   assert.match(component, /Public ICPs \(20\)/)
   assert.match(component, /Improve the public agent and compete on the same daily ICPs\./)
   assert.match(component, /All 20 ICPs are public for this round\./)
-  assert.match(component, /value="PydanticAI"/)
+  assert.match(component, /value="Public agent"/)
   assert.doesNotMatch(component, /server-held .* evaluation view/)
   assert.match(component, /response\.status === 403/)
   assert.match(component, /icp\.position/)
@@ -392,7 +438,7 @@ try {
   assert.match(component, /const submissionDate = utcCalendarDate\(round\.submissionOpen\) \?\? round\.icpSetDate/)
   assert.match(component, /const nextDay = submissionDate === round\.icpSetDate\s+&& isNextUtcDay\(submissionDate, round\.evaluationDate\)\s+&& utcCalendarDate\(round\.publicAt\) === round\.evaluationDate/, 'historical bank and disclosure dates must not be relabeled as the new daily cycle')
   assert.match(component, /No final baseline score has been published for this round\./)
-  assert.match(component, /label="Round baseline" value="PydanticAI"/)
+  assert.match(component, /label="Round baseline" value="Public agent"/)
   assert.match(component, /ICP set · \{formatUtcDate\(icpSetDate\)\}/)
   assert.match(component, /normalizeCompetitionBenchmark\(benchmarkRequest\.value\.body, round\)/)
   assert.match(component, /Some files are omitted from this preview\./)

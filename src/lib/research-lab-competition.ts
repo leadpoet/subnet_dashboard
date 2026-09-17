@@ -270,6 +270,22 @@ export function competitionRoundOptions(snapshot: CompetitionSnapshot): Competit
   })
 }
 
+export function latestPublishedBaselineRound(
+  snapshot: CompetitionSnapshot,
+  selectedRound: CompetitionRoundSummary | null,
+): CompetitionRoundSummary | null {
+  const publishedRound = snapshot.latestCompletedRound
+  if (
+    !selectedRound
+    || !publishedRound
+    || publishedRound.roundId === selectedRound.roundId
+    || publishedRound.status !== 'published'
+    || !publishedRound.baseline
+    || publishedRound.baseline.finalScore === null
+  ) return null
+  return publishedRound
+}
+
 export function competitionSubmissionStatusLabel(
   submission: Pick<CompetitionSubmission, 'isBaseline' | 'isChampion' | 'status' | 'failureReason' | 'codeReview'>,
   round: Pick<CompetitionRoundSummary, 'promotionStatus' | 'status'>,
