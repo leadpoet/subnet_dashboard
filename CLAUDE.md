@@ -16,3 +16,11 @@ frontend and backend contract changes, pushes to main, the existing deployment
 workflow, and protected production verification. Preserve scoring, source-code
 release gates, private ICPs, historical results, credentials, and concurrent
 work. Do not commit secret values. Keep this file and `CLAUDE.md` byte-identical.
+
+# Scoped authorization: company-level verification diagnostics
+
+On 2026-09-20 the user authorized narrow company-level failure diagnostics from
+accepted scoring evidence, tested with the saved miner inputs, pushed to main
+and deployed. Preserve scores, historical results, private ICP disclosure,
+contacts, credentials and concurrent work. Show failed, unverified and skipped
+checks separately. This scope ends after production verification.

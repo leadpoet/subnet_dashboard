@@ -33,6 +33,7 @@ try {
     normalizeCompetitionSnapshot,
     normalizeCompetitionSubmissions,
     isCompetitionReviewExcluded,
+    COMPANY_CHECK_LABELS,
   } = require(join(outDir, 'research-lab-competition.js'))
   assert.equal(DEFAULT_REPO_URL, 'https://github.com/leadpoet/leadpoet-sales-agent/tree/lab')
 
@@ -182,6 +183,7 @@ try {
   assert.equal(results.publicScores.size, 20)
   assert.equal(results.publicIcpStatus, 'ready')
   assert.equal(results.scoringAttribution, null, 'a legacy result must show attribution as unavailable')
+  assert.equal(results.companyDiagnostics, null, 'a legacy result without diagnostics must remain available without company rows')
   const primaryHotkey = '5FNVgRnrxMibhcBGEAaajGrYjsaCn441a5HuGUBUNnxEBLo9'
   const yumaHotkey = '5Chnr6Y72gdfTFdoZnsCvkndKpMk8jAtt9JAYKaNG3LmU4BW'
   const attributedResultsPayload = {
@@ -237,6 +239,7 @@ try {
   assert.equal(incomplete.finalScore, null)
   assert.equal(incomplete.publicScores.size, 0, 'cancelled partial evidence must not become a displayed score')
   assert.equal(incomplete.scoringAttribution, null)
+  assert.equal(incomplete.companyDiagnostics, null, 'cancelled evidence must not expose company diagnostics')
 
   const code = normalizeCompetitionCode({ submission_id: 'miner-1', files: [{ path: 'agent.py', content: 'print(1)' }], truncated: true })
   assert.deepEqual(code.files[0], { path: 'agent.py', content: 'print(1)', language: null })
@@ -246,7 +249,7 @@ try {
   const renderedModule = { exports: {} }
   vm.runInNewContext(ts.transpileModule(component, {
     compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX },
-  }).outputText + '\nexports.RoundSummary = RoundSummary; exports.LatestPublishedBaseline = LatestPublishedBaseline; exports.SubmissionTable = SubmissionTable; exports.PublishedResults = PublishedResults; exports.ScoringAttributionSummary = ScoringAttributionSummary; exports.IcpList = IcpList; exports.SourcePanel = SourcePanel;', {
+  }).outputText + '\nexports.RoundSummary = RoundSummary; exports.LatestPublishedBaseline = LatestPublishedBaseline; exports.SubmissionTable = SubmissionTable; exports.PublishedResults = PublishedResults; exports.ScoringAttributionSummary = ScoringAttributionSummary; exports.IcpList = IcpList; exports.CompanyDiagnostics = CompanyDiagnostics; exports.SourcePanel = SourcePanel;', {
     module: renderedModule, exports: renderedModule.exports,
     require(name) {
       if (name === '@/lib/research-lab-competition') return require(join(outDir, 'research-lab-competition.js'))
@@ -297,6 +300,94 @@ try {
   }))
   assert.match(legacyAttributionMarkup, /Unavailable/)
   assert.doesNotMatch(legacyAttributionMarkup, /Unattributed ICPs 0|None|0 validators/)
+
+  const allPassedChecks = Object.fromEntries(Object.keys(COMPANY_CHECK_LABELS).map((name) => [name, 'passed']))
+  const diagnosticRow = (overrides = {}) => ({
+    icp_position: 0, company_index: 0, company_name: 'HiddenLayer', qualified: true,
+    duplicate_company: false, missing_contact: false, checks: { ...allPassedChecks }, contact_failure: null,
+    ...overrides,
+  })
+  const diagnosticResultsPayload = {
+    ...attributedResultsPayload,
+    company_diagnostics: [
+      diagnosticRow({
+        company_name: 'Zenskar', qualified: false, missing_contact: true,
+        checks: { ...allPassedChecks, contact: 'failed', email: 'not_evaluated' },
+      }),
+      diagnosticRow({
+        company_index: 1, company_name: 'Crusoe', qualified: false,
+        checks: { ...allPassedChecks, contact: 'failed', email: 'not_evaluated' }, contact_failure: 'role',
+      }),
+      diagnosticRow({
+        company_index: 2, company_name: 'Forus', qualified: false, missing_contact: true,
+        checks: { ...allPassedChecks, employee_size: 'failed', stage: 'unavailable', intent: 'not_evaluated', intent_details: 'not_evaluated', contact: 'not_evaluated', email: 'not_evaluated' },
+      }),
+      diagnosticRow({ company_index: 3, company_name: 'HiddenLayer', qualified: true }),
+    ],
+  }
+  const diagnosticResults = normalizeCompetitionResults(diagnosticResultsPayload)
+  assert.ok(diagnosticResults)
+  assert.equal(diagnosticResults.companyDiagnostics.length, 4)
+  assert.deepEqual(diagnosticResults.companyDiagnostics[0], {
+    icpPosition: 0, companyIndex: 0, companyName: 'Zenskar', qualified: false, duplicateCompany: false,
+    missingContact: true, checks: { ...allPassedChecks, contact: 'failed', email: 'not_evaluated' }, contactFailure: null,
+  })
+  assert.equal(diagnosticResults.companyDiagnostics[1].contactFailure, 'Role')
+  assert.equal(diagnosticResults.companyDiagnostics[2].checks.employee_size, 'failed')
+  assert.equal(diagnosticResults.companyDiagnostics[2].checks.stage, 'unavailable')
+  assert.equal(diagnosticResults.companyDiagnostics[3].qualified, true)
+  assert.equal(diagnosticResults.companyDiagnostics[3].checks.email, 'passed')
+
+  const malformedDiagnosticInputs = [
+    [...diagnosticResultsPayload.company_diagnostics, null],
+    [...diagnosticResultsPayload.company_diagnostics, diagnosticResultsPayload.company_diagnostics[0]],
+    [...diagnosticResultsPayload.company_diagnostics, diagnosticRow({ icp_position: 20 })],
+    [...diagnosticResultsPayload.company_diagnostics, diagnosticRow({ checks: { ...allPassedChecks, email: 'unknown' } })],
+  ]
+  for (const companyDiagnostics of malformedDiagnosticInputs) {
+    const normalized = normalizeCompetitionResults({ ...attributedResultsPayload, company_diagnostics: companyDiagnostics })
+    assert.ok(normalized, 'malformed diagnostics must not discard valid scores')
+    assert.equal(normalized.companyDiagnostics, null, 'malformed diagnostics must render as unavailable')
+  }
+  const maliciousDiagnostic = diagnosticRow({
+    raw_extra: 'do-not-render', checks: { ...allPassedChecks, raw_extra: 'do-not-render' },
+  })
+  const sanitizedDiagnosticResults = normalizeCompetitionResults({ ...attributedResultsPayload, company_diagnostics: [maliciousDiagnostic] })
+  assert.ok(sanitizedDiagnosticResults)
+  assert.equal(Object.hasOwn(sanitizedDiagnosticResults.companyDiagnostics[0], 'raw_extra'), false)
+  assert.equal(Object.hasOwn(sanitizedDiagnosticResults.companyDiagnostics[0].checks, 'raw_extra'), false)
+
+  const emptyDiagnosticsResults = normalizeCompetitionResults({ ...attributedResultsPayload, company_diagnostics: [] })
+  const missingDiagnosticsResults = normalizeCompetitionResults(attributedResultsPayload)
+  assert.deepEqual(emptyDiagnosticsResults.companyDiagnostics, [], 'an explicit empty diagnostics list is distinct from missing diagnostics')
+  assert.equal(missingDiagnosticsResults.companyDiagnostics, null, 'missing diagnostics remain unavailable')
+  const renderedCompanyDiagnostics = renderToStaticMarkup(React.createElement(renderedModule.exports.CompanyDiagnostics, {
+    rows: diagnosticResults.companyDiagnostics,
+  }))
+  assert.match(renderedCompanyDiagnostics, /Zenskar · Not qualified · Missing contact/)
+  assert.match(renderedCompanyDiagnostics, /Contact check stopped at: Role\./)
+  assert.match(renderedCompanyDiagnostics, /Email verification/)
+  assert.match(renderedCompanyDiagnostics, /Not evaluated/)
+  assert.match(renderedCompanyDiagnostics, /Company size/)
+  assert.match(renderedCompanyDiagnostics, /Failed/)
+  assert.match(renderedCompanyDiagnostics, /Could not verify/)
+  assert.match(renderedCompanyDiagnostics, /HiddenLayer · Qualified/)
+  assert.doesNotMatch(renderedCompanyDiagnostics, /do-not-render/)
+  assert.match(renderToStaticMarkup(React.createElement(renderedModule.exports.CompanyDiagnostics, { rows: [] })), /No company checks were recorded/)
+  assert.match(renderToStaticMarkup(React.createElement(renderedModule.exports.CompanyDiagnostics, { rows: null })), /Company checks are unavailable/)
+
+  const gatedDiagnosticsMarkup = renderToStaticMarkup(React.createElement(renderedModule.exports.PublishedResults, {
+    submission: submissions[0], round: pendingRound, benchmark: null, benchmarkState: 'gated',
+    results: diagnosticResults, resultsState: 'available',
+  }))
+  assert.doesNotMatch(gatedDiagnosticsMarkup, /Zenskar|Crusoe|Forus|HiddenLayer/)
+  const unpublishedResults = normalizeCompetitionResults({ ...diagnosticResultsPayload, public_icp_status: 'pending' })
+  assert.equal(unpublishedResults.companyDiagnostics, null)
+  const unpublishedDiagnosticsMarkup = renderToStaticMarkup(React.createElement(renderedModule.exports.PublishedResults, {
+    submission: submissions[0], round: pendingRound, benchmark, benchmarkState: 'available',
+    results: unpublishedResults, resultsState: 'available',
+  }))
+  assert.doesNotMatch(unpublishedDiagnosticsMarkup, /Zenskar|Crusoe|Forus|HiddenLayer/)
 
   const attributionIcpMarkup = renderToStaticMarkup(React.createElement(renderedModule.exports.IcpList, {
     title: 'Public ICPs (20)', icpSetDate: benchmark.icpSetDate, icps: benchmark.icps.slice(0, 3),

@@ -96,6 +96,60 @@ export type CompetitionSubmissionResults = {
   publicIcpStatus: string
   publicScores: Map<number, number>
   scoringAttribution: CompetitionScoringAttribution | null
+  companyDiagnostics: CompetitionCompanyDiagnostic[] | null
+}
+
+export const COMPANY_CHECK_LABELS = {
+  identity: 'Company identity', industry: 'Industry', employee_size: 'Company size',
+  geography: 'Country', stage: 'Company stage', required_attribute: 'Required attribute',
+  intent: 'Intent evidence', intent_details: 'Intent Details', contact: 'Contact', email: 'Email verification',
+} as const
+
+export const COMPANY_CHECK_STATUS_LABELS = {
+  passed: 'Passed', failed: 'Failed', unavailable: 'Could not verify',
+  not_evaluated: 'Not evaluated', not_required: 'Not required',
+} as const
+
+export type CompetitionCompanyDiagnostic = {
+  icpPosition: number
+  companyIndex: number
+  companyName: string
+  qualified: boolean
+  duplicateCompany: boolean
+  missingContact: boolean
+  checks: Record<keyof typeof COMPANY_CHECK_LABELS, keyof typeof COMPANY_CHECK_STATUS_LABELS>
+  contactFailure: string | null
+}
+
+function normalizeCompanyDiagnostics(value: unknown): CompetitionCompanyDiagnostic[] | null {
+  if (!Array.isArray(value) || value.length > 400) return null
+  const seen = new Set<string>()
+  const rows = value.map((item) => {
+    const row = record(item)
+    const icpPosition = integer(row?.icp_position)
+    const companyIndex = integer(row?.company_index)
+    const companyName = text(row?.company_name)
+    const rawChecks = record(row?.checks)
+    if (!row || icpPosition === null || icpPosition < 0 || icpPosition >= 20 || companyIndex === null || companyIndex < 0
+      || !companyName || companyName.length > 200 || !rawChecks
+      || typeof row.qualified !== 'boolean' || typeof row.duplicate_company !== 'boolean' || typeof row.missing_contact !== 'boolean') return null
+    const key = `${icpPosition}:${companyIndex}`
+    if (seen.has(key)) return null
+    seen.add(key)
+    const checks = {} as CompetitionCompanyDiagnostic['checks']
+    for (const name of Object.keys(COMPANY_CHECK_LABELS) as Array<keyof typeof COMPANY_CHECK_LABELS>) {
+      const status = text(rawChecks[name])
+      if (!Object.hasOwn(COMPANY_CHECK_STATUS_LABELS, status)) return null
+      checks[name] = status as keyof typeof COMPANY_CHECK_STATUS_LABELS
+    }
+    const failureLabels: Record<string, string> = {
+      claim: 'Contact fields', identity: 'Contact identity', source: 'Contact source', company: 'Current employer',
+      role: 'Role', location: 'Contact location', email_attribution: 'Email ownership', email_verification: 'Email verification',
+    }
+    return { icpPosition, companyIndex, companyName, qualified: row.qualified, duplicateCompany: row.duplicate_company,
+      missingContact: row.missing_contact, checks, contactFailure: failureLabels[text(row.contact_failure)] ?? null }
+  })
+  return rows.every(isPresent) ? rows : null
 }
 
 export type CompetitionScoringValidator = {
@@ -265,6 +319,7 @@ export function normalizeCompetitionResults(value: unknown): CompetitionSubmissi
     publicIcpStatus,
     publicScores,
     scoringAttribution,
+    companyDiagnostics: !incomplete && publicIcpStatus === 'ready' ? normalizeCompanyDiagnostics(source.company_diagnostics) : null,
   }
 }
 
