@@ -95,6 +95,25 @@ export type CompetitionSubmissionResults = {
   finalScore: number | null
   publicIcpStatus: string
   publicScores: Map<number, number>
+  scoringAttribution: CompetitionScoringAttribution | null
+}
+
+export type CompetitionScoringValidator = {
+  hotkey: string
+  icpCount: number
+  reusedIcpCount: number
+}
+
+export type CompetitionIcpScoringAttribution = {
+  icpPosition: number
+  validatorHotkeys: string[]
+  reusedJudgment: boolean
+}
+
+export type CompetitionScoringAttribution = {
+  validators: CompetitionScoringValidator[]
+  icps: CompetitionIcpScoringAttribution[]
+  unattributedIcpCount: number
 }
 
 export type CompetitionCode = {
@@ -235,6 +254,7 @@ export function normalizeCompetitionResults(value: unknown): CompetitionSubmissi
   const incomplete = source.incomplete === true || text(source.round_status) === 'cancelled'
   const publicIcpStatus = text(source.public_icp_status) || 'pending'
   const publicScores = incomplete ? new Map<number, number>() : mergeScores(perIcpScores(scores?.stage_1), perIcpScores(scores?.stage_2))
+  const scoringAttribution = normalizeScoringAttribution(source.scoring_attribution)
   if (!incomplete && publicIcpStatus === 'ready' && publicScores.size !== 20) return null
   return {
     roundId,
@@ -244,6 +264,7 @@ export function normalizeCompetitionResults(value: unknown): CompetitionSubmissi
     finalScore: incomplete ? null : score(submissionScores?.final),
     publicIcpStatus,
     publicScores,
+    scoringAttribution,
   }
 }
 
@@ -390,6 +411,41 @@ function mergeScores(...sources: Map<number, number>[]): Map<number, number> {
   return result
 }
 
+function normalizeScoringAttribution(value: unknown): CompetitionScoringAttribution | null {
+  const source = record(value)
+  if (!source || !Array.isArray(source.validators) || !Array.isArray(source.icps)) return null
+  const unattributedIcpCount = boundedIcpCount(source.unattributed_icp_count)
+  if (unattributedIcpCount === null) return null
+
+  const validators = source.validators.map((value) => {
+    const row = record(value)
+    const hotkey = text(row?.hotkey)
+    const icpCount = boundedIcpCount(row?.icp_count)
+    const reusedIcpCount = boundedIcpCount(row?.reused_icp_count)
+    if (!row || !hotkey || icpCount === null || reusedIcpCount === null || reusedIcpCount > icpCount) return null
+    return { hotkey, icpCount, reusedIcpCount }
+  })
+  const icps = source.icps.map((value) => {
+    const row = record(value)
+    const icpPosition = integer(row?.icp_position)
+    if (!row || icpPosition === null || icpPosition >= 20 || !Array.isArray(row.validator_hotkeys) || typeof row.reused_judgment !== 'boolean') return null
+    const validatorHotkeys = row.validator_hotkeys.map(text)
+    if (validatorHotkeys.some((hotkey) => !hotkey) || new Set(validatorHotkeys).size !== validatorHotkeys.length) return null
+    return { icpPosition, validatorHotkeys, reusedJudgment: row.reused_judgment }
+  })
+  if (
+    validators.some((row) => row === null)
+    || icps.some((row) => row === null)
+    || new Set(validators.map((row) => row?.hotkey)).size !== validators.length
+    || new Set(icps.map((row) => row?.icpPosition)).size !== icps.length
+  ) return null
+  return {
+    validators: validators.filter(isPresent),
+    icps: icps.filter(isPresent),
+    unattributedIcpCount,
+  }
+}
+
 function record(value: unknown): JsonRecord | null {
   return value !== null && typeof value === 'object' && !Array.isArray(value) ? value as JsonRecord : null
 }
@@ -454,6 +510,11 @@ function codeReviewIssueLabel(review: CompetitionCodeReview): string | null {
 
 function integer(value: unknown): number | null {
   return typeof value === 'number' && Number.isInteger(value) && value >= 0 ? value : null
+}
+
+function boundedIcpCount(value: unknown): number | null {
+  const normalized = integer(value)
+  return normalized !== null && normalized <= 20 ? normalized : null
 }
 
 function httpStatus(value: unknown): number | null {

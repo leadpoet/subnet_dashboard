@@ -7,3 +7,12 @@ This includes narrow tested changes, pushes to main, the existing deployment
 workflow, and protected production inspection. Preserve scoring, champion
 promotion, historical results, credentials, and concurrent work. Do not commit
 secret values. Keep this file and `CLAUDE.md` byte-identical.
+
+# Scoped authorization: scoring validator attribution
+
+On 2026-09-20 the user authorized adding scoring-validator attribution to the
+public Open Source Agent Competition results UI. This includes narrow tested
+frontend and backend contract changes, pushes to main, the existing deployment
+workflow, and protected production verification. Preserve scoring, source-code
+release gates, private ICPs, historical results, credentials, and concurrent
+work. Do not commit secret values. Keep this file and `CLAUDE.md` byte-identical.

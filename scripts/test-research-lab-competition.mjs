@@ -181,6 +181,50 @@ try {
   assert.equal(results.publicScores.get(17), 88.5)
   assert.equal(results.publicScores.size, 20)
   assert.equal(results.publicIcpStatus, 'ready')
+  assert.equal(results.scoringAttribution, null, 'a legacy result must show attribution as unavailable')
+  const primaryHotkey = '5FNVgRnrxMibhcBGEAaajGrYjsaCn441a5HuGUBUNnxEBLo9'
+  const yumaHotkey = '5Chnr6Y72gdfTFdoZnsCvkndKpMk8jAtt9JAYKaNG3LmU4BW'
+  const attributedResultsPayload = {
+    round_id: 'arena-2026-09-05', submission_id: 'miner-1', public_icp_status: 'ready',
+    scores: {
+      stage_1: Array.from({ length: 10 }, (_, index) => ({ icp_position: index, per_icp_score: index === 2 ? 0 : 40 + index })),
+      stage_2: Array.from({ length: 10 }, (_, index) => ({ icp_position: index + 10, per_icp_score: 60 + index })),
+    },
+    submission_scores: { stage_1: 40, final: 64.25 },
+    scoring_attribution: {
+      validators: [
+        { hotkey: primaryHotkey, icp_count: 12, reused_icp_count: 3 },
+        { hotkey: yumaHotkey, icp_count: 7, reused_icp_count: 1 },
+      ],
+      icps: [
+        { icp_position: 0, validator_hotkeys: [primaryHotkey, yumaHotkey], reused_judgment: true },
+        { icp_position: 1, validator_hotkeys: [], reused_judgment: false },
+      ],
+      unattributed_icp_count: 1,
+    },
+  }
+  const attributedResults = normalizeCompetitionResults(attributedResultsPayload)
+  assert.deepEqual(attributedResults.scoringAttribution, {
+    validators: [
+      { hotkey: primaryHotkey, icpCount: 12, reusedIcpCount: 3 },
+      { hotkey: yumaHotkey, icpCount: 7, reusedIcpCount: 1 },
+    ],
+    icps: [
+      { icpPosition: 0, validatorHotkeys: [primaryHotkey, yumaHotkey], reusedJudgment: true },
+      { icpPosition: 1, validatorHotkeys: [], reusedJudgment: false },
+    ],
+    unattributedIcpCount: 1,
+  })
+  for (const malformed of [
+    { validators: null, icps: [], unattributed_icp_count: 0 },
+    { validators: [{ hotkey: primaryHotkey, icp_count: 1, reused_icp_count: 2 }], icps: [], unattributed_icp_count: 0 },
+    { validators: [], icps: [{ icp_position: 20, validator_hotkeys: [], reused_judgment: false }], unattributed_icp_count: 1 },
+    { validators: [], icps: [{ icp_position: 0, validator_hotkeys: [primaryHotkey, primaryHotkey], reused_judgment: false }], unattributed_icp_count: 0 },
+  ]) {
+    const normalized = normalizeCompetitionResults({ ...attributedResultsPayload, scoring_attribution: malformed })
+    assert.ok(normalized, 'malformed optional attribution must not discard valid scores')
+    assert.equal(normalized.scoringAttribution, null, 'malformed attribution must render as unavailable')
+  }
   assert.equal(normalizeCompetitionResults({
     round_id: 'arena-2026-09-05', submission_id: 'miner-1', public_icp_status: 'ready',
     scores: { stage_1: [{ icp_position: 2, per_icp_score: 99 }] }, submission_scores: { final: 99 },
@@ -192,6 +236,7 @@ try {
   })
   assert.equal(incomplete.finalScore, null)
   assert.equal(incomplete.publicScores.size, 0, 'cancelled partial evidence must not become a displayed score')
+  assert.equal(incomplete.scoringAttribution, null)
 
   const code = normalizeCompetitionCode({ submission_id: 'miner-1', files: [{ path: 'agent.py', content: 'print(1)' }], truncated: true })
   assert.deepEqual(code.files[0], { path: 'agent.py', content: 'print(1)', language: null })
@@ -201,7 +246,7 @@ try {
   const renderedModule = { exports: {} }
   vm.runInNewContext(ts.transpileModule(component, {
     compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX },
-  }).outputText + '\nexports.RoundSummary = RoundSummary; exports.LatestPublishedBaseline = LatestPublishedBaseline; exports.SubmissionTable = SubmissionTable; exports.PublishedResults = PublishedResults; exports.SourcePanel = SourcePanel;', {
+  }).outputText + '\nexports.RoundSummary = RoundSummary; exports.LatestPublishedBaseline = LatestPublishedBaseline; exports.SubmissionTable = SubmissionTable; exports.PublishedResults = PublishedResults; exports.ScoringAttributionSummary = ScoringAttributionSummary; exports.IcpList = IcpList; exports.SourcePanel = SourcePanel;', {
     module: renderedModule, exports: renderedModule.exports,
     require(name) {
       if (name === '@/lib/research-lab-competition') return require(join(outDir, 'research-lab-competition.js'))
@@ -237,6 +282,41 @@ try {
     assert.match(markup, /Champion/)
     assert.match(markup, promotionStatus === 'promoted' ? /Becomes next baseline/ : /Promotion pending/)
   }
+
+  const attributionSummaryMarkup = renderToStaticMarkup(React.createElement(renderedModule.exports.ScoringAttributionSummary, {
+    attribution: attributedResults.scoringAttribution,
+  }))
+  assert.match(attributionSummaryMarkup, /Scored by/)
+  assert.match(attributionSummaryMarkup, new RegExp(primaryHotkey))
+  assert.match(attributionSummaryMarkup, new RegExp(yumaHotkey))
+  assert.match(attributionSummaryMarkup, /12 ICPs · 3 reused/)
+  assert.match(attributionSummaryMarkup, /7 ICPs · 1 reused/)
+  assert.match(attributionSummaryMarkup, /Unattributed ICPs 1/)
+  const legacyAttributionMarkup = renderToStaticMarkup(React.createElement(renderedModule.exports.ScoringAttributionSummary, {
+    attribution: null,
+  }))
+  assert.match(legacyAttributionMarkup, /Unavailable/)
+  assert.doesNotMatch(legacyAttributionMarkup, /Unattributed ICPs 0|None|0 validators/)
+
+  const attributionIcpMarkup = renderToStaticMarkup(React.createElement(renderedModule.exports.IcpList, {
+    title: 'Public ICPs (20)', icpSetDate: benchmark.icpSetDate, icps: benchmark.icps.slice(0, 3),
+    scores: attributedResults.publicScores, scoringAttribution: attributedResults.scoringAttribution,
+  }))
+  assert.match(attributionIcpMarkup, /Scored by/)
+  assert.match(attributionIcpMarkup, /Reused judgment/)
+  assert.match(attributionIcpMarkup, /Yes/)
+  assert.match(attributionIcpMarkup, /Not judged/, 'a zero execution failure without an accepted judgment must not name a validator')
+  assert.match(attributionIcpMarkup, /Unavailable/, 'accepted attribution metadata with empty hotkeys must remain explicitly unavailable')
+  assert.match(attributionIcpMarkup, new RegExp(primaryHotkey))
+  assert.match(attributionIcpMarkup, new RegExp(yumaHotkey))
+  const gatedAttributionMarkup = renderToStaticMarkup(React.createElement(renderedModule.exports.PublishedResults, {
+    submission: submissions[0], round: { ...pendingRound, status: 'stage1' }, benchmark: null,
+    benchmarkState: 'gated', results: attributedResults, resultsState: 'available',
+  }))
+  assert.match(gatedAttributionMarkup, /Scored by/)
+  assert.match(gatedAttributionMarkup, new RegExp(primaryHotkey), 'aggregate attribution must remain public before ICP disclosure')
+  assert.match(gatedAttributionMarkup, /All 20 ICPs become public/)
+  assert.doesNotMatch(gatedAttributionMarkup, /Public ICP/, 'per-ICP content must remain hidden before disclosure')
 
   // Public Madara status on September 16, reduced to the fields needed to
   // verify the new public-list projection and miner-facing copy.
