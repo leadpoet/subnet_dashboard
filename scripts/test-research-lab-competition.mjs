@@ -163,6 +163,13 @@ try {
   assert.equal(benchmark.publicIcpCount, 20)
   assert.equal(benchmark.privateIcpCount, 0)
   assert.equal(benchmark.disclosurePolicy, 'all_20_next_day')
+  for (const policy of ['after_scoring_day2_v1', 'cutoff_public_v1']) {
+    const released = normalizeCompetitionBenchmark({ ...benchmarkPayload, disclosure_policy: policy }, snapshot.latestCompletedRound)
+    assert.equal(released?.icps.length, 20, 'supported gateway disclosure policies must render the released bank')
+    assert.equal(released?.disclosurePolicy, policy)
+    assert.equal(normalizeCompetitionBenchmark({ ...benchmarkPayload, disclosure_policy: policy, private_icp_count: 1 }), null)
+  }
+  assert.equal(normalizeCompetitionBenchmark({ ...benchmarkPayload, disclosure_policy: 'unknown_policy' }), null)
   assert.equal('nextIcps' in benchmark, false, 'the next ICP bank must not enter the public model')
   assert.equal(normalizeCompetitionBenchmark({ ...benchmarkPayload, icp_set_date: undefined }, snapshot.latestCompletedRound), null, 'a missing bank date must fail closed')
   assert.equal(normalizeCompetitionBenchmark({ ...benchmarkPayload, icp_set_date: '2026-09-03' }, snapshot.latestCompletedRound), null, 'a different bank must fail selected-round validation')
@@ -491,7 +498,7 @@ try {
     onSelectFile() {}, onRequest() {},
   }))
   assert.match(reviewSourceMarkup, /Source was not published because this submission was not evaluated/)
-  assert.doesNotMatch(reviewSourceMarkup, /View released source|Source locked|Available after evaluation/)
+  assert.doesNotMatch(reviewSourceMarkup, /View released source|Source locked|Awaiting source release/)
 
   // Public September 12 state, reduced to fields needed for status rendering.
   const credentialFixture = JSON.parse(await readFile(resolve('scripts/fixtures/competition-credential-error-20260912.json'), 'utf8'))
@@ -596,10 +603,10 @@ try {
   assert.ok(component.indexOf('if (!selectedSubmissionId || reviewExcluded) return') < component.indexOf('fetchReleasedJson(`/api/research-lab/rounds/${encodeURIComponent(requestedRoundId)}/results/'), 'the review exclusion gate must run before the result request')
   assert.match(component, /Last known submissions are shown below/)
   assert.match(component, /normalized\?\.roundId !== requestedRoundId/)
-  assert.match(component, /Code becomes public when Day 1 evaluation is complete\./)
+  assert.match(component, /Submitted code is frozen for this round\. Released files are read-only\./)
   assert.match(component, /This round was cancelled\. Aggregate and per-ICP scores were not published\./)
   assert.match(component, /This round was cancelled\. Source code was not published\./)
-  assert.match(component, /Scores and source code appear when evaluation is complete\./)
+  assert.match(component, /Scores appear when evaluation is complete\./)
   assert.match(component, /<PendingIcpResults benchmark=\{benchmark\}>/)
   assert.match(component, /if \(submission\.status === 'scoring_failed'\) return <PendingIcpResults benchmark=\{benchmark\}>\{competitionSubmissionStatusLabel\(submission, round\)\}\. No complete evaluation score is available\./, 'failed-run zero placeholders must not render as completed per-ICP evaluations')
   assert.ok(component.indexOf("if (submission.status === 'scoring_failed')") < component.indexOf('const scores = submission.isBaseline'), 'failure status must gate baseline score rendering too')

@@ -1,3 +1,11 @@
+# Scoped authorization: September 21 cutoff disclosure
+
+On 2026-09-21 the user authorized checking and narrowly repairing the daily
+Arena transition, including public ICP and frozen source release at cutoff.
+This includes the dashboard's supported release-policy names and release text,
+focused tests, push, normal deployment, and live UI verification. Preserve
+published scores, source and ICP access controls, credentials, and other work.
+
 # Scoped authorization: champion model repository rename
 
 On 2026-09-16 the user authorized renaming the public baseline repository from

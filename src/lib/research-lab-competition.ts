@@ -283,7 +283,7 @@ export function normalizeCompetitionBenchmark(
   if (
     publicIcpCount !== 20
     || privateIcpCount !== 0
-    || disclosurePolicy !== 'all_20_next_day'
+    || !['all_20_next_day', 'after_scoring_day2_v1', 'cutoff_public_v1'].includes(disclosurePolicy)
     || icps.length !== 20
     || new Set(icps.map((icp) => icp.position)).size !== 20
   ) return null
