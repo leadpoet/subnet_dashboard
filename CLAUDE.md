@@ -1,3 +1,12 @@
+# Scoped authorization: dynamic daily benchmark display
+
+On 2026-09-20 the user authorized the daily Arena benchmark change to 10 ICPs
+and a 0.5-point promotion margin, with future 15- and 30-ICP counts set by
+parameters. This includes narrow dashboard contract, copy, and test changes,
+push, normal deployment, and production verification. Preserve historical
+20-ICP rounds and their 1.0-point margin, public release timing, private ICP
+access controls, scoring attribution, credentials, and concurrent work.
+
 # Scoped authorization: September 21 cutoff disclosure
 
 On 2026-09-21 the user authorized checking and narrowly repairing the daily

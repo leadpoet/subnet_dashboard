@@ -21,6 +21,8 @@ export type CompetitionRoundSummary = {
   baseline: CompetitionParticipant | null
   champion: (CompetitionParticipant & { outcome: string | null }) | null
   promotionStatus: string | null
+  benchmarkIcpCount: number
+  promotionMargin: number
 }
 
 export type CompetitionSnapshot = {
@@ -66,6 +68,7 @@ export type CompetitionBenchmark = {
   publicAt: string
   icps: CompetitionIcp[]
   publicIcpCount: number
+  benchmarkIcpCount: number
   privateIcpCount: number
   disclosurePolicy: string
 }
@@ -94,6 +97,7 @@ export type CompetitionSubmissionResults = {
   stage1Score: number | null
   finalScore: number | null
   publicIcpStatus: string
+  benchmarkIcpCount: number
   publicScores: Map<number, number>
   scoringAttribution: CompetitionScoringAttribution | null
   companyDiagnostics: CompetitionCompanyDiagnostic[] | null
@@ -121,8 +125,8 @@ export type CompetitionCompanyDiagnostic = {
   contactFailure: string | null
 }
 
-function normalizeCompanyDiagnostics(value: unknown): CompetitionCompanyDiagnostic[] | null {
-  if (!Array.isArray(value) || value.length > 400) return null
+function normalizeCompanyDiagnostics(value: unknown, benchmarkIcpCount: number): CompetitionCompanyDiagnostic[] | null {
+  if (!Array.isArray(value) || value.length > benchmarkIcpCount * 20) return null
   const seen = new Set<string>()
   const rows = value.map((item) => {
     const row = record(item)
@@ -130,7 +134,7 @@ function normalizeCompanyDiagnostics(value: unknown): CompetitionCompanyDiagnost
     const companyIndex = integer(row?.company_index)
     const companyName = text(row?.company_name)
     const rawChecks = record(row?.checks)
-    if (!row || icpPosition === null || icpPosition < 0 || icpPosition >= 20 || companyIndex === null || companyIndex < 0
+    if (!row || icpPosition === null || icpPosition >= benchmarkIcpCount || companyIndex === null || companyIndex < 0
       || !companyName || companyName.length > 200 || !rawChecks
       || typeof row.qualified !== 'boolean' || typeof row.duplicate_company !== 'boolean' || typeof row.missing_contact !== 'boolean') return null
     const key = `${icpPosition}:${companyIndex}`
@@ -243,23 +247,25 @@ export function normalizeCompetitionSubmissions(value: unknown): CompetitionSubm
 
 export function normalizeCompetitionBenchmark(
   value: unknown,
-  expectedRound?: Pick<CompetitionRoundSummary, 'roundId' | 'icpSetDate' | 'publicAt'>,
+  expectedRound?: Pick<CompetitionRoundSummary, 'roundId' | 'icpSetDate' | 'publicAt' | 'benchmarkIcpCount'>,
 ): CompetitionBenchmark | null {
   const source = record(value)
   const roundId = text(source?.round_id)
   const icpSetDate = calendarDate(source?.icp_set_date)
   const publicAt = utcTimestamp(source?.public_at)
-  if (!source || !roundId || !icpSetDate || !publicAt || !Array.isArray(source.icps)) return null
+  const benchmarkIcpCount = source ? benchmarkCount(source) : null
+  if (!source || !roundId || !icpSetDate || !publicAt || benchmarkIcpCount === null || !Array.isArray(source.icps)) return null
   if (
     expectedRound
     && (roundId !== expectedRound.roundId
       || (expectedRound.icpSetDate !== null && icpSetDate !== expectedRound.icpSetDate)
-      || (expectedRound.publicAt !== null && publicAt !== expectedRound.publicAt))
+      || (expectedRound.publicAt !== null && publicAt !== expectedRound.publicAt)
+      || benchmarkIcpCount !== expectedRound.benchmarkIcpCount)
   ) return null
   const icps = source.icps.map((item) => {
     const row = record(item)
     const position = integer(row?.icp_position)
-    if (!row || position === null || position >= 20) return null
+    if (!row || position === null || position >= benchmarkIcpCount) return null
     return {
       position,
       id: text(row.icp_id) || `ICP ${position + 1}`,
@@ -281,11 +287,11 @@ export function normalizeCompetitionBenchmark(
   const privateIcpCount = integer(source.private_icp_count)
   const disclosurePolicy = text(source.disclosure_policy)
   if (
-    publicIcpCount !== 20
+    publicIcpCount !== benchmarkIcpCount
     || privateIcpCount !== 0
     || !['all_20_next_day', 'after_scoring_day2_v1', 'cutoff_public_v1'].includes(disclosurePolicy)
-    || icps.length !== 20
-    || new Set(icps.map((icp) => icp.position)).size !== 20
+    || icps.length !== benchmarkIcpCount
+    || new Set(icps.map((icp) => icp.position)).size !== benchmarkIcpCount
   ) return null
   return {
     roundId,
@@ -293,23 +299,29 @@ export function normalizeCompetitionBenchmark(
     publicAt,
     icps,
     publicIcpCount,
+    benchmarkIcpCount,
     privateIcpCount,
     disclosurePolicy,
   }
 }
 
-export function normalizeCompetitionResults(value: unknown): CompetitionSubmissionResults | null {
+export function normalizeCompetitionResults(
+  value: unknown,
+  expectedRound?: Pick<CompetitionRoundSummary, 'roundId' | 'benchmarkIcpCount'>,
+): CompetitionSubmissionResults | null {
   const source = record(value)
   const roundId = text(source?.round_id)
   const submissionId = text(source?.submission_id)
-  if (!source || !roundId || !submissionId) return null
+  const benchmarkIcpCount = source ? benchmarkCount(source) : null
+  if (!source || !roundId || !submissionId || benchmarkIcpCount === null
+    || (expectedRound && (roundId !== expectedRound.roundId || benchmarkIcpCount !== expectedRound.benchmarkIcpCount))) return null
   const scores = record(source.scores)
   const submissionScores = record(source.submission_scores)
   const incomplete = source.incomplete === true || text(source.round_status) === 'cancelled'
   const publicIcpStatus = text(source.public_icp_status) || 'pending'
-  const publicScores = incomplete ? new Map<number, number>() : mergeScores(perIcpScores(scores?.stage_1), perIcpScores(scores?.stage_2))
-  const scoringAttribution = normalizeScoringAttribution(source.scoring_attribution)
-  if (!incomplete && publicIcpStatus === 'ready' && publicScores.size !== 20) return null
+  const publicScores = incomplete ? new Map<number, number>() : mergeScores(perIcpScores(scores?.stage_1, benchmarkIcpCount), perIcpScores(scores?.stage_2, benchmarkIcpCount))
+  const scoringAttribution = normalizeScoringAttribution(source.scoring_attribution, benchmarkIcpCount)
+  if (!incomplete && publicIcpStatus === 'ready' && publicScores.size !== benchmarkIcpCount) return null
   return {
     roundId,
     submissionId,
@@ -317,9 +329,10 @@ export function normalizeCompetitionResults(value: unknown): CompetitionSubmissi
     stage1Score: incomplete ? null : score(submissionScores?.stage_1),
     finalScore: incomplete ? null : score(submissionScores?.final),
     publicIcpStatus,
+    benchmarkIcpCount,
     publicScores,
     scoringAttribution,
-    companyDiagnostics: !incomplete && publicIcpStatus === 'ready' ? normalizeCompanyDiagnostics(source.company_diagnostics) : null,
+    companyDiagnostics: !incomplete && publicIcpStatus === 'ready' ? normalizeCompanyDiagnostics(source.company_diagnostics, benchmarkIcpCount) : null,
   }
 }
 
@@ -423,6 +436,9 @@ function normalizeRound(source: JsonRecord | null): CompetitionRoundSummary | nu
   const submissionOpen = optionalUtcTimestamp(source.submission_open)
   const submissionCutoff = optionalUtcTimestamp(source.submission_cutoff)
   if ([icpSetDate, evaluationDate, publicAt, submissionOpen, submissionCutoff].includes(undefined)) return null
+  const benchmarkIcpCount = benchmarkCount(source)
+  const promotionMargin = source.promotion_margin === undefined ? 1 : score(source.promotion_margin)
+  if (benchmarkIcpCount === null || promotionMargin === null) return null
   return {
     roundId,
     status,
@@ -440,6 +456,8 @@ function normalizeRound(source: JsonRecord | null): CompetitionRoundSummary | nu
     baseline,
     champion: champion ? { ...champion, outcome: nullableText(championSource?.outcome) } : null,
     promotionStatus: nullableText(source.promotion_status),
+    benchmarkIcpCount,
+    promotionMargin,
   }
 }
 
@@ -450,12 +468,12 @@ function normalizeParticipant(source: JsonRecord | null): CompetitionParticipant
   return { submissionId, minerHotkey, finalScore: score(source.final_score) }
 }
 
-function perIcpScores(value: unknown): Map<number, number> {
+function perIcpScores(value: unknown, benchmarkIcpCount: number): Map<number, number> {
   const result = new Map<number, number>()
   for (const row of records(value)) {
     const position = integer(row.icp_position)
     const valueScore = score(row.per_icp_score)
-    if (position !== null && position >= 0 && position < 20 && valueScore !== null) result.set(position, valueScore)
+    if (position !== null && position < benchmarkIcpCount && valueScore !== null) result.set(position, valueScore)
   }
   return result
 }
@@ -466,24 +484,24 @@ function mergeScores(...sources: Map<number, number>[]): Map<number, number> {
   return result
 }
 
-function normalizeScoringAttribution(value: unknown): CompetitionScoringAttribution | null {
+function normalizeScoringAttribution(value: unknown, benchmarkIcpCount: number): CompetitionScoringAttribution | null {
   const source = record(value)
   if (!source || !Array.isArray(source.validators) || !Array.isArray(source.icps)) return null
-  const unattributedIcpCount = boundedIcpCount(source.unattributed_icp_count)
+  const unattributedIcpCount = boundedIcpCount(source.unattributed_icp_count, benchmarkIcpCount)
   if (unattributedIcpCount === null) return null
 
   const validators = source.validators.map((value) => {
     const row = record(value)
     const hotkey = text(row?.hotkey)
-    const icpCount = boundedIcpCount(row?.icp_count)
-    const reusedIcpCount = boundedIcpCount(row?.reused_icp_count)
+    const icpCount = boundedIcpCount(row?.icp_count, benchmarkIcpCount)
+    const reusedIcpCount = boundedIcpCount(row?.reused_icp_count, benchmarkIcpCount)
     if (!row || !hotkey || icpCount === null || reusedIcpCount === null || reusedIcpCount > icpCount) return null
     return { hotkey, icpCount, reusedIcpCount }
   })
   const icps = source.icps.map((value) => {
     const row = record(value)
     const icpPosition = integer(row?.icp_position)
-    if (!row || icpPosition === null || icpPosition >= 20 || !Array.isArray(row.validator_hotkeys) || typeof row.reused_judgment !== 'boolean') return null
+    if (!row || icpPosition === null || icpPosition >= benchmarkIcpCount || !Array.isArray(row.validator_hotkeys) || typeof row.reused_judgment !== 'boolean') return null
     const validatorHotkeys = row.validator_hotkeys.map(text)
     if (validatorHotkeys.some((hotkey) => !hotkey) || new Set(validatorHotkeys).size !== validatorHotkeys.length) return null
     return { icpPosition, validatorHotkeys, reusedJudgment: row.reused_judgment }
@@ -567,9 +585,15 @@ function integer(value: unknown): number | null {
   return typeof value === 'number' && Number.isInteger(value) && value >= 0 ? value : null
 }
 
-function boundedIcpCount(value: unknown): number | null {
+function benchmarkCount(source: JsonRecord): number | null {
+  if (!Object.hasOwn(source, 'benchmark_icp_count')) return 20
+  const count = integer(source.benchmark_icp_count)
+  return count !== null && count > 0 && count <= 100 ? count : null
+}
+
+function boundedIcpCount(value: unknown, benchmarkIcpCount: number): number | null {
   const normalized = integer(value)
-  return normalized !== null && normalized <= 20 ? normalized : null
+  return normalized !== null && normalized <= benchmarkIcpCount ? normalized : null
 }
 
 function httpStatus(value: unknown): number | null {

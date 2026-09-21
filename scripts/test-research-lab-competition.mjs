@@ -69,6 +69,8 @@ try {
     repo_url: 'https://github.com/leadpoet/leadpoet-sales-agent-unrelated/tree/lab', rounds: [],
   }).repoUrl, DEFAULT_REPO_URL)
   assert.equal(snapshot.latestCompletedRound.baseline.finalScore, 0, 'zero is a real score, not missing data')
+  assert.equal(snapshot.latestCompletedRound.benchmarkIcpCount, 20, 'legacy rounds retain their 20-ICP display')
+  assert.equal(snapshot.latestCompletedRound.promotionMargin, 1, 'legacy rounds retain their 1-point promotion rule')
   assert.equal(snapshot.latestCompletedRound.evaluationDate, '2026-09-05')
   assert.deepEqual(competitionRoundOptions(snapshot).map((round) => round.roundId), ['arena-2026-09-09', 'arena-2026-09-05'])
   assert.equal(
@@ -161,6 +163,7 @@ try {
   assert.equal(benchmark.icps[18].baselineScore, 0)
   assert.equal(benchmark.icps[19].baselineScore, null, 'a baseline ICP score stays pending instead of becoming zero')
   assert.equal(benchmark.publicIcpCount, 20)
+  assert.equal(benchmark.benchmarkIcpCount, 20)
   assert.equal(benchmark.privateIcpCount, 0)
   assert.equal(benchmark.disclosurePolicy, 'all_20_next_day')
   for (const policy of ['after_scoring_day2_v1', 'cutoff_public_v1']) {
@@ -188,6 +191,7 @@ try {
   assert.equal(results.publicScores.get(2), 0)
   assert.equal(results.publicScores.get(17), 88.5)
   assert.equal(results.publicScores.size, 20)
+  assert.equal(results.benchmarkIcpCount, 20)
   assert.equal(results.publicIcpStatus, 'ready')
   assert.equal(results.scoringAttribution, null, 'a legacy result must show attribution as unavailable')
   assert.equal(results.companyDiagnostics, null, 'a legacy result without diagnostics must remain available without company rows')
@@ -275,6 +279,7 @@ try {
     else if (status !== 'open') assert.match(markup, /Scoring/)
   }
   const finalMarkup = renderSummary(snapshot.latestCompletedRound)
+  assert.match(finalMarkup, /Promotion margin · \+1\.00 points/)
   assert.match(finalMarkup, /Not required/)
   assert.match(finalMarkup, /No champion was published/)
   assert.match(finalMarkup, /0\.00/, 'a published zero baseline is not pending')
@@ -314,6 +319,58 @@ try {
     duplicate_company: false, missing_contact: false, checks: { ...allPassedChecks }, contact_failure: null,
     ...overrides,
   })
+  for (const count of [10, 15, 30]) {
+    const dynamicRound = normalizeCompetitionSnapshot({
+      mode: 'live', network_name: 'finney', netuid: 71,
+      rounds: [{ ...published, benchmark_icp_count: count, promotion_margin: 0.5 }],
+    }).rounds[0]
+    assert.equal(dynamicRound.benchmarkIcpCount, count)
+    assert.equal(dynamicRound.promotionMargin, 0.5)
+    assert.match(renderSummary(dynamicRound), /Promotion margin · \+0\.50 points/)
+    const dynamicBenchmark = normalizeCompetitionBenchmark({
+      ...benchmarkPayload, benchmark_icp_count: count, public_icp_count: count,
+      icps: Array.from({ length: count }, (_, icp_position) => ({ icp_position, icp_id: `icp-${icp_position}`, prompt: 'Public ICP' })),
+    }, dynamicRound)
+    assert.equal(dynamicBenchmark?.icps.length, count, `${count} public ICPs must be accepted`)
+    assert.equal(dynamicBenchmark?.benchmarkIcpCount, count)
+    assert.equal(normalizeCompetitionBenchmark({ ...benchmarkPayload, benchmark_icp_count: count, public_icp_count: count - 1 }, dynamicRound), null)
+    assert.equal(normalizeCompetitionBenchmark({ ...benchmarkPayload, public_icp_count: count, icps: dynamicBenchmark.icps }, dynamicRound), null, 'a new round cannot borrow the legacy fallback count')
+
+    const dynamicResultPayload = {
+      round_id: dynamicRound.roundId, submission_id: 'miner-1', benchmark_icp_count: count, public_icp_status: 'ready',
+      scores: { stage_1: Array.from({ length: count }, (_, icp_position) => ({ icp_position, per_icp_score: 50 })) },
+      submission_scores: { final: 50 },
+      scoring_attribution: {
+        validators: [{ hotkey: primaryHotkey, icp_count: count, reused_icp_count: 0 }],
+        icps: [{ icp_position: count - 1, validator_hotkeys: [primaryHotkey], reused_judgment: false }],
+        unattributed_icp_count: 0,
+      },
+      company_diagnostics: [diagnosticRow({ icp_position: count - 1 })],
+    }
+    const dynamicResult = normalizeCompetitionResults(dynamicResultPayload, dynamicRound)
+    assert.equal(dynamicResult?.publicScores.size, count)
+    assert.equal(dynamicResult?.scoringAttribution?.icps[0].icpPosition, count - 1)
+    assert.equal(dynamicResult?.companyDiagnostics?.[0].icpPosition, count - 1)
+    const dynamicMarkup = renderToStaticMarkup(React.createElement(renderedModule.exports.PublishedResults, {
+      submission: submissions[0], round: dynamicRound, benchmark: dynamicBenchmark, benchmarkState: 'available',
+      results: dynamicResult, resultsState: 'available',
+    }))
+    assert.match(dynamicMarkup, new RegExp(`Public ICPs \\(${count}\\)`))
+    assert.match(dynamicMarkup, new RegExp(`All ${count} ICPs are public`))
+    const gatedMarkup = renderToStaticMarkup(React.createElement(renderedModule.exports.PublishedResults, {
+      submission: submissions[0], round: dynamicRound, benchmark: null, benchmarkState: 'gated',
+      results: dynamicResult, resultsState: 'available',
+    }))
+    assert.match(gatedMarkup, new RegExp(`All ${count} ICPs become public`))
+    assert.doesNotMatch(gatedMarkup, /Public ICPs \(/, 'a gated round must not reveal its ICP list')
+    const { benchmark_icp_count: omittedCount, ...resultWithoutCount } = dynamicResultPayload
+    assert.equal(omittedCount, count)
+    assert.equal(normalizeCompetitionResults(resultWithoutCount, dynamicRound), null, 'missing new result count cannot become a legacy result')
+    assert.equal(normalizeCompetitionResults({ ...dynamicResultPayload, scores: { stage_1: dynamicResultPayload.scores.stage_1.slice(1) } }, dynamicRound), null, 'missing one ready score must fail closed')
+    assert.equal(normalizeCompetitionResults({ ...dynamicResultPayload, scores: { stage_1: [...dynamicResultPayload.scores.stage_1.slice(1), { icp_position: count, per_icp_score: 50 }] } }, dynamicRound), null, 'an out-of-range score cannot fill a missing position')
+    assert.equal(normalizeCompetitionResults({ ...dynamicResultPayload, company_diagnostics: [diagnosticRow({ icp_position: count })] }, dynamicRound)?.companyDiagnostics, null)
+    assert.equal(normalizeCompetitionResults({ ...dynamicResultPayload, scoring_attribution: { ...dynamicResultPayload.scoring_attribution, icps: [{ icp_position: count, validator_hotkeys: [], reused_judgment: false }] } }, dynamicRound)?.scoringAttribution, null)
+  }
   const diagnosticResultsPayload = {
     ...attributedResultsPayload,
     company_diagnostics: [
@@ -589,9 +646,9 @@ try {
   assert.match(component, /const selectedRound = roundOptions\[0\] \?\? null/, 'the displayed round must follow the automatic priority order on every refresh')
   assert.ok(component.indexOf('<LatestPublishedBaseline') < component.indexOf('<RoundSummary'), 'the separate published baseline must appear before the selected round details')
   assert.doesNotMatch(component, /selectedRoundId|setSelectedRoundId|onSelectRound|roundOptionLabel|Competition round/, 'manual round selection must remain absent')
-  assert.match(component, /Public ICPs \(20\)/)
+  assert.match(component, /Public ICPs \(\$\{benchmark\.benchmarkIcpCount\}\)/)
   assert.match(component, /Improve the public agent and compete on the same daily ICPs\./)
-  assert.match(component, /All 20 ICPs are public for this round\./)
+  assert.match(component, /All \{icps\.length\} ICPs are public for this round\./)
   assert.match(component, /value="Public agent"/)
   assert.doesNotMatch(component, /server-held .* evaluation view/)
   assert.match(component, /response\.status === 403/)
