@@ -1,6 +1,7 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useState } from 'react'
+import { useVisiblePolling } from '@/lib/hooks/useVisiblePolling'
 import type { AdminResearchLabPayload } from '@/app/api/admin/research-lab/route'
 export type { AdminResearchLabPayload } from '@/app/api/admin/research-lab/route'
 
@@ -26,11 +27,7 @@ export function AdminResearchLab({
     }
   }, [])
 
-  useEffect(() => {
-    void refresh()
-    const timer = window.setInterval(() => void refresh(), 30_000)
-    return () => window.clearInterval(timer)
-  }, [refresh])
+  useVisiblePolling(refresh, 30_000)
 
   if (error && !payload) {
     return <div className="rounded-xl border border-red-400/20 bg-red-400/5 p-4 text-sm text-red-200">{error}</div>

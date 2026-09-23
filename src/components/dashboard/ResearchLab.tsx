@@ -150,6 +150,9 @@ function SummaryMetric({ label, value, detail }: { label: string; value: string;
 }
 
 function RoundWorkspace({ round, active }: { round: CompetitionRoundSummary; active: boolean }) {
+  // Summary polling returns a new object each time. Depend on the validation
+  // fields so an unchanged round does not restart detail polling or results.
+  const { roundId, icpSetDate, publicAt, benchmarkIcpCount } = round
   const [submissions, setSubmissions] = useState<CompetitionSubmission[]>([])
   const [benchmark, setBenchmark] = useState<CompetitionBenchmark | null>(null)
   const [benchmarkState, setBenchmarkState] = useState<ReleaseState>('loading')
@@ -177,14 +180,14 @@ function RoundWorkspace({ round, active }: { round: CompetitionRoundSummary; act
     roundSnapshotRef.current = false
     setRoundLoading(true); setRoundError(null); setBenchmark(null); setBenchmarkState('loading'); setSubmissions([]); selectSubmission(null)
     return () => { roundRequestRef.current += 1 }
-  }, [round.roundId, selectSubmission])
+  }, [roundId, selectSubmission])
 
   const refreshRound = useCallback(async () => {
     const initial = !roundSnapshotRef.current
     const request = ++roundRequestRef.current
     const [submissionRequest, benchmarkRequest] = await Promise.allSettled([
-      fetchReleasedJson(`/api/research-lab/rounds/${encodeURIComponent(round.roundId)}/submissions`),
-      fetchReleasedJson(`/api/research-lab/rounds/${encodeURIComponent(round.roundId)}/benchmark`),
+      fetchReleasedJson(`/api/research-lab/rounds/${encodeURIComponent(roundId)}/submissions`),
+      fetchReleasedJson(`/api/research-lab/rounds/${encodeURIComponent(roundId)}/benchmark`),
     ])
     if (request !== roundRequestRef.current) return
     if (submissionRequest.status === 'fulfilled' && submissionRequest.value.state === 'available') {
@@ -204,7 +207,7 @@ function RoundWorkspace({ round, active }: { round: CompetitionRoundSummary; act
         : 'Latest submission refresh did not return public data.')
     }
     if (benchmarkRequest.status === 'fulfilled' && benchmarkRequest.value.state === 'available') {
-      const next = normalizeCompetitionBenchmark(benchmarkRequest.value.body, round)
+      const next = normalizeCompetitionBenchmark(benchmarkRequest.value.body, { roundId, icpSetDate, publicAt, benchmarkIcpCount })
       benchmarkReleasedRef.current = next !== null
       setBenchmark(next); setBenchmarkState(next ? 'available' : 'error')
     } else if (benchmarkRequest.status === 'fulfilled') {
@@ -216,7 +219,7 @@ function RoundWorkspace({ round, active }: { round: CompetitionRoundSummary; act
     roundSnapshotRef.current = true
     setRoundLoading(false)
     setRoundRevision((current) => current + 1)
-  }, [round, selectSubmission])
+  }, [roundId, icpSetDate, publicAt, benchmarkIcpCount, selectSubmission])
 
   useVisiblePolling(refreshRound, 60_000, { enabled: active })
 
@@ -224,21 +227,21 @@ function RoundWorkspace({ round, active }: { round: CompetitionRoundSummary; act
     setResults(null); setCode(null); setCodeState('idle'); setSelectedFile(null)
     if (!selectedSubmissionId) { setResultsState('idle'); return }
     setResultsState('loading')
-  }, [round.roundId, selectedSubmissionId])
+  }, [roundId, selectedSubmissionId])
 
   const selectedSubmission = submissions.find((submission) => submission.submissionId === selectedSubmissionId) ?? null
   const reviewExcluded = selectedSubmission ? isCompetitionReviewExcluded(selectedSubmission) : false
 
   useEffect(() => {
     if (!selectedSubmissionId || reviewExcluded) return
-    const requestedRoundId = round.roundId
+    const requestedRoundId = roundId
     const requestedSubmissionId = selectedSubmissionId
     let active = true
     setResultsState((current) => current === 'available' ? current : 'loading')
     fetchReleasedJson(`/api/research-lab/rounds/${encodeURIComponent(requestedRoundId)}/results/${encodeURIComponent(requestedSubmissionId)}`).then((response) => {
       if (!active) return
       if (response.state !== 'available') { setResultsState(response.state); return }
-      const normalized = normalizeCompetitionResults(response.body, round)
+      const normalized = normalizeCompetitionResults(response.body, { roundId, benchmarkIcpCount })
       if (
         selectedSubmissionIdRef.current !== requestedSubmissionId
         || normalized?.roundId !== requestedRoundId
@@ -249,7 +252,7 @@ function RoundWorkspace({ round, active }: { round: CompetitionRoundSummary; act
       setResults(normalized); setResultsState('available')
     }).catch(() => { if (active) setResultsState('error') })
     return () => { active = false }
-  }, [reviewExcluded, round, roundRevision, selectedSubmissionId])
+  }, [reviewExcluded, roundId, benchmarkIcpCount, roundRevision, selectedSubmissionId])
 
   const selectedCodeFile = code?.files.find((file) => file.path === selectedFile) ?? code?.files[0] ?? null
   const requestCode = async () => {

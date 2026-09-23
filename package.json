@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "node scripts/test-retired-table-callers.mjs && node scripts/test-runtime-secret-loader.mjs && node scripts/test-admin-redirect-origin.mjs && node scripts/test-dashboard-tabs.mjs && node scripts/test-visible-polling.mjs && node scripts/test-single-flight.mjs && node scripts/test-gateway-deployment.mjs && node scripts/test-subnet-epoch-state.mjs && node scripts/test-metagraph-weight-freshness.mjs && python3 scripts/test-weights-alert.py && node scripts/test-research-lab-arena.mjs && node scripts/test-research-lab-competition.mjs && node scripts/test-chain-summaries.mjs && node scripts/test-chain-rpcs-postgres.mjs"
+    "test": "node scripts/test-retired-table-callers.mjs && node scripts/test-runtime-secret-loader.mjs && node scripts/test-admin-redirect-origin.mjs && node scripts/test-dashboard-tabs.mjs && node scripts/test-visible-polling.mjs && node scripts/test-arena-polling.mjs && node scripts/test-single-flight.mjs && node scripts/test-gateway-deployment.mjs && node scripts/test-subnet-epoch-state.mjs && node scripts/test-metagraph-weight-freshness.mjs && python3 scripts/test-weights-alert.py && node scripts/test-research-lab-arena.mjs && node scripts/test-research-lab-competition.mjs && node scripts/test-chain-summaries.mjs && node scripts/test-chain-rpcs-postgres.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-secrets-manager": "^3.1089.0",
