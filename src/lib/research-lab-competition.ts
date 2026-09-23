@@ -109,10 +109,21 @@ export const COMPANY_CHECK_LABELS = {
   intent: 'Intent evidence', intent_details: 'Intent Details', contact: 'Contact', email: 'Email verification',
 } as const
 
+const COMPANY_ONLY_CHECK_NAMES = [
+  'identity', 'industry', 'employee_size', 'geography', 'stage',
+  'required_attribute', 'intent', 'intent_details',
+] as const
+
+const CONTACT_CHECK_NAMES = ['contact', 'email'] as const
+
 export const COMPANY_CHECK_STATUS_LABELS = {
   passed: 'Passed', failed: 'Failed', unavailable: 'Could not verify',
   not_evaluated: 'Not evaluated', not_required: 'Not required',
 } as const
+
+type CompanyOnlyCheckName = typeof COMPANY_ONLY_CHECK_NAMES[number]
+type ContactCheckName = typeof CONTACT_CHECK_NAMES[number]
+type CompanyCheckStatus = keyof typeof COMPANY_CHECK_STATUS_LABELS
 
 export type CompetitionCompanyDiagnostic = {
   icpPosition: number
@@ -120,8 +131,8 @@ export type CompetitionCompanyDiagnostic = {
   companyName: string
   qualified: boolean
   duplicateCompany: boolean
-  missingContact: boolean
-  checks: Record<keyof typeof COMPANY_CHECK_LABELS, keyof typeof COMPANY_CHECK_STATUS_LABELS>
+  missingContact: boolean | null
+  checks: Record<CompanyOnlyCheckName, CompanyCheckStatus> & Partial<Record<ContactCheckName, CompanyCheckStatus>>
   contactFailure: string | null
 }
 
@@ -136,22 +147,35 @@ function normalizeCompanyDiagnostics(value: unknown, benchmarkIcpCount: number):
     const rawChecks = record(row?.checks)
     if (!row || icpPosition === null || icpPosition >= benchmarkIcpCount || companyIndex === null || companyIndex < 0
       || !companyName || companyName.length > 200 || !rawChecks
-      || typeof row.qualified !== 'boolean' || typeof row.duplicate_company !== 'boolean' || typeof row.missing_contact !== 'boolean') return null
+      || typeof row.qualified !== 'boolean' || typeof row.duplicate_company !== 'boolean') return null
     const key = `${icpPosition}:${companyIndex}`
     if (seen.has(key)) return null
     seen.add(key)
     const checks = {} as CompetitionCompanyDiagnostic['checks']
-    for (const name of Object.keys(COMPANY_CHECK_LABELS) as Array<keyof typeof COMPANY_CHECK_LABELS>) {
+    for (const name of COMPANY_ONLY_CHECK_NAMES) {
       const status = text(rawChecks[name])
       if (!Object.hasOwn(COMPANY_CHECK_STATUS_LABELS, status)) return null
       checks[name] = status as keyof typeof COMPANY_CHECK_STATUS_LABELS
+    }
+    const hasContactDiagnostics = Object.hasOwn(row, 'missing_contact')
+      || Object.hasOwn(row, 'contact_failure')
+      || CONTACT_CHECK_NAMES.some((name) => Object.hasOwn(rawChecks, name))
+    let missingContact: boolean | null = null
+    if (hasContactDiagnostics) {
+      if (typeof row.missing_contact !== 'boolean') return null
+      missingContact = row.missing_contact
+      for (const name of CONTACT_CHECK_NAMES) {
+        const status = text(rawChecks[name])
+        if (!Object.hasOwn(COMPANY_CHECK_STATUS_LABELS, status)) return null
+        checks[name] = status as keyof typeof COMPANY_CHECK_STATUS_LABELS
+      }
     }
     const failureLabels: Record<string, string> = {
       claim: 'Contact fields', identity: 'Contact identity', source: 'Contact source', company: 'Current employer',
       role: 'Role', location: 'Contact location', email_attribution: 'Email ownership', email_verification: 'Email verification',
     }
     return { icpPosition, companyIndex, companyName, qualified: row.qualified, duplicateCompany: row.duplicate_company,
-      missingContact: row.missing_contact, checks, contactFailure: failureLabels[text(row.contact_failure)] ?? null }
+      missingContact, checks, contactFailure: hasContactDiagnostics ? failureLabels[text(row.contact_failure)] ?? null : null }
   })
   return rows.every(isPresent) ? rows : null
 }

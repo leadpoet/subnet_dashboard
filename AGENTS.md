@@ -1,3 +1,13 @@
+# Scoped authorization: September 23 company-only Arena dashboard
+
+On 2026-09-23 the user authorized a narrow dashboard compatibility change for
+the current company-only Arena diagnostic payload. This includes focused parser
+and UI changes, tests, and a review commit for the root task's final release.
+Preserve historical contact diagnostics when provided, all company checks,
+scores, release timing, scoring attribution, credentials, and concurrent work.
+Do not perform broad FAQ cleanup. The root task owns push, deployment, and final
+production verification. Keep this file and `CLAUDE.md` byte-identical.
+
 # Scoped authorization: dynamic daily benchmark display
 
 On 2026-09-20 the user authorized the daily Arena benchmark change to 10 ICPs

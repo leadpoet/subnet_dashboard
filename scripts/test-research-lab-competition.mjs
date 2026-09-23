@@ -402,11 +402,40 @@ try {
   assert.equal(diagnosticResults.companyDiagnostics[3].qualified, true)
   assert.equal(diagnosticResults.companyDiagnostics[3].checks.email, 'passed')
 
+  const { contact: omittedContact, email: omittedEmail, ...companyOnlyChecks } = allPassedChecks
+  assert.equal(omittedContact, 'passed')
+  assert.equal(omittedEmail, 'passed')
+  const companyOnlyDiagnostic = {
+    icp_position: 0, company_index: 0, company_name: 'Acme', qualified: true,
+    duplicate_company: false, checks: companyOnlyChecks,
+  }
+  const companyOnlyResults = normalizeCompetitionResults({
+    ...attributedResultsPayload, company_diagnostics: [companyOnlyDiagnostic],
+  })
+  assert.deepEqual(companyOnlyResults.companyDiagnostics, [{
+    icpPosition: 0, companyIndex: 0, companyName: 'Acme', qualified: true,
+    duplicateCompany: false, missingContact: null, checks: companyOnlyChecks, contactFailure: null,
+  }])
+  const renderedCompanyOnlyDiagnostics = renderToStaticMarkup(React.createElement(renderedModule.exports.CompanyDiagnostics, {
+    rows: companyOnlyResults.companyDiagnostics,
+  }))
+  assert.match(renderedCompanyOnlyDiagnostics, /Acme · Qualified/)
+  assert.match(renderedCompanyOnlyDiagnostics, /Company identity/)
+  assert.match(renderedCompanyOnlyDiagnostics, /Intent Details/)
+  assert.doesNotMatch(renderedCompanyOnlyDiagnostics, /Email verification|Missing contact|Contact check stopped|>Contact</)
+
+  const { identity: omittedIdentity, ...missingCompanyCheck } = companyOnlyChecks
+  assert.equal(omittedIdentity, 'passed')
+
   const malformedDiagnosticInputs = [
     [...diagnosticResultsPayload.company_diagnostics, null],
     [...diagnosticResultsPayload.company_diagnostics, diagnosticResultsPayload.company_diagnostics[0]],
     [...diagnosticResultsPayload.company_diagnostics, diagnosticRow({ icp_position: 20 })],
     [...diagnosticResultsPayload.company_diagnostics, diagnosticRow({ checks: { ...allPassedChecks, email: 'unknown' } })],
+    [companyOnlyDiagnostic, { ...companyOnlyDiagnostic, company_index: 1, checks: missingCompanyCheck }],
+    [{ ...companyOnlyDiagnostic, missing_contact: false }],
+    [{ ...companyOnlyDiagnostic, checks: { ...companyOnlyChecks, contact: 'passed', email: 'passed' } }],
+    [{ ...companyOnlyDiagnostic, missing_contact: false, checks: { ...companyOnlyChecks, contact: 'passed' } }],
   ]
   for (const companyDiagnostics of malformedDiagnosticInputs) {
     const normalized = normalizeCompetitionResults({ ...attributedResultsPayload, company_diagnostics: companyDiagnostics })
