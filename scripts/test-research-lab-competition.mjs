@@ -675,7 +675,7 @@ try {
   assert.match(component, /No final baseline score has been published for this round\./)
   assert.match(component, /label="Round baseline" value="Public agent"/)
   assert.match(component, /ICP set · \{formatUtcDate\(icpSetDate\)\}/)
-  assert.match(component, /normalizeCompetitionBenchmark\(benchmarkRequest\.value\.body, round\)/)
+  assert.match(component, /normalizeCompetitionBenchmark\(benchmarkRequest\.value\.body, \{ roundId, icpSetDate, publicAt, benchmarkIcpCount \}\)/)
   assert.match(component, /Some files are omitted from this preview\./)
   assert.match(component, /promotionStatus === 'promoted'[^]*Becomes next baseline/)
   assert.match(component, /promotionStatus === 'pending'[^]*Promotion pending/)
