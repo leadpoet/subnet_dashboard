@@ -390,6 +390,7 @@ export function latestPublishedBaselineRound(
   const publishedRound = snapshot.latestCompletedRound
   if (
     !selectedRound
+    || selectedRound.baseline?.finalScore != null
     || !publishedRound
     || publishedRound.roundId === selectedRound.roundId
     || publishedRound.status !== 'published'
@@ -412,6 +413,9 @@ export function competitionSubmissionStatusLabel(
   }
   if (submission.status === 'scored' && round.status === 'published' && !submission.isBaseline) {
     return 'Scored · not promoted'
+  }
+  if (submission.status === 'scored' && round.status !== 'published') {
+    return 'Scored · round in progress'
   }
   if (submission.status === 'scoring_failed' && submission.failureReason === 'credential_error') {
     return 'Provider credential error'

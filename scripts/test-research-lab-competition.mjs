@@ -279,6 +279,20 @@ try {
     else if (status !== 'open') assert.match(markup, /Scoring/)
   }
   const finalMarkup = renderSummary(snapshot.latestCompletedRound)
+  const completedBaselineRound = {
+    ...activeRound, baseline: { submissionId: 'baseline', minerHotkey: '5baseline', finalScore: 0 },
+  }
+  const completedBaselineMarkup = renderSummary(completedBaselineRound)
+  assert.match(completedBaselineMarkup, /0\.00/)
+  assert.match(completedBaselineMarkup, /Baseline evaluation complete/)
+  assert.match(renderSummary({ ...completedBaselineRound, status: 'scored' }), /All evaluations are complete/)
+  assert.match(completedBaselineMarkup, /champion is decided when the round finishes/)
+  assert.match(completedBaselineMarkup, /Pending/)
+  assert.doesNotMatch(completedBaselineMarkup, /Awaiting score|No champion was published/)
+  assert.equal(latestPublishedBaselineRound(activeSnapshot, completedBaselineRound), null,
+    'the current completed baseline replaces the older fallback, including a true zero')
+  assert.equal(competitionSubmissionStatusLabel({ ...submissions[0], status: 'scored' }, activeRound),
+    'Scored · round in progress', 'a completed model must not imply a winner or promotion')
   assert.match(finalMarkup, /Promotion margin · \+1\.00 points/)
   assert.match(finalMarkup, /Not required/)
   assert.match(finalMarkup, /No champion was published/)
@@ -475,6 +489,21 @@ try {
   }))
   assert.doesNotMatch(gatedDiagnosticsMarkup, /Zenskar|Crusoe|Forus|HiddenLayer/)
   const unpublishedResults = normalizeCompetitionResults({ ...diagnosticResultsPayload, public_icp_status: 'pending' })
+  const completedBaselineResults = renderToStaticMarkup(React.createElement(renderedModule.exports.PublishedResults, {
+    submission: { ...submissions[0], isBaseline: true, finalScore: diagnosticResults.finalScore },
+    round: activeRound, benchmark, benchmarkState: 'available',
+    results: diagnosticResults, resultsState: 'available',
+  }))
+  assert.match(completedBaselineResults, /Zenskar|HiddenLayer/,
+    'a completed baseline exposes its diagnostics while the round is still active')
+  assert.match(completedBaselineResults, /Evaluation results/)
+  assert.doesNotMatch(completedBaselineResults, /This model’s score and diagnostics appear/)
+  const incompleteBaselineResults = renderToStaticMarkup(React.createElement(renderedModule.exports.PublishedResults, {
+    submission: { ...submissions[0], isBaseline: true, finalScore: null },
+    round: activeRound, benchmark, benchmarkState: 'available', results: null, resultsState: 'gated',
+  }))
+  assert.match(incompleteBaselineResults, /This model’s score and diagnostics appear/)
+  assert.doesNotMatch(incompleteBaselineResults, /Zenskar|HiddenLayer/)
   assert.equal(unpublishedResults.companyDiagnostics, null)
   const unpublishedDiagnosticsMarkup = renderToStaticMarkup(React.createElement(renderedModule.exports.PublishedResults, {
     submission: submissions[0], round: pendingRound, benchmark, benchmarkState: 'available',
@@ -692,7 +721,7 @@ try {
   assert.match(component, /Submitted code is frozen for this round\. Released files are read-only\./)
   assert.match(component, /This round was cancelled\. Aggregate and per-ICP scores were not published\./)
   assert.match(component, /This round was cancelled\. Source code was not published\./)
-  assert.match(component, /Scores appear when evaluation is complete\./)
+  assert.match(component, /This model’s score and diagnostics appear when its evaluation and cost checks are complete\./)
   assert.match(component, /<PendingIcpResults benchmark=\{benchmark\}>/)
   assert.match(component, /if \(submission\.status === 'scoring_failed'\) return <PendingIcpResults benchmark=\{benchmark\}>\{competitionSubmissionStatusLabel\(submission, round\)\}\. No complete evaluation score is available\./, 'failed-run zero placeholders must not render as completed per-ICP evaluations')
   assert.ok(component.indexOf("if (submission.status === 'scoring_failed')") < component.indexOf('const scores = submission.isBaseline'), 'failure status must gate baseline score rendering too')
@@ -701,7 +730,7 @@ try {
   assert.match(component, /Day 1 · Evaluation/)
   assert.match(component, /const submissionDate = utcCalendarDate\(round\.submissionOpen\) \?\? round\.icpSetDate/)
   assert.match(component, /const nextDay = submissionDate === round\.icpSetDate\s+&& isNextUtcDay\(submissionDate, round\.evaluationDate\)\s+&& utcCalendarDate\(round\.publicAt\) === round\.evaluationDate/, 'historical bank and disclosure dates must not be relabeled as the new daily cycle')
-  assert.match(component, /No final baseline score has been published for this round\./)
+  assert.match(component, /The baseline score appears when its evaluation and cost checks are complete\./)
   assert.match(component, /label="Round baseline" value="Public agent"/)
   assert.match(component, /ICP set · \{formatUtcDate\(icpSetDate\)\}/)
   assert.match(component, /normalizeCompetitionBenchmark\(benchmarkRequest\.value\.body, \{ roundId, icpSetDate, publicAt, benchmarkIcpCount \}\)/)
