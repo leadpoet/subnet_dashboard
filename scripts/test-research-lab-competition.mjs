@@ -319,7 +319,7 @@ try {
       champion: { submissionId: 'winner', minerHotkey: '5winner', finalScore: 51, outcome: 'new_king' } })
     assert.match(markup, /Champion/)
     assert.match(markup, promotionStatus === 'promoted' ? /Becomes next baseline/ : /Promotion pending/)
-    assert.doesNotMatch(markup, /Superseded|A newer round was published/)
+    assert.doesNotMatch(markup, /Superseded|was not promoted because a newer evaluation day was published/)
   }
 
   const supersededRound = normalizeCompetitionSnapshot({
@@ -331,7 +331,7 @@ try {
   const supersededMarkup = renderSummary(supersededRound)
   assert.match(supersededMarkup, /Superseded · 51\.00/)
   assert.match(supersededMarkup, /5winner/)
-  assert.match(supersededMarkup, /A newer round was published before this model was promoted\./)
+  assert.match(supersededMarkup, /This round’s champion was not promoted because a newer evaluation day was published\./)
   assert.doesNotMatch(supersededMarkup, /Promotion pending|Becomes next baseline/)
   const supersededTableMarkup = renderToStaticMarkup(React.createElement(renderedModule.exports.SubmissionTable, {
     submissions: [{ ...champion, submissionId: 'winner', minerHotkey: '5winner', finalScore: 51 }],
@@ -342,7 +342,7 @@ try {
   for (const promotionStatus of [null, 'not_required', 'unknown']) {
     const round = { ...supersededRound, promotionStatus }
     assert.equal(competitionSubmissionStatusLabel(champion, round), 'Champion')
-    assert.doesNotMatch(renderSummary(round), /Superseded|A newer round was published/)
+    assert.doesNotMatch(renderSummary(round), /Superseded|was not promoted because a newer evaluation day was published/)
   }
 
   const attributionSummaryMarkup = renderToStaticMarkup(React.createElement(renderedModule.exports.ScoringAttributionSummary, {

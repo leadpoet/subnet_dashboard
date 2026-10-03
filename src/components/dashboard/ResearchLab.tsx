@@ -114,7 +114,7 @@ function RoundSummary({ round }: { round: CompetitionRoundSummary }) {
             ? <SummaryMetric label="Cancellation" value={humanize(round.cancelReason)} detail="No champion was published" />
             : <SummaryMetric label="Promotion" value={evaluationComplete ? humanize(round.promotionStatus ?? 'not required') : 'Pending'} detail={evaluationComplete ? 'No champion was published' : 'Decision follows completed evaluation'} />}
       </div>
-      {round.champion && round.promotionStatus === 'superseded' ? <p className="mt-3 text-[11px] leading-relaxed text-[var(--muted-2)]">A newer round was published before this model was promoted.</p> : null}
+      {round.champion && round.promotionStatus === 'superseded' ? <p className="mt-3 text-[11px] leading-relaxed text-[var(--muted-2)]">This round’s champion was not promoted because a newer evaluation day was published.</p> : null}
     </section>
   )
 }
