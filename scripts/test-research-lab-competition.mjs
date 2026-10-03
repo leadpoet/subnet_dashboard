@@ -282,6 +282,7 @@ try {
     const markup = renderSummary({ ...snapshot.latestCompletedRound, status, publishedAt: null, baseline: null })
     assert.match(markup, /Pending/, `${status} must not imply a final promotion decision`)
     assert.match(markup, /Decision follows completed evaluation/)
+    assert.match(markup, /Awaiting score/, `${status} must distinguish a missing baseline score from zero`)
     assert.doesNotMatch(markup, /Not required|No champion was published|Stage1 scored/)
     if (status === 'scored') assert.match(markup, /Publishing results/)
     else if (status !== 'open') assert.match(markup, /Scoring/)
