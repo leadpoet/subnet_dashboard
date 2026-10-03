@@ -146,6 +146,14 @@ try {
     competitionSubmissionStatusLabel(champion, { ...pendingRound, promotionStatus: 'promoted' }),
     'Champion · promoted',
   )
+  assert.equal(
+    competitionSubmissionStatusLabel(champion, { ...pendingRound, promotionStatus: 'superseded' }),
+    'Champion · promotion superseded',
+  )
+  assert.equal(
+    competitionSubmissionStatusLabel(submissions[0], { ...pendingRound, promotionStatus: 'superseded' }),
+    'Scored · not promoted',
+  )
   assert.equal(formatCompetitionScore(0.99), '0.99')
   assert.equal(formatCompetitionScore(1), '1.00', 'two decimals distinguish threshold-adjacent scores')
   assert.equal(formatCompetitionScore(null), '—')
@@ -310,6 +318,30 @@ try {
       champion: { submissionId: 'winner', minerHotkey: '5winner', finalScore: 51, outcome: 'new_king' } })
     assert.match(markup, /Champion/)
     assert.match(markup, promotionStatus === 'promoted' ? /Becomes next baseline/ : /Promotion pending/)
+    assert.doesNotMatch(markup, /Superseded|A newer round was published/)
+  }
+
+  const supersededRound = normalizeCompetitionSnapshot({
+    mode: 'live', network_name: 'finney', netuid: 71,
+    rounds: [{ ...published, promotion_status: 'superseded',
+      champion: { submission_id: 'winner', miner_hotkey: '5winner', final_score: 51 } }],
+  }).rounds[0]
+  assert.equal(supersededRound.promotionStatus, 'superseded')
+  const supersededMarkup = renderSummary(supersededRound)
+  assert.match(supersededMarkup, /Superseded · 51\.00/)
+  assert.match(supersededMarkup, /5winner/)
+  assert.match(supersededMarkup, /A newer round was published before this model was promoted\./)
+  assert.doesNotMatch(supersededMarkup, /Promotion pending|Becomes next baseline/)
+  const supersededTableMarkup = renderToStaticMarkup(React.createElement(renderedModule.exports.SubmissionTable, {
+    submissions: [{ ...champion, submissionId: 'winner', minerHotkey: '5winner', finalScore: 51 }],
+    round: supersededRound, selectedId: 'winner', onSelect() {},
+  }))
+  assert.match(supersededTableMarkup, /Champion · promotion superseded/)
+  assert.match(supersededTableMarkup, /51\.00/)
+  for (const promotionStatus of [null, 'not_required', 'unknown']) {
+    const round = { ...supersededRound, promotionStatus }
+    assert.equal(competitionSubmissionStatusLabel(champion, round), 'Champion')
+    assert.doesNotMatch(renderSummary(round), /Superseded|A newer round was published/)
   }
 
   const attributionSummaryMarkup = renderToStaticMarkup(React.createElement(renderedModule.exports.ScoringAttributionSummary, {
@@ -690,7 +722,7 @@ try {
   }
   for (const status of ['queued', 'running', 'accepted', 'failed', 'scored', 'champion', 'cancelled', 'not_selected']) {
     for (const isBaseline of [false, true]) {
-      for (const promotionStatus of ['pending', 'promoted', 'not_required']) {
+      for (const promotionStatus of ['pending', 'promoted', 'superseded', 'not_required']) {
         const submission = { ...submissions[0], status, isBaseline }
         const round = { ...pendingRound, promotionStatus }
         assert.equal(competitionSubmissionStatusLabel({ ...submission, failureReason: 'credential_error' }, round), competitionSubmissionStatusLabel(submission, round), `${status} must not inherit a historical credential failure`)
