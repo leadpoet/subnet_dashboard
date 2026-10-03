@@ -409,6 +409,7 @@ export function competitionSubmissionStatusLabel(
   if (submission.isChampion || submission.status === 'champion') {
     if (round.promotionStatus === 'pending') return 'Champion · promotion pending'
     if (round.promotionStatus === 'promoted') return 'Champion · promoted'
+    if (round.promotionStatus === 'superseded') return 'Champion · promotion superseded'
     return 'Champion'
   }
   if (submission.status === 'scored' && round.status === 'published' && !submission.isBaseline) {
