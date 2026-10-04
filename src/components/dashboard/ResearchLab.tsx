@@ -114,6 +114,7 @@ function RoundSummary({ round }: { round: CompetitionRoundSummary }) {
             ? <SummaryMetric label="Cancellation" value={humanize(round.cancelReason)} detail="No champion was published" />
             : <SummaryMetric label="Promotion" value={evaluationComplete ? humanize(round.promotionStatus ?? 'not required') : 'Pending'} detail={evaluationComplete ? 'No champion was published' : 'Decision follows completed evaluation'} />}
       </div>
+      {round.champion && round.promotionStatus === 'superseded' ? <p className="mt-3 text-[11px] leading-relaxed text-[var(--muted-2)]">This round’s champion was not promoted because a newer evaluation day was published.</p> : null}
     </section>
   )
 }
@@ -360,6 +361,7 @@ async function fetchReleasedJson(url: string): Promise<{ state: 'available'; bod
 function championMetricDetail(round: CompetitionRoundSummary, championScore: number | null): string {
   if (round.promotionStatus === 'promoted') return `Becomes next baseline · ${formatCompetitionScore(championScore)}`
   if (round.promotionStatus === 'pending') return `Promotion pending · ${formatCompetitionScore(championScore)}`
+  if (round.promotionStatus === 'superseded') return `Superseded · ${formatCompetitionScore(championScore)}`
   return `${humanize(round.champion?.outcome ?? 'champion')} · ${formatCompetitionScore(championScore)}`
 }
 function roundStatusLabel(value: string): string { if (value === 'published') return 'Published result'; if (value === 'cancelled') return 'Cancelled round'; if (value === 'open') return 'Open for submissions'; if (['committed', 'stage1', 'stage1_scored', 'stage2'].includes(value)) return 'Scoring'; if (value === 'scored') return 'Publishing results'; return humanize(value) }
