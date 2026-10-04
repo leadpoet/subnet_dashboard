@@ -1,3 +1,13 @@
+# Scoped authorization: October 3 superseded competition status
+
+On 2026-10-03 the user authorized review, narrow safety fixes, merge, push and
+normal production deployment of Dashboard PR13 with Arena PR205/PR206.
+Show the final superseded promotion outcome without changing scores, champion
+identity, historical records or current pending decisions. Preserve secrets,
+active production traffic, deployment health checks and concurrent work.
+Verify the deployed API and rendered status end to end. Keep AGENTS.md and
+CLAUDE.md byte-identical. This authority ends after live verification.
+
 # Scoped authorization: September 23 company-only Arena dashboard
 
 On 2026-09-23 the user authorized a narrow dashboard compatibility change for
