@@ -383,6 +383,43 @@ export function competitionRoundOptions(snapshot: CompetitionSnapshot): Competit
   })
 }
 
+export type CompetitionScoreHistoryPoint = {
+  evaluationDate: string
+  timestamp: number
+  score: number | null
+  roundId: string | null
+}
+
+// Use the normalized history as the canonical record. References can include a
+// newer round outside the history window, but must not replace its record.
+export function competitionBaselineHistory(snapshot: CompetitionSnapshot): CompetitionScoreHistoryPoint[] {
+  const byId = new Map(snapshot.rounds.map((round) => [round.roundId, round]))
+  for (const round of [snapshot.latestRound, snapshot.latestCompletedRound, snapshot.openRound]) {
+    if (round && !byId.has(round.roundId)) byId.set(round.roundId, round)
+  }
+  const publicationTime = (round: CompetitionRoundSummary) => {
+    const timestamp = Date.parse(round.publishedAt ?? '')
+    return Number.isFinite(timestamp) ? timestamp : -Infinity
+  }
+  const published = [...byId.values()]
+    .filter((round) => round.status === 'published' && calendarDate(round.evaluationDate))
+    .sort((a, b) => (a.evaluationDate ?? '').localeCompare(b.evaluationDate ?? '')
+      || publicationTime(a) - publicationTime(b) || a.roundId.localeCompare(b.roundId))
+  if (!published.length) return []
+  const dayMs = 86_400_000
+  const end = Date.parse(`${published[published.length - 1].evaluationDate}T00:00:00Z`)
+  const start = Math.max(Date.parse(`${published[0].evaluationDate}T00:00:00Z`), end - 13 * dayMs)
+  // Multiple releases for one evaluation day use the latest published record.
+  const byDate = new Map(published.map((round) => [round.evaluationDate, round]))
+  const points: CompetitionScoreHistoryPoint[] = []
+  for (let timestamp = start; timestamp <= end; timestamp += dayMs) {
+    const evaluationDate = new Date(timestamp).toISOString().slice(0, 10)
+    const round = byDate.get(evaluationDate)
+    points.push({ evaluationDate, timestamp, score: score(round?.baseline?.finalScore), roundId: round?.roundId ?? null })
+  }
+  return points
+}
+
 export function latestPublishedBaselineRound(
   snapshot: CompetitionSnapshot,
   selectedRound: CompetitionRoundSummary | null,

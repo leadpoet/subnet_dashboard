@@ -25,6 +25,7 @@ try {
     competitionSubmissionEvaluationNotice,
     competitionSubmissionStatusLabel,
     competitionRoundOptions,
+    competitionBaselineHistory,
     formatCompetitionScore,
     latestPublishedBaselineRound,
     normalizeCompetitionBenchmark,
@@ -111,6 +112,39 @@ try {
     'arena-2026-09-05',
     'a newer active round must not hide the latest real published baseline',
   )
+  const historyRound = (date, finalScore, overrides = {}) => ({
+    ...snapshot.latestCompletedRound, roundId: `arena-${date}`, evaluationDate: date,
+    publishedAt: `${date}T18:00:00Z`, baseline: { submissionId: 'baseline', minerHotkey: '5baseline', finalScore },
+    ...overrides,
+  })
+  const historySnapshot = (rounds, refs = {}) => ({ ...snapshot, rounds, latestRound: null, latestCompletedRound: null, openRound: null, ...refs })
+  assert.deepEqual(competitionBaselineHistory(historySnapshot([])), [])
+  const canonical = historyRound('2026-09-05', 0)
+  const history = competitionBaselineHistory(historySnapshot([
+    historyRound('2026-09-10', 4.633), historyRound('2026-09-06', null), canonical,
+    historyRound('2026-09-07', 80, { status: 'cancelled' }),
+    historyRound('2026-09-08', 70, { status: 'stage2' }),
+    historyRound('2026-09-09', 60, { status: 'scoring_failed' }),
+    historyRound(null, 90), historyRound('2026-02-30', 90),
+  ], { latestCompletedRound: { ...canonical, baseline: { ...canonical.baseline, finalScore: 99 } } }))
+  assert.deepEqual(history.map((point) => point.evaluationDate), ['2026-09-05', '2026-09-06', '2026-09-07', '2026-09-08', '2026-09-09', '2026-09-10'], 'history sorts valid UTC evaluation dates and fills calendar gaps')
+  assert.deepEqual(history.map((point) => point.score), [0, null, null, null, null, 4.633], 'true zero is retained; pending, failed, cancelled and missing scores remain gaps')
+  assert.equal(history[0].timestamp, Date.parse('2026-09-05T00:00:00Z'))
+  assert.equal(history[0].roundId, canonical.roundId, 'canonical history wins over stale round references')
+  assert.equal(competitionBaselineHistory(historySnapshot([canonical, canonical])).length, 1, 'duplicate references do not add chart points')
+  assert.equal(competitionBaselineHistory(historySnapshot([], { latestCompletedRound: canonical }))[0].score, 0, 'a published canonical reference outside the history list is included')
+  const laterRelease = historyRound('2026-09-05', 2, { roundId: 'arena-rerun', publishedAt: '2026-09-05T20:00:00Z' })
+  assert.equal(competitionBaselineHistory(historySnapshot([laterRelease, canonical]))[0].score, 2, 'a repeated evaluation day uses the latest published release regardless of input order')
+  assert.equal(competitionBaselineHistory(historySnapshot([
+    laterRelease, historyRound('2026-09-05', 3, { roundId: 'offset-release', publishedAt: '2026-09-05T17:00:00-04:00' }),
+  ]))[0].score, 3, 'release ordering compares UTC instants rather than timestamp strings')
+  const windowedHistory = competitionBaselineHistory(historySnapshot([canonical, historyRound('2026-09-30', 5)]))
+  assert.equal(windowedHistory.length, 14, 'chart limits history to the most recent 14 evaluation days')
+  assert.equal(windowedHistory[0].evaluationDate, '2026-09-17')
+  assert.equal(windowedHistory.at(-1).score, 5)
+  const rolloverHistory = competitionBaselineHistory(historySnapshot([historyRound('2026-12-31', 1), historyRound('2027-01-02', 2)]))
+  assert.deepEqual(rolloverHistory.map((point) => point.evaluationDate), ['2026-12-31', '2027-01-01', '2027-01-02'], 'history crosses UTC year boundaries without a local-time shift')
+
   const legacySnapshot = normalizeCompetitionSnapshot({
     mode: 'live', network_name: 'finney', netuid: 71, rounds: [{
       ...published, round_id: 'arena-legacy', icp_set_date: '2026-09-05', evaluation_date: '2026-09-05',
@@ -268,7 +302,7 @@ try {
   const renderedModule = { exports: {} }
   vm.runInNewContext(ts.transpileModule(component, {
     compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX },
-  }).outputText + '\nexports.RoundSummary = RoundSummary; exports.LatestPublishedBaseline = LatestPublishedBaseline; exports.SubmissionTable = SubmissionTable; exports.PublishedResults = PublishedResults; exports.ScoringAttributionSummary = ScoringAttributionSummary; exports.IcpList = IcpList; exports.CompanyDiagnostics = CompanyDiagnostics; exports.SourcePanel = SourcePanel;', {
+  }).outputText + '\nexports.BaselineScoreHistory = BaselineScoreHistory; exports.ScoreHistoryTooltip = ScoreHistoryTooltip; exports.RoundSummary = RoundSummary; exports.LatestPublishedBaseline = LatestPublishedBaseline; exports.SubmissionTable = SubmissionTable; exports.PublishedResults = PublishedResults; exports.ScoringAttributionSummary = ScoringAttributionSummary; exports.IcpList = IcpList; exports.CompanyDiagnostics = CompanyDiagnostics; exports.SourcePanel = SourcePanel;', {
     module: renderedModule, exports: renderedModule.exports,
     require(name) {
       if (name === '@/lib/research-lab-competition') return require(join(outDir, 'research-lab-competition.js'))
@@ -287,6 +321,18 @@ try {
     if (status === 'scored') assert.match(markup, /Publishing results/)
     else if (status !== 'open') assert.match(markup, /Scoring/)
   }
+  const historyMarkup = renderToStaticMarkup(React.createElement(renderedModule.exports.BaselineScoreHistory, { points: history }))
+  assert.match(historyMarkup, /Baseline score over time/)
+  assert.match(historyMarkup, /Published rounds · UTC/)
+  assert.match(historyMarkup, /Gaps have no published score/)
+  const emptyHistoryMarkup = renderToStaticMarkup(React.createElement(renderedModule.exports.BaselineScoreHistory, { points: [] }))
+  assert.match(emptyHistoryMarkup, /No published score history yet/)
+  const onePointMarkup = renderToStaticMarkup(React.createElement(renderedModule.exports.BaselineScoreHistory, { points: [history[0]] }))
+  assert.match(onePointMarkup, /One published score/)
+  const tooltipMarkup = renderToStaticMarkup(React.createElement(renderedModule.exports.ScoreHistoryTooltip, { active: true, payload: [{ payload: history[0] }] }))
+  assert.match(tooltipMarkup, /Evaluation · Sep 5, 2026 · UTC/)
+  assert.match(tooltipMarkup, /Baseline 0\.00 \/100/)
+  assert.equal(renderToStaticMarkup(React.createElement(renderedModule.exports.ScoreHistoryTooltip, { active: true, payload: [{ payload: history[1] }] })), '', 'a missing point must not expose a zero tooltip')
   const finalMarkup = renderSummary(snapshot.latestCompletedRound)
   const datedRound = {
     ...snapshot.latestCompletedRound, status: 'stage1', publishedAt: null,
@@ -315,9 +361,8 @@ try {
   }
   const completedBaselineMarkup = renderSummary(completedBaselineRound)
   assert.match(completedBaselineMarkup, /0\.00/)
-  assert.match(completedBaselineMarkup, /Baseline evaluation complete/)
-  assert.match(renderSummary({ ...completedBaselineRound, status: 'scored' }), /All evaluations are complete/)
-  assert.match(completedBaselineMarkup, /champion is decided when the round finishes/)
+  assert.match(completedBaselineMarkup, /Baseline evaluated/)
+  assert.match(renderSummary({ ...completedBaselineRound, status: 'scored' }), /Evaluations complete. Publication pending/)
   assert.match(completedBaselineMarkup, /Pending/)
   assert.doesNotMatch(completedBaselineMarkup, /Awaiting score|No champion was published/)
   assert.equal(latestPublishedBaselineRound(activeSnapshot, completedBaselineRound), null,
@@ -762,7 +807,6 @@ try {
   assert.match(component, /Public ICPs \(\$\{benchmark\.benchmarkIcpCount\}\)/)
   assert.match(component, /Improve the public agent and compete on the same daily ICPs\./)
   assert.match(component, /All \{icps\.length\} ICPs are public for this round\./)
-  assert.match(component, /value="Public agent"/)
   assert.doesNotMatch(component, /server-held .* evaluation view/)
   assert.match(component, /response\.status === 403/)
   assert.match(component, /icp\.position/)
@@ -785,8 +829,8 @@ try {
   assert.match(component, /Evaluation day/)
   assert.doesNotMatch(component, /Day 0|Day 1/)
   assert.match(component, /const submissionDate = utcCalendarDate\(round\.submissionOpen\) \?\? round\.icpSetDate/)
-  assert.match(component, /The baseline score appears when its evaluation and cost checks are complete\./)
-  assert.match(component, /label="Round baseline" value="Public agent"/)
+  assert.match(component, /Available after evaluation and cost checks\./)
+  assert.doesNotMatch(component, /label="Round baseline"|label="Round status"|SummaryMetric/, 'summary must not repeat its score and status in metric cards')
   assert.match(component, /ICP set · \{formatUtcDate\(icpSetDate\)\}/)
   assert.match(component, /normalizeCompetitionBenchmark\(benchmarkRequest\.value\.body, \{ roundId, icpSetDate, publicAt, benchmarkIcpCount \}\)/)
   assert.match(component, /Some files are omitted from this preview\./)
