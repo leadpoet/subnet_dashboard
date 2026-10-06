@@ -1,3 +1,13 @@
+# Scoped authorization: October 6 score history and simpler dashboard
+
+The user authorized a score-over-time chart and less repeated dashboard text,
+with desktop/mobile visual checks, safe push/merge, normal deployment and a
+screenshot of the finished live dashboard. Reuse public scores and existing
+chart dependencies. Preserve missing scores, UTC dates, release status, API
+contracts, scoring, promotion, runtime behavior and concurrent work. No verifier
+research or new paid sourcing is part of this change. Keep this file and
+`CLAUDE.md` byte-identical. Authority ends after live visual verification.
+
 # Scoped authorization: October 6 competition date clarity
 
 The user authorized clearer submission and evaluation dates on the dashboard,

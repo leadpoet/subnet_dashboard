@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { useVisiblePolling } from '@/lib/hooks/useVisiblePolling'
 import {
   DEFAULT_REPO_URL,
@@ -10,6 +11,8 @@ import {
   competitionSubmissionEvaluationNotice,
   competitionSubmissionStatusLabel,
   competitionRoundOptions,
+  competitionBaselineHistory,
+  type CompetitionScoreHistoryPoint,
   formatCompetitionScore,
   latestPublishedBaselineRound,
   normalizeCompetitionBenchmark,
@@ -63,7 +66,7 @@ export function ResearchLab({
   return (
     <div className="w-full">
       <CompetitionHeader competition={competition} />
-      {!competition ? <Unavailable message="Competition data is temporarily unavailable. This page will retry automatically." /> : selectedRound ? <>{publishedBaselineRound ? <LatestPublishedBaseline round={publishedBaselineRound} /> : null}<RoundSummary round={selectedRound} /><RoundWorkspace round={selectedRound} active={active} /></> : <p className="border-b border-[var(--line)] py-12 text-[14px] text-[var(--muted)]">No production competition round is available.</p>}
+      {!competition ? <Unavailable message="Competition data is temporarily unavailable. This page will retry automatically." /> : selectedRound ? <>{publishedBaselineRound ? <LatestPublishedBaseline round={publishedBaselineRound} /> : null}<RoundSummary round={selectedRound} history={competitionBaselineHistory(competition)} /><RoundWorkspace round={selectedRound} active={active} /></> : <p className="border-b border-[var(--line)] py-12 text-[14px] text-[var(--muted)]">No production competition round is available.</p>}
       {error && competition ? <p className="mt-5 text-[12px] text-[var(--muted-2)]">Latest refresh failed: {error}</p> : null}
     </div>
   )
@@ -90,34 +93,76 @@ function CompetitionHeader({ competition }: { competition: CompetitionSnapshot |
   )
 }
 
-function RoundSummary({ round }: { round: CompetitionRoundSummary }) {
+function RoundSummary({ round, history = [] }: { round: CompetitionRoundSummary; history?: CompetitionScoreHistoryPoint[] }) {
   const baselineScore = round.baseline?.finalScore ?? null
   const championScore = round.champion?.finalScore ?? null
   const evaluationComplete = round.status === 'published'
   return (
-    <section className="border-b border-[var(--line)] py-10 md:py-12">
-      <div className="flex flex-col justify-between gap-5 md:flex-row md:items-start">
-        <div>
-          <div className="flex flex-wrap items-center gap-2 font-mono text-[10.5px] uppercase tracking-[0.13em] text-[var(--muted-2)]"><span>{roundStatusLabel(round.status)}</span>{round.cancelReason ? <><span aria-hidden>·</span><span>{humanize(round.cancelReason)}</span></> : null}</div>
-          <h3 className="mt-3 text-[14px] text-[var(--platinum)]">Evaluation day · {formatUtcDate(round.evaluationDate)}</h3>
-          <div className="mt-4 font-display text-[clamp(42px,7vw,76px)] font-medium leading-[0.9] tracking-[-0.045em] text-[var(--platinum)]">{baselineScore === null ? 'Awaiting score' : formatCompetitionScore(baselineScore)}{baselineScore === null ? null : <span className="ml-3 align-baseline text-[20px] tracking-normal text-[var(--faint)]">/100 baseline</span>}</div>
-          <p className="mt-5 max-w-[610px] text-[13px] leading-[1.7] text-[var(--muted)]">{baselineScore === null ? 'The baseline score appears when its evaluation and cost checks are complete.' : evaluationComplete ? 'Final score for the public baseline in this production round.' : round.status === 'scored' ? 'All evaluations are complete. Final round publication and the champion decision are pending.' : 'Baseline evaluation complete. Other models are still being evaluated; the champion is decided when the round finishes.'}</p>
+    <section className="border-b border-[var(--line)] py-7 md:py-8">
+      <div className="grid min-w-0 gap-7 md:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)] md:gap-10">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2 font-mono text-[10px] uppercase tracking-[0.13em] text-[var(--muted-2)]"><span>{roundStatusLabel(round.status)}</span>{round.cancelReason ? <><span aria-hidden>·</span><span>{humanize(round.cancelReason)}</span></> : null}</div>
+          <h3 className="mt-3 text-[13px] text-[var(--muted)]">Evaluation day · {formatUtcDate(round.evaluationDate)}</h3>
+          <div className="mt-5 font-mono text-[10px] uppercase tracking-[0.13em] text-[var(--muted-2)]">Baseline score</div>
+          <div className="mt-3 font-display text-[clamp(38px,6vw,68px)] font-medium leading-none tracking-[-0.045em] text-[var(--platinum)]">{baselineScore === null ? 'Awaiting score' : formatCompetitionScore(baselineScore)}{baselineScore === null ? null : <span className="ml-2 text-[19px] tracking-normal text-[var(--muted-2)]">/100</span>}</div>
+          <p className="mt-3 text-[11px] leading-relaxed text-[var(--muted-2)]">{baselineScore === null ? 'Available after evaluation and cost checks.' : evaluationComplete ? `${round.publishedAt ? `Published ${formatUtc(round.publishedAt)}` : 'Published result'}${round.baseline ? ` · ${shortHotkey(round.baseline.minerHotkey)}` : ''}` : round.status === 'scored' ? 'Evaluations complete. Publication pending.' : 'Baseline evaluated. Round still in progress.'}</p>
+        </div>
+        <BaselineScoreHistory points={history} />
+      </div>
+      <CompetitionSchedule round={round} />
+      <div className="mt-5 flex flex-wrap items-start justify-between gap-x-6 gap-y-3 text-[11px] leading-relaxed text-[var(--muted-2)]">
+        <p>Promotion margin · +{formatCompetitionScore(round.promotionMargin)} points above baseline</p>
+        <div className="text-[var(--muted)]">{round.champion
+          ? <><span className="text-[var(--platinum)]">Champion · {shortHotkey(round.champion.minerHotkey)}</span><span className="ml-2">{championMetricDetail(round, championScore)}</span></>
+          : round.cancelReason ? <span>No champion was published</span>
+            : <><span className="text-[var(--platinum)]">Promotion · {evaluationComplete ? humanize(round.promotionStatus ?? 'not required') : 'Pending'}</span><span className="ml-2">{evaluationComplete ? 'No champion was published' : 'Decision follows completed evaluation'}</span></>}
         </div>
       </div>
-      <p className="mt-3 text-[11px] text-[var(--muted-2)]">Promotion margin · +{formatCompetitionScore(round.promotionMargin)} points above the baseline.</p>
-      <CompetitionSchedule round={round} />
-      <div className="mt-8 grid gap-px overflow-hidden rounded-md border border-[var(--line)] bg-[var(--line)] sm:grid-cols-3">
-        <SummaryMetric label="Round baseline" value="Public agent" detail={round.baseline ? `${formatCompetitionScore(baselineScore)} · ${shortHotkey(round.baseline.minerHotkey)}` : 'Score unavailable'} />
-        <SummaryMetric label="Round status" value={roundStatusLabel(round.status)} detail={round.publishedAt ? formatUtc(round.publishedAt) : round.createdAt ? `Created ${formatUtc(round.createdAt)}` : round.roundId} />
-        {round.champion
-          ? <SummaryMetric label="Champion" value={shortHotkey(round.champion.minerHotkey)} detail={championMetricDetail(round, championScore)} />
-          : round.cancelReason
-            ? <SummaryMetric label="Cancellation" value={humanize(round.cancelReason)} detail="No champion was published" />
-            : <SummaryMetric label="Promotion" value={evaluationComplete ? humanize(round.promotionStatus ?? 'not required') : 'Pending'} detail={evaluationComplete ? 'No champion was published' : 'Decision follows completed evaluation'} />}
-      </div>
-      {round.champion && round.promotionStatus === 'superseded' ? <p className="mt-3 text-[11px] leading-relaxed text-[var(--muted-2)]">This round’s champion was not promoted because a newer evaluation day was published.</p> : null}
+      {round.champion && round.promotionStatus === 'superseded' ? <p className="mt-2 text-[11px] leading-relaxed text-[var(--muted-2)]">This round’s champion was not promoted because a newer evaluation day was published.</p> : null}
     </section>
   )
+}
+
+function BaselineScoreHistory({ points }: { points: CompetitionScoreHistoryPoint[] }) {
+  const publishedScores = points.filter((point) => point.score !== null)
+  const maxScore = Math.max(0, ...publishedScores.map((point) => point.score ?? 0))
+  const upperBound = maxScore <= 5 ? 5 : maxScore <= 10 ? 10 : Math.min(100, Math.ceil(maxScore / 10) * 10)
+  const ticks = [0, upperBound / 2, upperBound]
+  return <div className="min-w-0" role="region" aria-label="Baseline score history">
+    <div className="flex flex-wrap items-baseline justify-between gap-2">
+      <h4 className="text-[13px] text-[var(--platinum)]">Baseline score over time <span className="text-[11px] text-[var(--muted-2)]">/100</span></h4>
+      <span className="font-mono text-[9px] uppercase tracking-[0.1em] text-[var(--muted-2)]">Published rounds · UTC</span>
+    </div>
+    {publishedScores.length ? <>
+      <div className="mt-3 h-[180px] w-full min-w-0">
+        <ResponsiveContainer width="100%" height="100%" minWidth={0}>
+          <LineChart data={points} accessibilityLayer margin={{ top: 8, right: 9, bottom: 0, left: 0 }}>
+            <CartesianGrid vertical={false} stroke="var(--line)" strokeDasharray="3 5" />
+            <XAxis dataKey="timestamp" type="number" scale="time" domain={points.length === 1 ? [points[0].timestamp - 43_200_000, points[0].timestamp + 43_200_000] : ['dataMin', 'dataMax']} ticks={historyTicks(points)} tickFormatter={formatHistoryDate} stroke="var(--line)" tick={{ fill: 'var(--muted-2)', fontSize: 10 }} tickLine={false} axisLine={false} minTickGap={25} tickMargin={10} />
+            <YAxis domain={[0, upperBound]} ticks={ticks} tick={{ fill: 'var(--muted-2)', fontSize: 10 }} tickLine={false} axisLine={false} width={30} tickMargin={8} />
+            <Tooltip content={<ScoreHistoryTooltip />} cursor={{ stroke: 'var(--line-3)', strokeDasharray: '3 3' }} />
+            <Line type="linear" dataKey="score" name="Baseline score" stroke="var(--brand)" strokeWidth={2} connectNulls={false} dot={{ r: 3, strokeWidth: 0, fill: 'var(--brand)' }} activeDot={{ r: 5, stroke: 'var(--surface)', strokeWidth: 2 }} isAnimationActive={false} />
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
+      <p className="mt-2 text-[10px] text-[var(--muted-2)]">{publishedScores.length === 1 ? 'One published score. More points appear as rounds publish.' : `${formatHistoryDate(points[0].timestamp)} – ${formatHistoryDate(points[points.length - 1].timestamp)} · Gaps have no published score.`}</p>
+    </> : <div className="mt-3 flex h-[180px] items-center justify-center rounded-md border border-dashed border-[var(--line)] text-[12px] text-[var(--muted-2)]">No published score history yet.</div>}
+  </div>
+}
+
+function ScoreHistoryTooltip({ active, payload }: { active?: boolean; payload?: ReadonlyArray<{ payload?: CompetitionScoreHistoryPoint }> }) {
+  const point = payload?.[0]?.payload
+  if (!active || !point || point.score === null) return null
+  return <div className="rounded-md border border-[var(--line-3)] bg-[#101010] px-3 py-2 text-[11px] shadow-lg"><div className="text-[var(--muted)]">Evaluation · {formatUtcDate(point.evaluationDate)}</div><div className="mt-1 font-mono text-[var(--platinum)]">Baseline {formatCompetitionScore(point.score)} /100</div></div>
+}
+
+function historyTicks(points: CompetitionScoreHistoryPoint[]): number[] {
+  if (points.length <= 1) return points.map((point) => point.timestamp)
+  return [...new Set([points[0].timestamp, points[Math.floor((points.length - 1) / 2)].timestamp, points[points.length - 1].timestamp])]
+}
+
+function formatHistoryDate(value: number): string {
+  return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' }).format(new Date(value))
 }
 
 function LatestPublishedBaseline({ round }: { round: CompetitionRoundSummary }) {
@@ -138,14 +183,10 @@ function LatestPublishedBaseline({ round }: { round: CompetitionRoundSummary }) 
 function CompetitionSchedule({ round }: { round: CompetitionRoundSummary }) {
   if (!round.icpSetDate && !round.evaluationDate && !round.publicAt) return null
   const submissionDate = utcCalendarDate(round.submissionOpen) ?? round.icpSetDate
-  return <div className="mt-8 grid gap-5 border-y border-[var(--line)] py-5 sm:grid-cols-2">
+  return <div className="mt-6 grid gap-4 border-y border-[var(--line)] py-4 sm:grid-cols-2">
     <div><div className="font-mono text-[9.5px] uppercase tracking-[0.13em] text-[var(--muted-2)]">Submission day</div><div className="mt-2 text-[14px] text-[var(--platinum)]">{formatUtcDate(submissionDate)}</div><div className="mt-1 text-[11px] text-[var(--muted-2)]">{round.submissionCutoff ? `Closes ${formatUtc(round.submissionCutoff)}` : 'Submit an agent for this ICP set.'}</div></div>
-    <div><div className="font-mono text-[9.5px] uppercase tracking-[0.13em] text-[var(--muted-2)]">Evaluation day</div><div className="mt-2 text-[14px] text-[var(--platinum)]">{formatUtcDate(round.evaluationDate)}</div><div className="mt-1 text-[11px] text-[var(--muted-2)]">{round.publicAt ? `ICPs publish ${formatUtc(round.publicAt)}. Each model’s score appears when its evaluation is complete.` : 'ICPs publish first. Each model’s score appears when its evaluation is complete.'}</div></div>
+    <div><div className="font-mono text-[9.5px] uppercase tracking-[0.13em] text-[var(--muted-2)]">Evaluation day</div><div className="mt-2 text-[14px] text-[var(--platinum)]">{formatUtcDate(round.evaluationDate)}</div><div className="mt-1 text-[11px] text-[var(--muted-2)]">{round.publicAt ? `ICPs publish ${formatUtc(round.publicAt)}. Scores follow evaluation.` : 'ICPs publish first. Scores follow evaluation.'}</div></div>
   </div>
-}
-
-function SummaryMetric({ label, value, detail }: { label: string; value: string; detail: string }) {
-  return <div className="min-w-0 bg-[#0b0b0b] px-4 py-4"><div className="font-mono text-[9.5px] uppercase tracking-[0.13em] text-[var(--muted-2)]">{label}</div><div className="mt-2 truncate font-mono text-[12px] text-[var(--platinum)]" title={value}>{value}</div><div className="mt-1 truncate text-[11px] text-[var(--muted-2)]" title={detail}>{detail}</div></div>
 }
 
 function RoundWorkspace({ round, active }: { round: CompetitionRoundSummary; active: boolean }) {
