@@ -99,6 +99,7 @@ function RoundSummary({ round }: { round: CompetitionRoundSummary }) {
       <div className="flex flex-col justify-between gap-5 md:flex-row md:items-start">
         <div>
           <div className="flex flex-wrap items-center gap-2 font-mono text-[10.5px] uppercase tracking-[0.13em] text-[var(--muted-2)]"><span>{roundStatusLabel(round.status)}</span>{round.cancelReason ? <><span aria-hidden>·</span><span>{humanize(round.cancelReason)}</span></> : null}</div>
+          <h3 className="mt-3 text-[14px] text-[var(--platinum)]">Evaluation day · {formatUtcDate(round.evaluationDate)}</h3>
           <div className="mt-4 font-display text-[clamp(42px,7vw,76px)] font-medium leading-[0.9] tracking-[-0.045em] text-[var(--platinum)]">{baselineScore === null ? 'Awaiting score' : formatCompetitionScore(baselineScore)}{baselineScore === null ? null : <span className="ml-3 align-baseline text-[20px] tracking-normal text-[var(--faint)]">/100 baseline</span>}</div>
           <p className="mt-5 max-w-[610px] text-[13px] leading-[1.7] text-[var(--muted)]">{baselineScore === null ? 'The baseline score appears when its evaluation and cost checks are complete.' : evaluationComplete ? 'Final score for the public baseline in this production round.' : round.status === 'scored' ? 'All evaluations are complete. Final round publication and the champion decision are pending.' : 'Baseline evaluation complete. Other models are still being evaluated; the champion is decided when the round finishes.'}</p>
         </div>
@@ -126,7 +127,7 @@ function LatestPublishedBaseline({ round }: { round: CompetitionRoundSummary }) 
       <div className="flex flex-col justify-between gap-3 rounded-md border border-[var(--line)] bg-[#0b0b0b] px-4 py-4 sm:flex-row sm:items-center">
         <div>
           <div className="font-mono text-[9.5px] uppercase tracking-[0.13em] text-[var(--muted-2)]">Latest published baseline</div>
-          <div className="mt-2 text-[12px] text-[var(--muted)]">Public agent · Evaluation {formatUtcDate(round.evaluationDate)} · Round <span className="font-mono">{round.roundId}</span></div>
+          <div className="mt-2 text-[12px] text-[var(--muted)]">Public agent · Evaluation day {formatUtcDate(round.evaluationDate)} · Round <span className="font-mono">{round.roundId}</span></div>
         </div>
         <div className="shrink-0 font-display text-[28px] font-medium tracking-[-0.025em] text-[var(--platinum)]">{formatCompetitionScore(score)}<span className="ml-2 font-mono text-[11px] tracking-normal text-[var(--muted-2)]">/100</span></div>
       </div>
@@ -137,12 +138,9 @@ function LatestPublishedBaseline({ round }: { round: CompetitionRoundSummary }) 
 function CompetitionSchedule({ round }: { round: CompetitionRoundSummary }) {
   if (!round.icpSetDate && !round.evaluationDate && !round.publicAt) return null
   const submissionDate = utcCalendarDate(round.submissionOpen) ?? round.icpSetDate
-  const nextDay = submissionDate === round.icpSetDate
-    && isNextUtcDay(submissionDate, round.evaluationDate)
-    && utcCalendarDate(round.publicAt) === round.evaluationDate
   return <div className="mt-8 grid gap-5 border-y border-[var(--line)] py-5 sm:grid-cols-2">
-    <div><div className="font-mono text-[9.5px] uppercase tracking-[0.13em] text-[var(--muted-2)]">{nextDay ? 'Day 0 · Submissions' : 'Submissions'}</div><div className="mt-2 text-[14px] text-[var(--platinum)]">{formatUtcDate(submissionDate)}</div><div className="mt-1 text-[11px] text-[var(--muted-2)]">{round.submissionCutoff ? `Closes ${formatUtc(round.submissionCutoff)}` : 'Submit an agent for this ICP set.'}</div></div>
-    <div><div className="font-mono text-[9.5px] uppercase tracking-[0.13em] text-[var(--muted-2)]">{nextDay ? 'Day 1 · Evaluation' : 'Evaluation'}</div><div className="mt-2 text-[14px] text-[var(--platinum)]">{formatUtcDate(round.evaluationDate)}</div><div className="mt-1 text-[11px] text-[var(--muted-2)]">{round.publicAt ? `ICPs publish ${formatUtc(round.publicAt)}. Each model’s score appears when its evaluation is complete.` : 'ICPs publish first. Each model’s score appears when its evaluation is complete.'}</div></div>
+    <div><div className="font-mono text-[9.5px] uppercase tracking-[0.13em] text-[var(--muted-2)]">Submission day</div><div className="mt-2 text-[14px] text-[var(--platinum)]">{formatUtcDate(submissionDate)}</div><div className="mt-1 text-[11px] text-[var(--muted-2)]">{round.submissionCutoff ? `Closes ${formatUtc(round.submissionCutoff)}` : 'Submit an agent for this ICP set.'}</div></div>
+    <div><div className="font-mono text-[9.5px] uppercase tracking-[0.13em] text-[var(--muted-2)]">Evaluation day</div><div className="mt-2 text-[14px] text-[var(--platinum)]">{formatUtcDate(round.evaluationDate)}</div><div className="mt-1 text-[11px] text-[var(--muted-2)]">{round.publicAt ? `ICPs publish ${formatUtc(round.publicAt)}. Each model’s score appears when its evaluation is complete.` : 'ICPs publish first. Each model’s score appears when its evaluation is complete.'}</div></div>
   </div>
 }
 
@@ -272,7 +270,7 @@ function RoundWorkspace({ round, active }: { round: CompetitionRoundSummary; act
 
   return (
     <section className="pt-10">
-      <div className="mb-5 flex items-end justify-between gap-4"><div><h3 className="font-display text-[22px] font-medium tracking-[-0.025em] text-[var(--platinum)]">Submissions</h3><p className="mt-1 text-[12px] text-[var(--muted-2)]">Select a submission to inspect its published public-ICP scores and released source.</p></div><span className="font-mono text-[10px] text-[var(--muted-2)]">{submissions.length} total</span></div>
+      <div className="mb-5 flex items-end justify-between gap-4"><div><h3 className="font-display text-[22px] font-medium tracking-[-0.025em] text-[var(--platinum)]">Submissions</h3><p className="mt-1 text-[12px] text-[var(--muted-2)]">Evaluation day: {formatUtcDate(round.evaluationDate)}. Select a submission to inspect its published public-ICP scores and released source.</p></div><span className="font-mono text-[10px] text-[var(--muted-2)]">{submissions.length} total</span></div>
       {roundLoading ? <div className="h-24 shimmer rounded-md" /> : submissions.length === 0 ? <InlineNotice>{roundError ?? 'No submissions are public for this round.'}</InlineNotice> : <>{roundError ? <div className="mb-3"><InlineNotice>{roundError} Last known submissions are shown below.</InlineNotice></div> : null}<SubmissionTable submissions={submissions} round={round} selectedId={selectedSubmissionId} onSelect={selectSubmission} /></>}
       {selectedSubmission ? <div className="mt-8 grid gap-8 xl:grid-cols-[minmax(0,1.45fr)_minmax(300px,0.55fr)]"><PublishedResults benchmark={benchmark} benchmarkState={benchmarkState} results={results} resultsState={resultsState} round={round} submission={selectedSubmission} /><SourcePanel submission={selectedSubmission} cancelled={round.status === 'cancelled'} code={code} codeState={codeState} selectedFile={selectedCodeFile} onSelectFile={setSelectedFile} onRequest={() => void requestCode()} /></div> : null}
     </section>
@@ -371,5 +369,4 @@ function shortHotkey(value: string): string { return value.length > 18 ? `${valu
 function formatUtc(value: string): string { const date = new Date(value); return Number.isFinite(date.getTime()) ? `${date.toISOString().slice(0, 16).replace('T', ' ')} UTC` : value }
 function formatUtcDate(value: string | null): string { if (!value) return 'Date unavailable'; const date = new Date(`${value}T00:00:00Z`); return Number.isFinite(date.getTime()) ? `${new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' }).format(date)} · UTC` : value }
 function utcCalendarDate(value: string | null): string | null { if (!value) return null; const date = new Date(value); return Number.isFinite(date.getTime()) ? date.toISOString().slice(0, 10) : null }
-function isNextUtcDay(start: string | null, end: string | null): boolean { if (!start || !end) return false; const startDate = new Date(`${start}T00:00:00Z`); const endDate = new Date(`${end}T00:00:00Z`); return endDate.getTime() - startDate.getTime() === 86_400_000 }
 function errorMessage(value: unknown, fallback: string): string { return value instanceof Error ? value.message : fallback }
