@@ -1,3 +1,12 @@
+# Scoped authorization: October 6 competition date clarity
+
+The user authorized clearer submission and evaluation dates on the dashboard,
+including focused tests, safe push/merge, normal production deployment and
+rendered verification. Preserve API contracts, selected rounds, scores,
+disclosure timing, promotion, deployment safety and concurrent work. This
+scope ends when the new date labels are live and verified. Keep this file and
+`CLAUDE.md` byte-identical.
+
 # Scoped authorization: October 3 superseded competition status
 
 On 2026-10-03 the user authorized review, narrow safety fixes, merge, push and
