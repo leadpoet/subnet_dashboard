@@ -288,6 +288,28 @@ try {
     else if (status !== 'open') assert.match(markup, /Scoring/)
   }
   const finalMarkup = renderSummary(snapshot.latestCompletedRound)
+  const datedRound = {
+    ...snapshot.latestCompletedRound, status: 'stage1', publishedAt: null,
+    icpSetDate: '2026-10-05', submissionOpen: '2026-10-05T00:00:00Z',
+    submissionCutoff: '2026-10-05T23:59:59Z', evaluationDate: '2026-10-06',
+    publicAt: '2026-10-06T00:00:00Z',
+  }
+  for (const status of ['stage1', 'published']) {
+    const markup = renderSummary({ ...datedRound, status })
+    assert.match(markup, /Evaluation day · Oct 6, 2026 · UTC<\/h3>/)
+    assert.match(markup, /Submission day<\/div><div[^>]*>Oct 5, 2026 · UTC/)
+    assert.match(markup, /Evaluation day<\/div><div[^>]*>Oct 6, 2026 · UTC/)
+    assert.doesNotMatch(markup, /Day 0|Day 1/)
+  }
+  const rolloverMarkup = renderSummary({
+    ...datedRound, icpSetDate: '2026-12-31', submissionOpen: '2026-12-30T16:00:00-08:00',
+    submissionCutoff: '2026-12-31T23:59:59Z', evaluationDate: '2027-01-01',
+    publicAt: '2027-01-01T00:00:00Z',
+  })
+  assert.match(rolloverMarkup, /Submission day<\/div><div[^>]*>Dec 31, 2026 · UTC/)
+  assert.match(rolloverMarkup, /Evaluation day · Jan 1, 2027 · UTC<\/h3>/)
+  const historicalMarkup = renderSummary({ ...datedRound, evaluationDate: '2026-10-09', publicAt: '2026-10-09T18:00:00Z' })
+  assert.match(historicalMarkup, /Evaluation day · Oct 9, 2026 · UTC<\/h3>/, 'the API evaluation day must take precedence over any next-day assumption')
   const completedBaselineRound = {
     ...activeRound, baseline: { submissionId: 'baseline', minerHotkey: '5baseline', finalScore: 0 },
   }
@@ -311,7 +333,7 @@ try {
   const publishedBaselineMarkup = renderToStaticMarkup(React.createElement(renderedModule.exports.LatestPublishedBaseline, { round: snapshot.latestCompletedRound }))
   assert.match(publishedBaselineMarkup, /Latest published baseline/)
   assert.match(publishedBaselineMarkup, /Public agent/)
-  assert.match(publishedBaselineMarkup, /Evaluation Sep 5, 2026 · UTC/)
+  assert.match(publishedBaselineMarkup, /Evaluation day Sep 5, 2026 · UTC/)
   assert.match(publishedBaselineMarkup, /arena-2026-09-05/)
   assert.match(publishedBaselineMarkup, /0\.00/)
   for (const promotionStatus of ['pending', 'promoted']) {
@@ -759,10 +781,10 @@ try {
   assert.match(component, /if \(submission\.status === 'scoring_failed'\) return <PendingIcpResults benchmark=\{benchmark\}>\{competitionSubmissionStatusLabel\(submission, round\)\}\. No complete evaluation score is available\./, 'failed-run zero placeholders must not render as completed per-ICP evaluations')
   assert.ok(component.indexOf("if (submission.status === 'scoring_failed')") < component.indexOf('const scores = submission.isBaseline'), 'failure status must gate baseline score rendering too')
   assert.doesNotMatch(component, /24.hour|24 hours|private ICP/i)
-  assert.match(component, /Day 0 · Submissions/)
-  assert.match(component, /Day 1 · Evaluation/)
+  assert.match(component, /Submission day/)
+  assert.match(component, /Evaluation day/)
+  assert.doesNotMatch(component, /Day 0|Day 1/)
   assert.match(component, /const submissionDate = utcCalendarDate\(round\.submissionOpen\) \?\? round\.icpSetDate/)
-  assert.match(component, /const nextDay = submissionDate === round\.icpSetDate\s+&& isNextUtcDay\(submissionDate, round\.evaluationDate\)\s+&& utcCalendarDate\(round\.publicAt\) === round\.evaluationDate/, 'historical bank and disclosure dates must not be relabeled as the new daily cycle')
   assert.match(component, /The baseline score appears when its evaluation and cost checks are complete\./)
   assert.match(component, /label="Round baseline" value="Public agent"/)
   assert.match(component, /ICP set · \{formatUtcDate\(icpSetDate\)\}/)
