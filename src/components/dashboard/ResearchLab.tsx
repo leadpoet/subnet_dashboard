@@ -1,10 +1,9 @@
 'use client'
 
-import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
+import { Fragment, createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { useVisiblePolling } from '@/lib/hooks/useVisiblePolling'
 import {
-  DEFAULT_REPO_URL,
   COMPANY_CHECK_LABELS,
   COMPANY_CHECK_STATUS_LABELS,
   type CompetitionCompanyDiagnostic,
@@ -19,6 +18,8 @@ import {
   normalizeCompetitionCode,
   normalizeCompetitionResults,
   normalizeCompetitionSnapshot,
+  normalizeCompetitionHistory,
+  type CompetitionHistoryPage,
   normalizeCompetitionSubmissions,
   normalizeValidatorNames,
   isCompetitionReviewExcluded,
@@ -39,6 +40,7 @@ export function ResearchLab({
   onSync,
   active = true,
 }: { onSync?: () => void; active?: boolean } = {}) {
+  const [historyOpen, setHistoryOpen] = useState(false)
   const [competition, setCompetition] = useState<CompetitionSnapshot | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -73,29 +75,40 @@ export function ResearchLab({
   const championRound = competition ? currentChampionRound(competition) : null
   return (
     <ValidatorNamesContext.Provider value={validatorNames}><div className="w-full pb-12">
-      <CompetitionHeader competition={competition} />
-      {!competition ? <Unavailable message="Competition data is temporarily unavailable. This page will retry automatically." /> : selectedRound ? <><ChampionSummary round={championRound} history={competitionChampionHistory(competition)} /><RoundSummary round={selectedRound} /><RoundWorkspace round={selectedRound} active={active} /></> : <p className="border-b border-[var(--line)] py-12 text-[14px] text-[var(--muted)]">No production competition round is available.</p>}
+      <CompetitionHeader historyOpen={historyOpen} onHistory={() => setHistoryOpen((open) => !open)} />
+      {historyOpen ? <CompetitionHistory active={active} /> : !competition ? <Unavailable message="Competition data is temporarily unavailable. This page will retry automatically." /> : selectedRound ? <><ChampionSummary round={championRound} history={competitionChampionHistory(competition)} /><RoundSummary round={selectedRound} /><RoundWorkspace round={selectedRound} active={active} /></> : <p className="border-b border-[var(--line)] py-12 text-[14px] text-[var(--muted)]">No production competition round is available.</p>}
       {error && competition ? <p className="mt-5 text-[12px] text-[var(--muted-2)]">Latest refresh failed: {error}</p> : null}
     </div></ValidatorNamesContext.Provider>
   )
 }
 
 function ResearchLabLoading() {
-  return <div className="w-full"><div className="font-mono text-[11px] uppercase tracking-[0.2em] text-[var(--muted-2)]">Open Source Agent Competition</div><div className="mt-10 space-y-4"><div className="h-20 w-48 shimmer rounded-md" /><div className="h-4 w-96 max-w-full shimmer rounded" /></div></div>
+  return <div aria-busy="true" aria-label="Loading competition"><CompetitionHeader />
+    <section aria-label="Current champion" className="grid min-w-0 gap-8 rounded-xl border border-[var(--line)] bg-[var(--surface)] p-6 md:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)] md:gap-12 md:p-8">
+      <div className="flex flex-col justify-center"><h2 className="text-[13px] text-[var(--muted)]">Current champion</h2><div className="mt-4 h-[88px] w-48 shimmer rounded-md" /><div className="mt-5 h-4 w-56 shimmer rounded" /><div className="mt-2 h-3 w-36 shimmer rounded" /></div>
+      <div><div className="text-[13px] text-[var(--platinum)]">Champion history <span className="text-[11px] text-[var(--muted-2)]">/100</span></div><div className="mt-3 h-[180px] shimmer rounded-md" /><div className="mt-2 h-3 w-36 shimmer rounded" /></div>
+    </section>
+    <section className="mt-8 border-y border-[var(--line)] py-5"><div className="grid gap-5 sm:grid-cols-[1fr_2fr]"><div className="h-12 w-32 shimmer rounded" /><div className="grid grid-cols-2 gap-5"><div className="h-12 shimmer rounded" /><div className="h-12 shimmer rounded" /></div></div><div className="mt-5 h-4 w-24 shimmer rounded" /></section>
+    <section className="pt-10"><h3 className="font-display text-[22px] text-[var(--platinum)]">Submissions</h3><div className="my-5 h-10 shimmer rounded-md" /><SubmissionRowsLoading /></section>
+  </div>
+}
+
+function SubmissionRowsLoading() {
+  return <div aria-label="Loading submissions" role="status" className="overflow-hidden rounded-lg border border-[var(--line)]"><div className="h-10 bg-[var(--surface)]" />{[0, 1, 2, 3, 4].map((row) => <div key={row} className="grid grid-cols-[2fr_2fr_1fr] gap-5 border-t border-[var(--line)] px-4 py-4"><div className="h-4 shimmer rounded" /><div className="h-4 shimmer rounded" /><div className="h-4 shimmer rounded" /></div>)}</div>
 }
 
 function Unavailable({ message }: { message: string }) {
   return <p role="status" className="border-b border-[var(--line)] py-10 text-[14px] leading-relaxed text-[var(--muted)]">{message}</p>
 }
 
-function CompetitionHeader({ competition }: { competition: CompetitionSnapshot | null }) {
+function CompetitionHeader({ historyOpen = false, onHistory }: { historyOpen?: boolean; onHistory?: () => void }) {
   return (
     <header className="flex flex-wrap items-center justify-between gap-5 py-7 md:py-9">
       <div>
-        <h1 className="font-display text-[28px] font-medium tracking-[-0.04em] text-[var(--white)] md:text-[36px]">Agent competition</h1>
+        <h1 className="font-display text-[28px] font-medium tracking-[-0.04em] text-[var(--white)] md:text-[36px]">{historyOpen ? 'Competition history' : 'Agent competition'}</h1>
         <p className="mt-2 text-[13px] text-[var(--muted)]">Open-source sales intelligence.</p>
       </div>
-      <a href={competition?.repoUrl ?? DEFAULT_REPO_URL} target="_blank" rel="noreferrer" className="inline-flex items-center gap-3 rounded-md border border-[var(--line-2)] px-4 py-2.5 text-[12px] text-[var(--platinum)] transition-colors hover:bg-white/5">Repository <span aria-hidden>↗</span></a>
+      <div className="flex flex-wrap gap-2"><button type="button" onClick={onHistory} disabled={!onHistory} aria-pressed={historyOpen} className="rounded-md border border-[var(--line-2)] px-4 py-2.5 text-[12px] text-[var(--platinum)] transition-colors hover:bg-white/5 disabled:opacity-50">{historyOpen ? 'Back to competition' : 'History'}</button><a href="https://github.com/leadpoet/champion_model" target="_blank" rel="noreferrer" className="inline-flex items-center gap-3 rounded-md border border-[var(--line-2)] px-4 py-2.5 text-[12px] text-[var(--platinum)] transition-colors hover:bg-white/5">Top Sales Agent Model <span aria-hidden>↗</span></a></div>
     </header>
   )
 }
@@ -201,20 +214,23 @@ function CompetitionSchedule({ round }: { round: CompetitionRoundSummary }) {
   if (!round.icpSetDate && !round.evaluationDate && !round.publicAt) return null
   const submissionDate = utcCalendarDate(round.submissionOpen) ?? round.icpSetDate
   return <div className="grid grid-cols-2 gap-4">
-    <div><div className="text-[12px] text-[var(--muted)]">Submission day</div><div className="mt-2 text-[13px] text-[var(--platinum)]">{formatUtcDate(submissionDate)}</div></div>
-    <div><div className="text-[12px] text-[var(--muted)]">Evaluation day</div><div className="mt-2 text-[13px] text-[var(--platinum)]">{formatUtcDate(round.evaluationDate)}</div></div>
+    <div><div className="text-[12px] text-[var(--muted)]">Submission day</div><div className="mt-2 text-[13px] text-[var(--platinum)]">{formatDay(submissionDate)}</div></div>
+    <div><div className="text-[12px] text-[var(--muted)]">Evaluation day</div><div className="mt-2 text-[13px] text-[var(--platinum)]">{formatDay(round.evaluationDate)}</div></div>
   </div>
 }
 
-function RoundWorkspace({ round, active }: { round: CompetitionRoundSummary; active: boolean }) {
+function RoundWorkspace({ round, active, initialSubmissionId = null, inspectionOnly = false }: { round: CompetitionRoundSummary; active: boolean; initialSubmissionId?: string | null; inspectionOnly?: boolean }) {
   // Summary polling returns a new object each time. Depend on the validation
   // fields so an unchanged round does not restart detail polling or results.
   const { roundId, icpSetDate, publicAt, benchmarkIcpCount } = round
   const [submissions, setSubmissions] = useState<CompetitionSubmission[]>([])
   const [benchmark, setBenchmark] = useState<CompetitionBenchmark | null>(null)
   const [benchmarkState, setBenchmarkState] = useState<ReleaseState>('loading')
-  const [selectedSubmissionId, setSelectedSubmissionId] = useState<string | null>(null)
-  const [inspectionOpen, setInspectionOpen] = useState(false)
+  const [query, setQuery] = useState('')
+  const [statusFilter, setStatusFilter] = useState('all')
+  const [page, setPage] = useState(0)
+  const [selectedSubmissionId, setSelectedSubmissionId] = useState<string | null>(initialSubmissionId)
+  const [inspectionOpen, setInspectionOpen] = useState(inspectionOnly)
   const [roundLoading, setRoundLoading] = useState(true)
   const [roundError, setRoundError] = useState<string | null>(null)
   const [results, setResults] = useState<CompetitionSubmissionResults | null>(null)
@@ -236,10 +252,11 @@ function RoundWorkspace({ round, active }: { round: CompetitionRoundSummary; act
   useEffect(() => {
     benchmarkReleasedRef.current = false
     roundSnapshotRef.current = false
-    setInspectionOpen(false)
-    setRoundLoading(true); setRoundError(null); setBenchmark(null); setBenchmarkState('loading'); setSubmissions([]); selectSubmission(null)
+    setInspectionOpen(inspectionOnly)
+    setPage(0)
+    setRoundLoading(true); setRoundError(null); setBenchmark(null); setBenchmarkState('loading'); setSubmissions([]); selectSubmission(initialSubmissionId)
     return () => { roundRequestRef.current += 1 }
-  }, [roundId, selectSubmission])
+  }, [roundId, selectSubmission, initialSubmissionId, inspectionOnly])
 
   const refreshRound = useCallback(async () => {
     const initial = !roundSnapshotRef.current
@@ -253,7 +270,7 @@ function RoundWorkspace({ round, active }: { round: CompetitionRoundSummary; act
       const next = normalizeCompetitionSubmissions(submissionRequest.value.body)
       setSubmissions(next)
       const current = selectedSubmissionIdRef.current
-      selectSubmission(current && next.some((submission) => submission.submissionId === current)
+      selectSubmission(inspectionOnly ? initialSubmissionId : current && next.some((submission) => submission.submissionId === current)
         ? current
         : next.find((submission) => submission.isBaseline)?.submissionId ?? next.find((submission) => submission.isChampion)?.submissionId ?? next[0]?.submissionId ?? null)
       setRoundError(null)
@@ -278,7 +295,7 @@ function RoundWorkspace({ round, active }: { round: CompetitionRoundSummary; act
     roundSnapshotRef.current = true
     setRoundLoading(false)
     setRoundRevision((current) => current + 1)
-  }, [roundId, icpSetDate, publicAt, benchmarkIcpCount, selectSubmission])
+  }, [roundId, icpSetDate, publicAt, benchmarkIcpCount, selectSubmission, inspectionOnly, initialSubmissionId])
 
   useVisiblePolling(refreshRound, 60_000, { enabled: active })
 
@@ -328,32 +345,96 @@ function RoundWorkspace({ round, active }: { round: CompetitionRoundSummary; act
     } catch { if (selectedSubmissionIdRef.current === requestedSubmissionId) setCodeState('error') }
   }
 
-  return (
-    <section className="pt-10">
-      <div className="mb-5 flex items-end justify-between gap-4"><div><h3 className="font-display text-[22px] font-medium tracking-[-0.025em] text-[var(--platinum)]">Submissions</h3><p className="mt-1 text-[12px] text-[var(--muted-2)]">{formatUtcDate(round.evaluationDate)}</p></div><span className="font-mono text-[10px] text-[var(--muted-2)]">{submissions.length} total</span></div>
-      {roundLoading ? <div className="h-24 shimmer rounded-md" /> : submissions.length === 0 ? <InlineNotice>{roundError ?? 'No submissions are public for this round.'}</InlineNotice> : <>{roundError ? <div className="mb-3"><InlineNotice>{roundError} Last known submissions are shown below.</InlineNotice></div> : null}<SubmissionTable submissions={submissions} round={round} selectedId={selectedSubmissionId} onSelect={(id) => { selectSubmission(id); setInspectionOpen(true) }} /></>}
-      {selectedSubmission ? <section aria-label="Submission inspection" className="mt-6 border-y border-[var(--line)]">
-        <button type="button" aria-expanded={inspectionOpen} onClick={() => setInspectionOpen((open) => !open)} className="flex w-full items-center justify-between gap-4 py-4 text-left text-[13px] text-[var(--platinum)]">
-          <span>Evaluation & source<span className="ml-3 hidden font-mono text-[10px] text-[var(--muted)] sm:inline">{shortId(selectedSubmission.submissionId)}</span></span>
-          <span aria-hidden className={`text-[18px] text-[var(--muted)] transition-transform ${inspectionOpen ? 'rotate-45' : ''}`}>+</span>
-        </button>
-        <div hidden={!inspectionOpen}><div className="grid gap-8 pb-7 pt-3 xl:grid-cols-[minmax(0,1.5fr)_minmax(260px,0.5fr)]"><PublishedResults benchmark={benchmark} benchmarkState={benchmarkState} results={results} resultsState={resultsState} round={round} submission={selectedSubmission} /><SourcePanel submission={selectedSubmission} cancelled={round.status === 'cancelled'} code={code} codeState={codeState} selectedFile={selectedCodeFile} onSelectFile={setSelectedFile} onRequest={() => void requestCode()} /></div></div></section> : null}
-    </section>
-  )
+  const filtered = filterSubmissions(submissions, query, statusFilter)
+  const pageCount = Math.max(1, Math.ceil(filtered.length / 15))
+  const currentPage = Math.min(page, pageCount - 1)
+  const inspection = selectedSubmission ? <div className="p-4 sm:p-6" aria-label="Submission audit">
+    <div className="mb-6 flex flex-wrap items-start justify-between gap-3"><div><h4 className="text-[14px] text-[var(--white)]">Agent audit</h4><p className="mt-1 text-[12px] text-[var(--muted)]">{formatDay(round.evaluationDate)}</p><p className="mt-2 break-all font-mono text-[10px] text-[var(--muted-2)]">{selectedSubmission.minerHotkey}</p></div><button type="button" onClick={() => { setInspectionOpen(false); document.getElementById(`audit-toggle-${selectedSubmission.submissionId}`)?.focus() }} className={`${inspectionOnly ? 'hidden' : ''} rounded border border-[var(--line-2)] px-3 py-1.5 text-[11px] text-[var(--muted)]`}>Close audit</button></div>
+    <div className="grid min-w-0 gap-8 xl:grid-cols-[minmax(0,1.5fr)_minmax(260px,0.5fr)]"><PublishedResults benchmark={benchmark} benchmarkState={benchmarkState} results={results} resultsState={resultsState} round={round} submission={selectedSubmission} /><SourcePanel submission={selectedSubmission} cancelled={round.status === 'cancelled'} code={code} codeState={codeState} selectedFile={selectedCodeFile} onSelectFile={setSelectedFile} onRequest={() => void requestCode()} /></div>
+  </div> : null
+  if (inspectionOnly) return roundLoading ? <div className="p-5"><SubmissionRowsLoading /></div> : inspection ?? <InlineNotice>{roundError ?? 'Submission details are unavailable.'}</InlineNotice>
+  return <section className="pt-10" aria-label="Current submissions">
+    <div className="mb-5 flex items-end justify-between gap-4"><div><h3 className="font-display text-[22px] font-medium tracking-[-0.025em] text-[var(--platinum)]">Submissions</h3><p className="mt-1 text-[12px] text-[var(--muted-2)]">{formatDay(round.evaluationDate)}</p></div><span className="font-mono text-[10px] text-[var(--muted-2)]">{submissions.length} total</span></div>
+    <div className="mb-4 flex flex-col gap-3 sm:flex-row"><label className="flex-1"><span className="sr-only">Find your miner</span><input type="search" value={query} onChange={(event) => { setQuery(event.target.value); setPage(0) }} placeholder="Search miner hotkey or submission" className={filterClass} /></label><label><span className="sr-only">Submission status</span><select value={statusFilter} onChange={(event) => { setStatusFilter(event.target.value); setPage(0) }} className={filterClass}><option value="all">All statuses</option><option value="evaluating">Evaluating</option><option value="queued">Queued</option><option value="review">Code review</option><option value="rejected">Review rejected</option><option value="scored">Scored</option></select></label></div>
+    {roundError ? <div className="mb-3"><InlineNotice>{roundError} Last known submissions are shown below.</InlineNotice></div> : null}
+    {roundLoading ? <SubmissionRowsLoading /> : filtered.length ? <><SubmissionTable submissions={filtered.slice(currentPage * 15, (currentPage + 1) * 15)} round={round} selectedId={inspectionOpen ? selectedSubmissionId : null} expandedContent={inspectionOpen ? inspection : null} onSelect={(id) => { selectSubmission(id); setInspectionOpen(id !== selectedSubmissionId || !inspectionOpen) }} /><Pagination page={currentPage} hasNext={currentPage + 1 < pageCount} onPrevious={() => setPage(currentPage - 1)} onNext={() => setPage(currentPage + 1)} label={`${filtered.length} ${query || statusFilter !== 'all' ? 'matches' : 'submissions'}`} /></> : <InlineNotice>{submissions.length ? 'No miners match these filters.' : 'No submissions are public for this round.'}</InlineNotice>}
+  </section>
 }
 
-function SubmissionTable({ submissions, round, selectedId, onSelect }: { submissions: CompetitionSubmission[]; round: CompetitionRoundSummary; selectedId: string | null; onSelect: (submissionId: string) => void }) {
+const filterClass = 'h-10 w-full rounded-md border border-[var(--line-2)] bg-[var(--surface)] px-3 text-[12px] text-[var(--platinum)] placeholder:text-[var(--muted-2)]'
+
+function filterSubmissions(submissions: CompetitionSubmission[], query: string, status: string) {
+  const needle = query.trim().toLowerCase()
+  return submissions.filter((submission) => {
+    if (needle && !`${submission.minerHotkey} ${submission.submissionId}`.toLowerCase().includes(needle)) return false
+    if (status === 'evaluating') return submission.evaluation?.state === 'evaluating'
+    if (status === 'queued') return submission.evaluation?.state === 'queued' || ['accepted', 'queued'].includes(submission.status)
+    if (status === 'rejected') return submission.status === 'review_rejected'
+    if (status === 'review') return submission.status === 'review_failed' || ['pending', 'running', 'in_progress', 'error'].includes(submission.codeReview.status ?? '')
+    if (status === 'scored') return submission.finalScore !== null
+    return true
+  })
+}
+
+function Pagination({ page, hasNext, onPrevious, onNext, label, loading = false }: { page: number; hasNext: boolean; onPrevious: () => void; onNext: () => void; label?: string; loading?: boolean }) {
+  return <nav aria-label="Submission pages" className="mt-4 flex items-center justify-between gap-3 text-[11px] text-[var(--muted)]"><span aria-live="polite">{label ? `${label} · ` : ''}Page {page + 1}</span><div className="flex gap-2"><button type="button" disabled={loading || page === 0} onClick={onPrevious} className="rounded border border-[var(--line-2)] px-3 py-2 disabled:opacity-30 hover:bg-white/5">Previous</button><button type="button" disabled={loading || !hasNext} onClick={onNext} className="rounded border border-[var(--line-2)] px-3 py-2 disabled:opacity-30 hover:bg-white/5">Next</button></div></nav>
+}
+
+function CompetitionHistory({ active }: { active: boolean }) {
+  const [day, setDay] = useState('')
+  const [hotkey, setHotkey] = useState('')
+  const [filters, setFilters] = useState({ day: '', hotkey: '' })
+  const [page, setPage] = useState(0)
+  const [cursors, setCursors] = useState<Array<string | null>>([null])
+  const cursor = cursors[page] ?? null
+  const [history, setHistory] = useState<CompetitionHistoryPage | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [selected, setSelected] = useState<string | null>(null)
+  const request = useRef(0)
+  const refresh = useCallback(async () => {
+    const id = ++request.current
+    setLoading(true); setError(null)
+    const query = new URLSearchParams({ hotkey: filters.hotkey })
+    if (cursor) query.set('cursor', cursor)
+    if (filters.day) query.set('day', filters.day)
+    try {
+      const data = normalizeCompetitionHistory(await fetchJson(`/api/research-lab/history?${query}`))
+      if (id !== request.current) return
+      if (!data) throw new Error('History data is unavailable.')
+      setHistory(data)
+    } catch (error) { if (id === request.current) { setHistory(null); setError(errorMessage(error, 'History is temporarily unavailable.')) } }
+    finally { if (id === request.current) setLoading(false) }
+  }, [cursor, filters])
+  useEffect(() => { setHistory(null); setSelected(null); return () => { request.current += 1 } }, [page, filters])
+  useVisiblePolling(refresh, 300_000, { enabled: active })
+  return <section aria-label="Competition history" className="pb-8">
+    <form className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-end" onSubmit={(event) => { event.preventDefault(); setPage(0); setCursors([null]); setFilters({ day, hotkey: hotkey.trim() }) }}>
+      <label className="flex-1"><span className="mb-2 block text-[11px] text-[var(--muted)]">Miner hotkey</span><input type="search" value={hotkey} maxLength={128} pattern="[A-Za-z0-9]*" onChange={(event) => setHotkey(event.target.value)} placeholder="All miners" className={filterClass} /></label>
+      <label><span className="mb-2 block text-[11px] text-[var(--muted)]">Evaluation day</span><input type="date" value={day} onChange={(event) => setDay(event.target.value)} className={filterClass} /></label>
+      <button type="submit" className="h-10 rounded-md bg-[var(--white)] px-5 text-[12px] font-medium text-black">Search history</button>
+      {(day || hotkey || filters.day || filters.hotkey) ? <button type="button" onClick={() => { setDay(''); setHotkey(''); setPage(0); setCursors([null]); setFilters({ day: '', hotkey: '' }) }} className="h-10 px-2 text-[12px] text-[var(--muted)]">Clear</button> : null}
+    </form>
+    {loading && !history ? <SubmissionRowsLoading /> : error ? <InlineNotice>{error} <button type="button" className="underline" onClick={() => void refresh()}>Retry</button></InlineNotice> : history?.entries.length ? <div className="overflow-x-auto rounded-lg border border-[var(--line)]"><table className="w-full text-left"><thead className="bg-[var(--surface)] text-[11px] text-[var(--muted)]"><tr><th className="px-4 py-3 font-normal" scope="col">Miner</th><th className="px-3 py-3 font-normal" scope="col">Evaluation day</th><th className="px-4 py-3 text-right font-normal" scope="col">Score</th></tr></thead><tbody>{history.entries.map(({ round, submission }) => {
+      const key = `${round.roundId}:${submission.submissionId}`
+      return <Fragment key={key}><tr className="border-t border-[var(--line)] hover:bg-white/[0.025]"><td className="px-4 py-3"><button type="button" aria-expanded={selected === key} aria-controls={`audit-${key}`} onClick={() => setSelected(selected === key ? null : key)} className="text-left" title={submission.minerHotkey}><span className="block font-mono text-[11px] text-[var(--platinum)]">{shortHotkey(submission.minerHotkey)}</span><span className="mt-1 block text-[10px] text-[var(--muted)]">{submission.isBaseline ? 'Baseline · ' : submission.isChampion ? 'Champion · ' : ''}{selected === key ? 'Close audit −' : 'View audit +'}</span></button></td><td className="px-3 py-3 text-[11px] text-[var(--muted)]">{formatDay(round.evaluationDate)}</td><td className="px-4 py-3 text-right font-mono text-[12px] text-[var(--platinum)]">{formatCompetitionScore(submission.finalScore)}</td></tr>{selected === key ? <tr id={`audit-${key}`}><td colSpan={3} className="border-t border-[var(--line)] bg-[var(--surface)]"><RoundWorkspace key={key} round={round} active={active} initialSubmissionId={submission.submissionId} inspectionOnly /></td></tr> : null}</Fragment>
+    })}</tbody></table></div> : <InlineNotice>{history?.nextCursor ? 'No matches on this page. Continue to earlier rounds or filter by day.' : 'No published submissions match these filters.'}</InlineNotice>}
+    <Pagination page={page} hasNext={Boolean(history?.nextCursor)} loading={loading} onPrevious={() => setPage((page) => Math.max(0, page - 1))} onNext={() => { if (history?.nextCursor) { setCursors((items) => [...items.slice(0, page + 1), history.nextCursor]); setPage(page + 1) } }} />
+  </section>
+}
+
+function SubmissionTable({ submissions, round, selectedId, onSelect, expandedContent }: { submissions: CompetitionSubmission[]; round: CompetitionRoundSummary; selectedId: string | null; onSelect: (submissionId: string) => void; expandedContent?: ReactNode }) {
   return (
-    <div className="max-h-[352px] overflow-auto rounded-lg border border-[var(--line)]">
+    <div className="overflow-x-auto rounded-lg border border-[var(--line)]">
       <table className="w-full border-collapse text-left">
         <thead className="sticky top-0 z-10 bg-[var(--surface)] text-[11px] text-[var(--muted)]">
           <tr><th scope="col" className="px-4 py-3 font-normal">Submission</th><th scope="col" className="hidden px-4 py-3 font-normal sm:table-cell">Miner</th><th scope="col" className="px-3 py-3 font-normal">Status</th><th scope="col" className="px-4 py-3 text-right font-normal">Score</th></tr>
         </thead>
         <tbody>{submissions.map((submission) => {
           const selected = submission.submissionId === selectedId
-          return <tr key={submission.submissionId} className={`border-t border-[var(--line)] ${selected ? 'bg-white/[0.045]' : 'hover:bg-white/[0.02]'}`}>
+          return <Fragment key={submission.submissionId}><tr className={`border-t border-[var(--line)] ${selected ? 'bg-white/[0.045]' : 'hover:bg-white/[0.02]'}`}>
             <td className="p-0">
-              <button type="button" onClick={() => onSelect(submission.submissionId)} className="w-full px-4 py-3 text-left" aria-pressed={selected} title={submission.submissionId}>
+              <button id={`audit-toggle-${submission.submissionId}`} type="button" onClick={() => onSelect(submission.submissionId)} className="w-full px-4 py-3 text-left" aria-expanded={selected} aria-controls={`submission-${submission.submissionId}`} title={submission.submissionId}>
                 <span className="block max-w-[110px] truncate font-mono text-[11px] text-[var(--platinum)] sm:max-w-none">{shortId(submission.submissionId)}</span>
                 {submission.isBaseline ? <span className="mt-1 block text-[10px] text-[var(--muted)]">Baseline</span> : null}
                 <span className="mt-1 block max-w-[110px] truncate font-mono text-[10px] text-[var(--muted-2)] sm:hidden" title={submission.minerHotkey}>{shortHotkey(submission.minerHotkey)}</span>
@@ -362,7 +443,7 @@ function SubmissionTable({ submissions, round, selectedId, onSelect }: { submiss
             <td className="hidden px-4 py-3 font-mono text-[11px] text-[var(--muted)] sm:table-cell" title={submission.minerHotkey}>{shortHotkey(submission.minerHotkey)}</td>
             <td className="px-3 py-3 text-[11px] text-[var(--muted)]"><SubmissionStatus submission={submission} round={round} /></td>
             <td className="px-4 py-3 text-right font-mono text-[12px] text-[var(--platinum)]">{formatCompetitionScore(submission.finalScore)}</td>
-          </tr>
+          </tr>{selected && expandedContent ? <tr id={`submission-${submission.submissionId}`}><td colSpan={4} className="border-t border-[var(--line)] bg-[var(--surface)]">{expandedContent}</td></tr> : null}</Fragment>
         })}</tbody>
       </table>
     </div>
@@ -411,6 +492,7 @@ function ScoringAttributionSummary({ attribution, loading = false }: { attributi
     <div className="space-y-3 pb-4">{attribution?.validators.map((validator) => <div key={validator.hotkey}>
       <div className="text-[12px] leading-relaxed text-[var(--platinum)]"><ValidatorIdentity hotkey={validator.hotkey} full /></div>
       <div className="mt-1 text-[11px] text-[var(--muted)]">{formatIcpCount(validator.icpCount)} · {validator.reusedIcpCount} reused</div>
+      <div className="mt-2 space-y-1 text-[11px] text-[var(--muted)]">{attribution.codeVersions?.some((version) => version.validatorHotkey === validator.hotkey) ? attribution.codeVersions.filter((version) => version.validatorHotkey === validator.hotkey).map((version) => <p key={`${version.commit}-${version.workingTree}`}><a href={`https://github.com/leadpoet/leadpoet/commit/${version.commit}`} target="_blank" rel="noreferrer" className="font-mono text-[var(--platinum)] underline underline-offset-4" title={version.commit}>{version.commit.slice(0, 12)}</a> · {formatIcpCount(version.icpPositions.length)}{version.workingTree === 'dirty' ? ' · local modifications' : version.workingTree === 'unknown' ? ' · working tree not recorded' : ''}</p>) : <p>Validator commit not recorded.</p>}</div>
     </div>)}
     {!loading && attribution ? <p className="text-[11px] text-[var(--muted)]">Unattributed ICPs {attribution.unattributedIcpCount}</p> : <p className="text-[11px] text-[var(--muted)]">{loading ? 'Loading validator attribution…' : 'Validator attribution is unavailable for this result.'}</p>}</div>
   </details>
@@ -472,6 +554,7 @@ function humanize(value: string): string { const normalized = value.trim().repla
 function shortId(value: string): string { return value.length > 18 ? `${value.slice(0, 9)}…${value.slice(-6)}` : value }
 function shortHotkey(value: string): string { return value.length > 18 ? `${value.slice(0, 9)}…${value.slice(-6)}` : value }
 function formatUtc(value: string): string { const date = new Date(value); return Number.isFinite(date.getTime()) ? `${date.toISOString().slice(0, 16).replace('T', ' ')} UTC` : value }
+function formatDay(value: string | null): string { return formatUtcDate(value).replace(' · UTC', '') }
 function formatUtcDate(value: string | null): string { if (!value) return 'Date unavailable'; const date = new Date(`${value}T00:00:00Z`); return Number.isFinite(date.getTime()) ? `${new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' }).format(date)} · UTC` : value }
 function utcCalendarDate(value: string | null): string | null { if (!value) return null; const date = new Date(value); return Number.isFinite(date.getTime()) ? date.toISOString().slice(0, 10) : null }
 function errorMessage(value: unknown, fallback: string): string { return value instanceof Error ? value.message : fallback }

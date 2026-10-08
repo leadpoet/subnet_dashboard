@@ -44,14 +44,14 @@ function load(path, extra = '') {
   vm.runInNewContext(ts.transpileModule(readFileSync(path, 'utf8') + extra, {
     compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX },
   }).outputText, {
-    module, exports: module.exports, window, document, Error,
+    module, exports: module.exports, window, document, Error, URLSearchParams,
     require: (name) => name.startsWith('@/') ? load(`src/${name.slice(2)}.ts`) : require(name),
     fetch: async (url) => { calls.push(url); return respond(url) },
   })
   modules.set(path, module.exports)
   return module.exports
 }
-const { ResearchLab, RoundWorkspace } = load('src/components/dashboard/ResearchLab.tsx', '\nexport { RoundWorkspace };')
+const { ResearchLab, RoundWorkspace, CompetitionHistory } = load('src/components/dashboard/ResearchLab.tsx', '\nexport { RoundWorkspace, CompetitionHistory };')
 const { AdminResearchLab } = load('src/app/admin/_components/AdminResearchLab.tsx')
 const { normalizeCompetitionSnapshot } = load('src/lib/research-lab-competition.ts')
 
@@ -131,7 +131,7 @@ try {
   assert.equal(calls.length, 5)
   assert.equal(count('/metagraph'), 1)
   assert.match(markup(), /Queued for validation/)
-  const inspectionToggle = () => renderer.root.findAllByType('button').find((button) => typeof button.props['aria-expanded'] === 'boolean')
+  const inspectionToggle = () => renderer.root.findAllByType('button').find((button) => button.props.title === 'competitor')
   assert.equal(inspectionToggle().props['aria-expanded'], false, 'submission details start collapsed')
   competitor.evaluation = { state: 'evaluating', validators: [{ hotkey: '5Validator', phase: 'scoring' }] }
   await advance(60_000)
@@ -141,7 +141,7 @@ try {
   assert.equal(count('/metagraph'), 1, 'validator identity polling is shared and less frequent than progress polling')
   assert.equal(count('/results/baseline'), 2)
   assert.equal(calls.some((url) => url.endsWith('/code')), false, 'source remains on demand')
-  await act(async () => { renderer.root.findAllByType('button').find((button) => button.props['aria-pressed'] === false).props.onClick() })
+  await act(async () => { inspectionToggle().props.onClick() })
   assert.equal(count('/results/competitor'), 1, 'selecting another submission immediately loads its results')
   assert.equal(inspectionToggle().props['aria-expanded'], true, 'selecting a submission opens its evaluation and source')
   await act(async () => { inspectionToggle().props.onClick() })
@@ -153,6 +153,7 @@ try {
   benchmarkGated = false
   await setVisibility('visible')
   assert.equal(calls.length, beforeHidden + 5, 'resuming refreshes each endpoint once')
+  await act(async () => { inspectionToggle().props.onClick() })
   assert.match(markup(), /Public ICP 1/, 'a previously gated benchmark becomes visible after release')
   const beforeInactive = calls.length
   await act(async () => { renderer.update(React.createElement(ResearchLab, { active: false })) })
@@ -183,6 +184,47 @@ try {
   assert.equal(count('/arena-2026-09-23/submissions'), 1)
   assert.equal(count('/arena-2026-09-22/results/baseline'), 0, 'a completed old-round request cannot select an old submission')
   assert.equal(count('/arena-2026-09-23/results/baseline'), 1)
+  await unmount()
+
+  // Filtering applies before pagination, including miners beyond the first page.
+  respond = (url) => url.endsWith('/submissions') ? Response.json({ round_id: round.round_id,
+    submissions: Array.from({ length: 32 }, (_, index) => ({ ...competitor, submission_id: `miner-${index}`, miner_hotkey: `5Miner${index}`, ...(index === 31 ? { status: 'review_rejected', evaluation: undefined } : {}) })) }) : publicResponse(url)
+  await act(async () => { renderer = TestRenderer.create(React.createElement(RoundWorkspace, { round: normalizedRound, active: true }), rendererOptions) })
+  assert.match(markup(), /Page /); assert.equal(renderer.root.findByProps({ 'aria-live': 'polite' }).children.at(-1), '1')
+  assert.doesNotMatch(markup(), /miner-31/)
+  await act(async () => { renderer.root.findByType('input').props.onChange({ target: { value: '5Miner31' } }) })
+  assert.match(markup(), /miner-31/)
+  assert.match(markup(), /Code review rejected/)
+  await act(async () => { renderer.root.findByType('input').props.onChange({ target: { value: '' } }); renderer.root.findByType('select').props.onChange({ target: { value: 'rejected' } }) })
+  assert.match(markup(), /miner-31/)
+  await unmount()
+
+  // A missing archived submission must never silently select the baseline.
+  respond = publicResponse
+  await act(async () => { renderer = TestRenderer.create(React.createElement(RoundWorkspace, { round: normalizedRound, active: true, inspectionOnly: true, initialSubmissionId: 'missing-miner' }), rendererOptions) })
+  assert.match(markup(), /Submission details are unavailable/)
+  assert.equal(count('/results/baseline'), 0)
+  await unmount()
+
+  const oldHistory = deferred()
+  respond = async (url) => {
+    if (!url.includes('/history?')) return publicResponse(url)
+    const params = new URLSearchParams(url.split('?')[1])
+    if (params.get('hotkey') === 'OldMiner') await oldHistory.promise
+    return Response.json({ rounds: [{ ...round, status: 'published' }], submissions: [{ ...competitor,
+      round_id: round.round_id, miner_hotkey: params.get('hotkey') || 'AllMiners', final_score: 0,
+    }], next_cursor: params.get('cursor') ? null : 'next_page' })
+  }
+  await act(async () => { renderer = TestRenderer.create(React.createElement(CompetitionHistory, { active: true }), rendererOptions) })
+  const search = async (hotkey) => { await act(async () => { renderer.root.findAllByType('input')[0].props.onChange({ target: { value: hotkey } }) }); await act(async () => { renderer.root.findByType('form').props.onSubmit({ preventDefault() {} }) }) }
+  await search('OldMiner')
+  await search('NewMiner')
+  await act(async () => { oldHistory.resolve() })
+  assert.match(markup(), /NewMiner/)
+  assert.doesNotMatch(markup(), /OldMiner/)
+  await act(async () => { renderer.root.findAllByType('button').find((button) => button.props.children === 'Next').props.onClick() })
+  assert.equal(renderer.root.findByProps({ 'aria-live': 'polite' }).children.at(-1), '2')
+  assert.ok(calls.some((url) => url.includes('cursor=next_page') && url.includes('hotkey=NewMiner')))
   await unmount()
 
   let adminStatus = 'stage1'

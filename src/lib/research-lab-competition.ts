@@ -228,6 +228,7 @@ export type CompetitionScoringAttribution = {
   validators: CompetitionScoringValidator[]
   icps: CompetitionIcpScoringAttribution[]
   unattributedIcpCount: number
+  codeVersions?: Array<{ validatorHotkey: string; commit: string; workingTree: 'clean' | 'dirty' | 'unknown'; icpPositions: number[] }>
 }
 
 export type CompetitionCode = {
@@ -300,6 +301,27 @@ export function normalizeCompetitionSubmissions(value: unknown): CompetitionSubm
       },
     }
   }).filter(isPresent)
+}
+
+export type CompetitionHistoryPage = {
+  entries: Array<{ round: CompetitionRoundSummary; submission: CompetitionSubmission }>
+  nextCursor: string | null
+}
+
+export function normalizeCompetitionHistory(value: unknown): CompetitionHistoryPage | null {
+  const source = record(value)
+  if (!source || !Array.isArray(source.rounds) || !Array.isArray(source.submissions)) return null
+  const rounds = new Map(records(source.rounds).map((row) => normalizeRound(row)).filter(isPresent).map((round) => [round.roundId, round]))
+  const entries: CompetitionHistoryPage['entries'] = []
+  for (const row of records(source.submissions)) {
+    const round = rounds.get(text(row.round_id))
+    const submission = normalizeCompetitionSubmissions({ submissions: [row] })[0]
+    if (!round || round.status !== 'published' || !submission) return null
+    entries.push({ round, submission })
+  }
+  const nextCursor = source.next_cursor === null ? null : text(source.next_cursor)
+  if (nextCursor !== null && !/^[A-Za-z0-9_-]{1,1024}$/.test(nextCursor)) return null
+  return { entries, nextCursor }
 }
 
 export function normalizeCompetitionBenchmark(
@@ -378,6 +400,20 @@ export function normalizeCompetitionResults(
   const publicIcpStatus = text(source.public_icp_status) || 'pending'
   const publicScores = incomplete ? new Map<number, number>() : mergeScores(perIcpScores(scores?.stage_1, benchmarkIcpCount), perIcpScores(scores?.stage_2, benchmarkIcpCount))
   const scoringAttribution = normalizeScoringAttribution(source.scoring_attribution, benchmarkIcpCount)
+  const versions = records(record(source.scoring_attribution)?.code_versions)
+  if (scoringAttribution && versions.length) {
+    scoringAttribution.codeVersions = versions.flatMap((row) => {
+      const validatorHotkey = text(row.validator_hotkey)
+      const commit = text(row.commit)
+      const positions = Array.isArray(row.icp_positions) ? row.icp_positions : []
+      if (!scoringAttribution.validators.some((validator) => validator.hotkey === validatorHotkey)
+        || !/^[a-f0-9]{40}$/.test(commit) || !positions.length
+        || positions.some((position) => integer(position) === null || Number(position) >= benchmarkIcpCount)) return []
+      const workingTree = row.working_tree === 'clean' || row.working_tree === 'dirty' ? row.working_tree : 'unknown'
+      return [{ validatorHotkey, commit, workingTree, icpPositions: [...new Set(positions as number[])] }]
+    })
+  }
+
   if (!incomplete && publicIcpStatus === 'ready' && publicScores.size !== benchmarkIcpCount) return null
   return {
     roundId,
@@ -497,7 +533,7 @@ export function competitionSubmissionStatusLabel(
     if (submission.evaluation?.state === 'queued') return 'Queued for validation'
     if (submission.evaluation?.state === 'evaluating') return 'Evaluating'
     if (submission.evaluation?.state === 'finalizing') return 'Finalizing results'
-    return 'Awaiting evaluation update'
+    return 'In evaluation'
   }
   return humanizeStatus(submission.status)
 }

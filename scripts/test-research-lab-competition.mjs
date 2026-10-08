@@ -31,6 +31,7 @@ try {
     normalizeCompetitionBenchmark,
     normalizeCompetitionCode,
     normalizeCompetitionResults,
+    normalizeCompetitionHistory,
     normalizeCompetitionSnapshot,
     normalizeCompetitionSubmissions,
     normalizeValidatorNames,
@@ -255,6 +256,18 @@ try {
     ],
     unattributedIcpCount: 1,
   })
+  const withVersions = (versions) => normalizeCompetitionResults({ ...attributedResultsPayload, scoring_attribution: { ...attributedResultsPayload.scoring_attribution, code_versions: versions } })
+  const version = { validator_hotkey: primaryHotkey, commit: 'a'.repeat(40), working_tree: 'dirty', icp_positions: [0] }
+  assert.deepEqual(withVersions([version]).scoringAttribution.codeVersions, [{ validatorHotkey: primaryHotkey, commit: 'a'.repeat(40), workingTree: 'dirty', icpPositions: [0] }])
+  for (const invalid of [{ ...version, commit: 'main' }, { ...version, validator_hotkey: 'unknown' }, { ...version, icp_positions: [-1] }, { ...version, icp_positions: [20] }]) {
+    assert.deepEqual(withVersions([invalid]).scoringAttribution.codeVersions, [])
+  }
+  const historyPayload = { rounds: [published], submissions: [{ round_id: published.round_id, submission_id: 'miner-1', miner_hotkey: primaryHotkey, status: 'scored', final_score: 0 }], next_cursor: 'next_page' }
+  assert.equal(normalizeCompetitionHistory(historyPayload).entries[0].submission.finalScore, 0)
+  assert.equal(normalizeCompetitionHistory(historyPayload).nextCursor, 'next_page')
+  assert.equal(normalizeCompetitionHistory({ ...historyPayload, next_cursor: '../unsafe' }), null)
+  assert.equal(normalizeCompetitionHistory({ ...historyPayload, rounds: [{ ...published, status: 'open' }] }), null)
+  assert.equal(normalizeCompetitionHistory({ ...historyPayload, rounds: [] }), null)
   for (const malformed of [
     { validators: null, icps: [], unattributed_icp_count: 0 },
     { validators: [{ hotkey: primaryHotkey, icp_count: 1, reused_icp_count: 2 }], icps: [], unattributed_icp_count: 0 },
@@ -305,7 +318,7 @@ try {
   assert.equal(competitionSubmissionStatusLabel(evaluating, pendingRound), 'Evaluating')
   assert.equal(competitionSubmissionStatusLabel(evaluationRow({ state: 'finalizing', validators: [] }), pendingRound), 'Finalizing results')
   for (const evaluation of [null, { state: 'evaluating', validators: [] }, { state: 'queued', validators: [{ hotkey: primaryHotkey, phase: 'scoring' }] }, { state: 'evaluating', validators: [{ hotkey: primaryHotkey, phase: 'unknown' }] }]) {
-    assert.equal(competitionSubmissionStatusLabel(evaluationRow(evaluation), pendingRound), 'Awaiting evaluation update', 'missing or invalid progress must not imply an active assignment')
+    assert.equal(competitionSubmissionStatusLabel(evaluationRow(evaluation), pendingRound), 'In evaluation', 'missing or invalid progress must not imply an active assignment')
   }
   assert.equal(evaluationRow({ state: 'evaluating', validators: [{ hotkey: primaryHotkey, phase: 'scoring' }] }, 'review_failed').evaluation, null)
   const validatorNames = normalizeValidatorNames({ names: { [primaryHotkey]: 'Leadpoet', [yumaHotkey]: 'Yuma', ghost: 'Wrong identity' }, hotkeyToUid: { [primaryHotkey]: 0, [yumaHotkey]: 155 } })
@@ -354,8 +367,8 @@ try {
   }
   for (const status of ['stage1', 'published']) {
     const markup = renderSummary({ ...datedRound, status })
-    assert.match(markup, /Submission day<\/div><div[^>]*>Oct 5, 2026 · UTC/)
-    assert.match(markup, /Evaluation day<\/div><div[^>]*>Oct 6, 2026 · UTC/)
+    assert.match(markup, /Submission day<\/div><div[^>]*>Oct 5, 2026<\/div>/)
+    assert.match(markup, /Evaluation day<\/div><div[^>]*>Oct 6, 2026<\/div>/)
     assert.doesNotMatch(markup, /Day 0|Day 1/)
   }
   const rolloverMarkup = renderSummary({
@@ -363,10 +376,10 @@ try {
     submissionCutoff: '2026-12-31T23:59:59Z', evaluationDate: '2027-01-01',
     publicAt: '2027-01-01T00:00:00Z',
   })
-  assert.match(rolloverMarkup, /Submission day<\/div><div[^>]*>Dec 31, 2026 · UTC/)
-  assert.match(rolloverMarkup, /Evaluation day<\/div><div[^>]*>Jan 1, 2027 · UTC/)
+  assert.match(rolloverMarkup, /Submission day<\/div><div[^>]*>Dec 31, 2026<\/div>/)
+  assert.match(rolloverMarkup, /Evaluation day<\/div><div[^>]*>Jan 1, 2027<\/div>/)
   const historicalMarkup = renderSummary({ ...datedRound, evaluationDate: '2026-10-09', publicAt: '2026-10-09T18:00:00Z' })
-  assert.match(historicalMarkup, /Evaluation day<\/div><div[^>]*>Oct 9, 2026 · UTC/, 'the API evaluation day must take precedence over any next-day assumption')
+  assert.match(historicalMarkup, /Evaluation day<\/div><div[^>]*>Oct 9, 2026<\/div>/, 'the API evaluation day must take precedence over any next-day assumption')
   const completedBaselineRound = {
     ...activeRound, baseline: { submissionId: 'baseline', minerHotkey: '5baseline', finalScore: 0 },
   }
@@ -809,7 +822,7 @@ try {
     }
   }
   assert.doesNotMatch(component, /if \(!competition\) return/, 'an Arena outage must render its retry state')
-  assert.match(component, /competition\?\.repoUrl \?\? DEFAULT_REPO_URL/)
+  assert.match(component, /https:\/\/github\.com\/leadpoet\/champion_model/); assert.match(component, /Top Sales Agent Model/)
   assert.match(component, /Competition data is temporarily unavailable\. This page will retry automatically\./)
   assert.doesNotMatch(component, /settlement|LabEmissionSplit|\/api\/research-lab\?/)
   assert.match(component, /const selectedRound = roundOptions\[0\] \?\? null/, 'the displayed round must follow the automatic priority order on every refresh')

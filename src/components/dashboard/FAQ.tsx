@@ -6,22 +6,6 @@ import {
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
-// =================================================================
-//  FAQ. Premium editorial layout.
-//
-//  Positioning: Leadpoet is reimagining how sales intelligence is
-//  produced. Live fulfillment on a Bittensor subnet replaces the
-//  static-list / single-vendor status quo. Alpha is the access token.
-//  Sales lead generation is the first deployment of a framework that
-//  extends to any matching problem with verifiable quality.
-//
-//  Visual language matches Fulfillment: warm off-black canvas, single
-//  gold accent, restrained palette.
-//  Flat list (no category sections, no search, no share UI). There
-//  aren't enough questions to justify the chrome, and each answer
-//  is meant to be read on its own.
-// =================================================================
-
 interface FAQItem {
   id: string
   question: string
@@ -34,52 +18,28 @@ interface FAQItem {
 
 const FAQ_DATA: FAQItem[] = [
   {
-    id: 'problem',
-    question: 'What problem does Leadpoet solve?',
-    answer:
-      "Sales runs on fragmented tools and stale, generic data. The lead lists teams buy are sold to thousands of competitors at once, scored by proprietary algorithms nobody can audit, and out of date before anyone reaches out. Worse, none of it compounds: every vendor is a static point solution that never really gets smarter.\n\nLeadpoet rebuilds the layer underneath. We're training a specialized sales intelligence, a sales brain, and the best autonomous sales agent built on top of it. Sales is, at its core, a continuously evolving matching problem with measurable outcomes, which makes it ideal to train against. An open market of contributors competes to produce better results, every output is verified before it ships, and each one makes the model sharper. Lead generation is where we start. The goal is the entire sales motion.",
+    id: 'problem', question: 'What is Leadpoet?',
+    answer: 'Leadpoet is an AI research lab advancing autonomous sales research on Bittensor Subnet 71. Independent contributors build agents that find companies matching a shared set of buyer criteria. Published benchmarks, agent source and evaluation results make their performance open to inspection.',
   },
   {
-    id: 'why-bittensor',
-    question: 'Why Bittensor?',
-    answer:
-      "Bittensor turns useful work into an open incentive market: anyone can contribute, and emissions flow to whoever produces the best verified output. Sales is unusually measurable. Did the contact exist, did the email land, did the prospect reply, did the deal close. Because the work can be scored honestly, the incentive can't be gamed.\n\nThat makes it the right substrate for building a sales brain. Instead of one company training a model behind closed doors, an open network of contributors competes every cycle to push the agent's data, fit, and verification forward, and the same work generates the labeled data that trains the model. No single lab could assemble that breadth of real-world sales signal alone.",
+    id: 'why-bittensor', question: 'Why Bittensor?',
+    answer: 'Bittensor provides an incentive network for independent contributors. Leadpoet uses shared benchmarks and validator evaluations to compare sales research agents and reward progress under the subnet’s active reward policy. Published results let participants inspect how submissions performed.',
   },
   {
-    id: 'how-it-works',
-    question: 'How does the subnet actually work?',
-    answer:
-      "The subnet runs on two tracks. Fulfillment is where it produces economic output. When a sales team submits a request, miners compete in real time to source leads that match the request's criteria, including industry, role, geography, company size, and intent signals. Validators score and verify every submission, so only the leads that pass quality checks and fit best reach the sales team. That creates a live market around each request instead of a static list sold over and over again.\n\nThe Open Source Agent Competition publishes a baseline agent that miners can fork and improve. Miners submit on Day 0. Each round's ICPs become public at the scheduled release. Validators then evaluate every submission and publish scores and source code when evaluation is complete.",
+    id: 'how-it-works', question: 'How does the agent competition work?',
+    answer: 'Miners improve an agent and submit it to Arena during the daily submission window. Submissions must pass code review before evaluation. Validators evaluate eligible agents and the baseline against the same benchmark. Each round records its benchmark size and promotion margin.\n\nFor current rounds, benchmark inputs and eligible frozen source become public after the submission cutoff is committed. A model’s score appears after its evaluation and cost checks finish. The final round publication records the champion and promotion outcome; historical rounds retain their original release rules.',
   },
   {
-    id: 'fulfillment',
-    question: 'How does fulfillment work?',
-    answer:
-      "A sales team submits a request with the criteria they care about: industry, role, geography, headcount, and intent signals to prioritize. Miners source matching leads in real time, then validators score every submission on ICP fit, decision-maker accuracy, intent signal strength, and integrity.\n\nValidators also verify the underlying facts: company identity, contact existence, email deliverability, employment status, and intent scoring. Only leads that survive those checks reach the sales team, and the miners whose leads were chosen are compensated for them. Incumbents work the opposite way: they give you stale data from months ago and leave filtering and qualifying to you.",
+    id: 'fulfillment', question: 'What do agents produce?',
+    answer: 'The current competition evaluates company research: company information and evidence that a company matches the benchmark’s criteria and intent signals. The current output schema is company-only. Contact discovery and email verification are not part of the current competition output.',
   },
   {
-    id: 'research-lab',
-    question: 'How does the Open Source Agent Competition work?',
-    answer:
-      "Miners fork the public benchmark repository, improve the agent, and submit it through Arena on Day 0. Each round's ICPs become public at the scheduled release. Validators then score the baseline and every submission against those ICPs. Final scores, per-ICP scores, and submission source code become public when evaluation is complete.",
+    id: 'incentives', question: 'How are champions and rewards decided?',
+    answer: 'Eligible challengers must beat the evaluated baseline by the round’s recorded promotion margin to qualify for promotion. The published decision identifies the champion, and a successfully promoted agent becomes the next baseline.\n\nRewards are handled separately under the active reward policy. A high score or a displayed champion does not, by itself, confirm reward settlement. The repository documents the policy and its activation requirements.',
   },
   {
-    id: 'incentives',
-    question: 'How does the incentive mechanism work?',
-    answer:
-      "Rewards follow verified value, on both tracks. In Fulfillment, miners earn when their leads pass every data-quality and intent check and rank highest for a live request. Validators handle scoring, and the leads that win are the ones that get paid. In the Agent Competition, Arena rewards the submissions that score best against the shared benchmark.\n\nThat keeps incentives tied to measurable output. Validators score the same inputs for every competitor, and the published competition outcome drives settlement.",
-  },
-  {
-    id: 'alpha',
-    question: 'What role will Alpha play?',
-    answer:
-      "Alpha will gate access to the subnet's outputs. If a platform wants to tap into Leadpoet's intelligence, they'll have to leverage Alpha.\n\nThis is the cleanest design of subnet utility that can be built. More teams pulling outputs means more Alpha spent, which routes more emissions to miners, which attracts better fulfillment, improves the outputs, and brings in more teams.",
-  },
-  {
-    id: 'beyond-sales',
-    question: "What's beyond sales?",
-    answer:
-      "First, the whole of sales. Lead generation is the entry point, but the same engine extends across the entire sales motion: sourcing, qualification, account expansion, timing, and outreach, all powered by the sales brain we're training and the agent built on it.\n\nBeyond sales, the architecture isn't sales-specific. Live request fulfillment, verifiable quality, and a model that learns from measured outcomes apply to any matching problem: talent acquisition, M&A sourcing, procurement, investment research, partnership development. Each is the same shape with the same brittle incumbents.\n\nEvery new domain plugs into the same trust infrastructure, validator network, and Alpha economy, deepening the flywheel for everything already on the subnet. Over time, other Bittensor subnets and applications build directly on Leadpoet's outputs, making Leadpoet infrastructure for an entire class of intent-driven products, not just one of them.",
+    id: 'beyond-sales', question: 'What comes next?',
+    answer: 'The current focus is better company-level sales research. Broader sales workflows and other research domains are possible future directions; they are not current competition capabilities.',
   },
 ]
 
