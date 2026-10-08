@@ -348,8 +348,8 @@ function RoundWorkspace({ round, active, initialSubmissionId = null, inspectionO
   const filtered = filterSubmissions(submissions, query, statusFilter)
   const pageCount = Math.max(1, Math.ceil(filtered.length / 15))
   const currentPage = Math.min(page, pageCount - 1)
-  const inspection = selectedSubmission ? <div className="p-4 sm:p-6" aria-label="Submission audit">
-    <div className="mb-6 flex flex-wrap items-start justify-between gap-3"><div><h4 className="text-[14px] text-[var(--white)]">Agent audit</h4><p className="mt-1 text-[12px] text-[var(--muted)]">{formatDay(round.evaluationDate)}</p><p className="mt-2 break-all font-mono text-[10px] text-[var(--muted-2)]">{selectedSubmission.minerHotkey}</p></div><button type="button" onClick={() => { setInspectionOpen(false); document.getElementById(`audit-toggle-${selectedSubmission.submissionId}`)?.focus() }} className={`${inspectionOnly ? 'hidden' : ''} rounded border border-[var(--line-2)] px-3 py-1.5 text-[11px] text-[var(--muted)]`}>Close audit</button></div>
+  const inspection = selectedSubmission ? <div className="p-4 sm:p-6" aria-label="Submission evaluation">
+    <div className="mb-6 flex flex-wrap items-start justify-between gap-3"><div><h4 className="text-[14px] text-[var(--white)]">Agent evaluation</h4><p className="mt-1 text-[12px] text-[var(--muted)]">{formatDay(round.evaluationDate)}</p><p className="mt-2 break-all font-mono text-[10px] text-[var(--muted-2)]">{selectedSubmission.minerHotkey}</p></div><button type="button" onClick={() => { setInspectionOpen(false); document.getElementById(`evaluation-toggle-${selectedSubmission.submissionId}`)?.focus() }} className={`${inspectionOnly ? 'hidden' : ''} rounded border border-[var(--line-2)] px-3 py-1.5 text-[11px] text-[var(--muted)]`}>Close evaluation</button></div>
     <div className="grid min-w-0 gap-8 xl:grid-cols-[minmax(0,1.5fr)_minmax(260px,0.5fr)]"><PublishedResults benchmark={benchmark} benchmarkState={benchmarkState} results={results} resultsState={resultsState} round={round} submission={selectedSubmission} /><SourcePanel submission={selectedSubmission} cancelled={round.status === 'cancelled'} code={code} codeState={codeState} selectedFile={selectedCodeFile} onSelectFile={setSelectedFile} onRequest={() => void requestCode()} /></div>
   </div> : null
   if (inspectionOnly) return roundLoading ? <div className="p-5"><SubmissionRowsLoading /></div> : inspection ?? <InlineNotice>{roundError ?? 'Submission details are unavailable.'}</InlineNotice>
@@ -360,6 +360,9 @@ function RoundWorkspace({ round, active, initialSubmissionId = null, inspectionO
     {roundLoading ? <SubmissionRowsLoading /> : filtered.length ? <><SubmissionTable submissions={filtered.slice(currentPage * 15, (currentPage + 1) * 15)} round={round} selectedId={inspectionOpen ? selectedSubmissionId : null} expandedContent={inspectionOpen ? inspection : null} onSelect={(id) => { selectSubmission(id); setInspectionOpen(id !== selectedSubmissionId || !inspectionOpen) }} /><Pagination page={currentPage} hasNext={currentPage + 1 < pageCount} onPrevious={() => setPage(currentPage - 1)} onNext={() => setPage(currentPage + 1)} label={`${filtered.length} ${query || statusFilter !== 'all' ? 'matches' : 'submissions'}`} /></> : <InlineNotice>{submissions.length ? 'No miners match these filters.' : 'No submissions are public for this round.'}</InlineNotice>}
   </section>
 }
+
+// Stretch the native button over its row, preserving keyboard and table semantics.
+const evaluationRowButtonClass = 'text-left after:absolute after:inset-0 after:cursor-pointer focus-visible:outline-none focus-visible:after:ring-1 focus-visible:after:ring-inset focus-visible:after:ring-[var(--platinum)]'
 
 const filterClass = 'h-10 w-full rounded-md border border-[var(--line-2)] bg-[var(--surface)] px-3 text-[12px] text-[var(--platinum)] placeholder:text-[var(--muted-2)]'
 
@@ -417,7 +420,7 @@ function CompetitionHistory({ active }: { active: boolean }) {
     </form>
     {loading && !history ? <SubmissionRowsLoading /> : error ? <InlineNotice>{error} <button type="button" className="underline" onClick={() => void refresh()}>Retry</button></InlineNotice> : history?.entries.length ? <div className="overflow-x-auto rounded-lg border border-[var(--line)]"><table className="w-full text-left"><thead className="bg-[var(--surface)] text-[11px] text-[var(--muted)]"><tr><th className="px-4 py-3 font-normal" scope="col">Miner</th><th className="px-3 py-3 font-normal" scope="col">Evaluation day</th><th className="px-4 py-3 text-right font-normal" scope="col">Score</th></tr></thead><tbody>{history.entries.map(({ round, submission }) => {
       const key = `${round.roundId}:${submission.submissionId}`
-      return <Fragment key={key}><tr className="border-t border-[var(--line)] hover:bg-white/[0.025]"><td className="px-4 py-3"><button type="button" aria-expanded={selected === key} aria-controls={`audit-${key}`} onClick={() => setSelected(selected === key ? null : key)} className="text-left" title={submission.minerHotkey}><span className="block font-mono text-[11px] text-[var(--platinum)]">{shortHotkey(submission.minerHotkey)}</span><span className="mt-1 block text-[10px] text-[var(--muted)]">{submission.isBaseline ? 'Baseline · ' : submission.isChampion ? 'Champion · ' : ''}{selected === key ? 'Close audit −' : 'View audit +'}</span></button></td><td className="px-3 py-3 text-[11px] text-[var(--muted)]">{formatDay(round.evaluationDate)}</td><td className="px-4 py-3 text-right font-mono text-[12px] text-[var(--platinum)]">{formatCompetitionScore(submission.finalScore)}</td></tr>{selected === key ? <tr id={`audit-${key}`}><td colSpan={3} className="border-t border-[var(--line)] bg-[var(--surface)]"><RoundWorkspace key={key} round={round} active={active} initialSubmissionId={submission.submissionId} inspectionOnly /></td></tr> : null}</Fragment>
+      return <Fragment key={key}><tr className={`relative cursor-pointer border-t border-[var(--line)] transition-colors ${selected === key ? 'bg-white/[0.045]' : 'hover:bg-white/[0.025]'}`}><td className="px-4 py-3"><button type="button" aria-expanded={selected === key} aria-controls={`evaluation-${key}`} onClick={() => setSelected(selected === key ? null : key)} className={evaluationRowButtonClass} title={submission.minerHotkey}><span className="block font-mono text-[11px] text-[var(--platinum)]">{shortHotkey(submission.minerHotkey)}</span><span className="mt-1 block text-[10px] text-[var(--muted)]">{submission.isBaseline ? 'Baseline · ' : submission.isChampion ? 'Champion · ' : ''}{selected === key ? 'Close evaluation −' : 'View evaluation +'}</span></button></td><td className="px-3 py-3 text-[11px] text-[var(--muted)]">{formatDay(round.evaluationDate)}</td><td className="px-4 py-3 text-right font-mono text-[12px] text-[var(--platinum)]">{formatCompetitionScore(submission.finalScore)}</td></tr>{selected === key ? <tr id={`evaluation-${key}`}><td colSpan={3} className="border-t border-[var(--line)] bg-[var(--surface)]"><RoundWorkspace key={key} round={round} active={active} initialSubmissionId={submission.submissionId} inspectionOnly /></td></tr> : null}</Fragment>
     })}</tbody></table></div> : <InlineNotice>{history?.nextCursor ? 'No matches on this page. Continue to earlier rounds or filter by day.' : 'No published submissions match these filters.'}</InlineNotice>}
     <Pagination page={page} hasNext={Boolean(history?.nextCursor)} loading={loading} onPrevious={() => setPage((page) => Math.max(0, page - 1))} onNext={() => { if (history?.nextCursor) { setCursors((items) => [...items.slice(0, page + 1), history.nextCursor]); setPage(page + 1) } }} />
   </section>
@@ -432,9 +435,9 @@ function SubmissionTable({ submissions, round, selectedId, onSelect, expandedCon
         </thead>
         <tbody>{submissions.map((submission) => {
           const selected = submission.submissionId === selectedId
-          return <Fragment key={submission.submissionId}><tr className={`border-t border-[var(--line)] ${selected ? 'bg-white/[0.045]' : 'hover:bg-white/[0.02]'}`}>
+          return <Fragment key={submission.submissionId}><tr className={`relative cursor-pointer border-t border-[var(--line)] transition-colors ${selected ? 'bg-white/[0.045]' : 'hover:bg-white/[0.02]'}`}>
             <td className="p-0">
-              <button id={`audit-toggle-${submission.submissionId}`} type="button" onClick={() => onSelect(submission.submissionId)} className="w-full px-4 py-3 text-left" aria-expanded={selected} aria-controls={`submission-${submission.submissionId}`} title={submission.submissionId}>
+              <button id={`evaluation-toggle-${submission.submissionId}`} type="button" onClick={() => onSelect(submission.submissionId)} className={`w-full px-4 py-3 ${evaluationRowButtonClass}`} aria-expanded={selected} aria-controls={`submission-${submission.submissionId}`} title={submission.submissionId}>
                 <span className="block max-w-[110px] truncate font-mono text-[11px] text-[var(--platinum)] sm:max-w-none">{shortId(submission.submissionId)}</span>
                 {submission.isBaseline ? <span className="mt-1 block text-[10px] text-[var(--muted)]">Baseline</span> : null}
                 <span className="mt-1 block max-w-[110px] truncate font-mono text-[10px] text-[var(--muted-2)] sm:hidden" title={submission.minerHotkey}>{shortHotkey(submission.minerHotkey)}</span>
@@ -489,11 +492,16 @@ function ScoringAttributionSummary({ attribution, loading = false }: { attributi
       <span>Scored by <span className="ml-1 text-[var(--platinum)]">{loading ? 'Loading…' : attribution?.validators.length ? attribution.validators.map(({ hotkey }) => Object.hasOwn(names, hotkey) ? names[hotkey] : shortHotkey(hotkey)).join(', ') : 'Unavailable'}</span></span>
       <span aria-hidden className="transition-transform group-open:rotate-45">+</span>
     </summary>
-    <div className="space-y-3 pb-4">{attribution?.validators.map((validator) => <div key={validator.hotkey}>
+    <div className="space-y-3 pb-4">{attribution?.validators.map((validator) => {
+      const codeVersions = attribution.codeVersions?.filter((version) => version.validatorHotkey === validator.hotkey) ?? []
+      return <div key={validator.hotkey}>
       <div className="text-[12px] leading-relaxed text-[var(--platinum)]"><ValidatorIdentity hotkey={validator.hotkey} full /></div>
       <div className="mt-1 text-[11px] text-[var(--muted)]">{formatIcpCount(validator.icpCount)} · {validator.reusedIcpCount} reused</div>
-      <div className="mt-2 space-y-1 text-[11px] text-[var(--muted)]">{attribution.codeVersions?.some((version) => version.validatorHotkey === validator.hotkey) ? attribution.codeVersions.filter((version) => version.validatorHotkey === validator.hotkey).map((version) => <p key={`${version.commit}-${version.workingTree}`}><a href={`https://github.com/leadpoet/leadpoet/commit/${version.commit}`} target="_blank" rel="noreferrer" className="font-mono text-[var(--platinum)] underline underline-offset-4" title={version.commit}>{version.commit.slice(0, 12)}</a> · {formatIcpCount(version.icpPositions.length)}{version.workingTree === 'dirty' ? ' · local modifications' : version.workingTree === 'unknown' ? ' · working tree not recorded' : ''}</p>) : <p>Validator commit not recorded.</p>}</div>
-    </div>)}
+      {codeVersions.length ? <div className="mt-3 space-y-1 text-[11px] text-[var(--muted)]">
+        <p className="mb-2 text-[10px] text-[var(--muted-2)]">Validator code commits</p>
+        {codeVersions.map((version) => <p key={`${version.commit}-${version.workingTree}`}><a href={`https://github.com/leadpoet/leadpoet/commit/${version.commit}`} target="_blank" rel="noreferrer" className="font-mono text-[var(--platinum)] underline underline-offset-4" title={version.commit}>{version.commit.slice(0, 12)}</a> · {formatIcpCount(version.icpPositions.length)}{version.workingTree === 'dirty' ? ' · local modifications' : ''}</p>)}
+      </div> : null}
+    </div>})}
     {!loading && attribution ? <p className="text-[11px] text-[var(--muted)]">Unattributed ICPs {attribution.unattributedIcpCount}</p> : <p className="text-[11px] text-[var(--muted)]">{loading ? 'Loading validator attribution…' : 'Validator attribution is unavailable for this result.'}</p>}</div>
   </details>
 }

@@ -446,6 +446,16 @@ try {
   assert.match(attributionSummaryMarkup, /12 ICPs · 3 reused/)
   assert.match(attributionSummaryMarkup, /7 ICPs · 1 reused/)
   assert.match(attributionSummaryMarkup, /Unattributed ICPs 1/)
+  assert.doesNotMatch(attributionSummaryMarkup, /Validator code commits|not recorded/)
+  for (const workingTree of ['unknown', 'clean', 'dirty']) {
+    const codeVersionMarkup = renderToStaticMarkup(React.createElement(renderedModule.exports.ScoringAttributionSummary, {
+      attribution: withVersions([{ ...version, working_tree: workingTree }]).scoringAttribution,
+    }))
+    assert.match(codeVersionMarkup, /Validator code commits/)
+    assert.ok(codeVersionMarkup.includes(`href="https://github.com/leadpoet/leadpoet/commit/${version.commit}"`))
+    assert.doesNotMatch(codeVersionMarkup, /not recorded/)
+    assert.equal(codeVersionMarkup.includes('local modifications'), workingTree === 'dirty')
+  }
   const legacyAttributionMarkup = renderToStaticMarkup(React.createElement(renderedModule.exports.ScoringAttributionSummary, {
     attribution: null,
   }))
