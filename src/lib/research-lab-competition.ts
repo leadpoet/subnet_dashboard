@@ -42,6 +42,7 @@ export type CompetitionSubmission = {
   isBaseline: boolean
   status: string
   failureReason?: 'credential_error' | null
+  evaluation?: CompetitionEvaluation | null
   submittedAt: string | null
   stage1Score: number | null
   finalScore: number | null
@@ -52,6 +53,37 @@ export type CompetitionSubmission = {
     availableAt: string | null
     url: string | null
   }
+}
+
+export type CompetitionEvaluation = {
+  state: 'queued' | 'evaluating' | 'finalizing'
+  validators: Array<{ hotkey: string; phase: 'executing' | 'scoring' }>
+}
+
+export function normalizeValidatorNames(value: unknown): Record<string, string> {
+  const source = record(value)
+  const registered = record(source?.hotkeyToUid)
+  return Object.fromEntries(Object.entries(record(source?.names) ?? {}).flatMap(([hotkey, name]) => {
+    const label = text(name).trim().slice(0, 80)
+    return label && integer(registered?.[hotkey]) !== null ? [[hotkey, label]] : []
+  }))
+}
+
+function normalizeEvaluation(value: unknown): CompetitionEvaluation | null {
+  const source = record(value)
+  const state = source?.state
+  if (!source || (state !== 'queued' && state !== 'evaluating' && state !== 'finalizing') || !Array.isArray(source.validators)) return null
+  const validators: CompetitionEvaluation['validators'] = []
+  for (const value of source.validators) {
+    const row = record(value)
+    const hotkey = text(row?.hotkey)
+    const phase = text(row?.phase)
+    if (!hotkey || (phase !== 'executing' && phase !== 'scoring')) return null
+    if (validators.some((item) => item.hotkey === hotkey && item.phase === phase)) return null
+    validators.push({ hotkey, phase })
+  }
+  if ((state === 'evaluating') !== (validators.length > 0)) return null
+  return { state, validators }
 }
 
 export type CompetitionCodeReview = {
@@ -249,6 +281,7 @@ export function normalizeCompetitionSubmissions(value: unknown): CompetitionSubm
       isBaseline: row.is_baseline === true,
       status,
       failureReason: row.failure_reason === 'credential_error' ? 'credential_error' as const : null,
+      evaluation: !reviewExcluded && status === 'scoring' ? normalizeEvaluation(row.evaluation) : null,
       submittedAt: nullableText(row.submitted_at),
       stage1Score: reviewExcluded ? null : score(row.stage1_score),
       finalScore: reviewExcluded ? null : score(row.final_score),
@@ -388,11 +421,12 @@ export type CompetitionScoreHistoryPoint = {
   timestamp: number
   score: number | null
   roundId: string | null
+  promotionStatus: string | null
 }
 
 // Use the normalized history as the canonical record. References can include a
 // newer round outside the history window, but must not replace its record.
-export function competitionBaselineHistory(snapshot: CompetitionSnapshot): CompetitionScoreHistoryPoint[] {
+function publishedCompetitionRounds(snapshot: CompetitionSnapshot): CompetitionRoundSummary[] {
   const byId = new Map(snapshot.rounds.map((round) => [round.roundId, round]))
   for (const round of [snapshot.latestRound, snapshot.latestCompletedRound, snapshot.openRound]) {
     if (round && !byId.has(round.roundId)) byId.set(round.roundId, round)
@@ -401,10 +435,23 @@ export function competitionBaselineHistory(snapshot: CompetitionSnapshot): Compe
     const timestamp = Date.parse(round.publishedAt ?? '')
     return Number.isFinite(timestamp) ? timestamp : -Infinity
   }
-  const published = [...byId.values()]
+  return [...byId.values()]
     .filter((round) => round.status === 'published' && calendarDate(round.evaluationDate))
     .sort((a, b) => (a.evaluationDate ?? '').localeCompare(b.evaluationDate ?? '')
       || publicationTime(a) - publicationTime(b) || a.roundId.localeCompare(b.roundId))
+}
+
+/** The reigning champion keeps its winning score while a new round runs. */
+export function currentChampionRound(snapshot: CompetitionSnapshot): CompetitionRoundSummary | null {
+  return publishedCompetitionRounds(snapshot)
+    .filter((round) => round.champion && round.promotionStatus === 'promoted')
+    .at(-1) ?? null
+}
+
+/** Historical round winners, including winners whose promotion was superseded.
+ * A round without a winner is a gap; never substitute the baseline's score. */
+export function competitionChampionHistory(snapshot: CompetitionSnapshot): CompetitionScoreHistoryPoint[] {
+  const published = publishedCompetitionRounds(snapshot)
   if (!published.length) return []
   const dayMs = 86_400_000
   const end = Date.parse(`${published[published.length - 1].evaluationDate}T00:00:00Z`)
@@ -415,30 +462,13 @@ export function competitionBaselineHistory(snapshot: CompetitionSnapshot): Compe
   for (let timestamp = start; timestamp <= end; timestamp += dayMs) {
     const evaluationDate = new Date(timestamp).toISOString().slice(0, 10)
     const round = byDate.get(evaluationDate)
-    points.push({ evaluationDate, timestamp, score: score(round?.baseline?.finalScore), roundId: round?.roundId ?? null })
+    points.push({ evaluationDate, timestamp, score: score(round?.champion?.finalScore), roundId: round?.roundId ?? null, promotionStatus: round?.promotionStatus ?? null })
   }
   return points
 }
 
-export function latestPublishedBaselineRound(
-  snapshot: CompetitionSnapshot,
-  selectedRound: CompetitionRoundSummary | null,
-): CompetitionRoundSummary | null {
-  const publishedRound = snapshot.latestCompletedRound
-  if (
-    !selectedRound
-    || selectedRound.baseline?.finalScore != null
-    || !publishedRound
-    || publishedRound.roundId === selectedRound.roundId
-    || publishedRound.status !== 'published'
-    || !publishedRound.baseline
-    || publishedRound.baseline.finalScore === null
-  ) return null
-  return publishedRound
-}
-
 export function competitionSubmissionStatusLabel(
-  submission: Pick<CompetitionSubmission, 'isBaseline' | 'isChampion' | 'status' | 'failureReason' | 'codeReview'>,
+  submission: Pick<CompetitionSubmission, 'isBaseline' | 'isChampion' | 'status' | 'failureReason' | 'codeReview' | 'evaluation'>,
   round: Pick<CompetitionRoundSummary, 'promotionStatus' | 'status'>,
 ): string {
   if (submission.status === 'review_failed') return 'Code review could not complete'
@@ -461,6 +491,13 @@ export function competitionSubmissionStatusLabel(
   if (submission.status === 'queued' || submission.status === 'accepted') {
     const reviewIssue = codeReviewIssueLabel(submission.codeReview)
     if (reviewIssue) return reviewIssue
+    return 'Queued for validation'
+  }
+  if (submission.status === 'scoring') {
+    if (submission.evaluation?.state === 'queued') return 'Queued for validation'
+    if (submission.evaluation?.state === 'evaluating') return 'Evaluating'
+    if (submission.evaluation?.state === 'finalizing') return 'Finalizing results'
+    return 'Awaiting evaluation update'
   }
   return humanizeStatus(submission.status)
 }

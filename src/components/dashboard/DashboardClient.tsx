@@ -67,15 +67,15 @@ export function DashboardClient() {
   }, [activeTab])
 
   return (
-    <div className="relative min-h-screen">
-      <div className="relative z-10 max-w-[1500px] mx-auto px-5 py-4 md:py-6 overflow-auto">
-        <header className="relative mb-7 md:mb-9 pt-6 md:pt-10 pb-6 md:pb-8 border-b border-[var(--line)]">
+    <div className="dashboard-surface relative min-h-screen">
+      <div className="relative z-10 max-w-[1240px] mx-auto px-5 md:px-8">
+        <header className="py-6 md:py-8">
           <div className="flex items-center justify-between gap-4">
             <span className="font-display text-[20px] md:text-[22px] font-semibold tracking-[-0.02em] text-[var(--white)]">
-              Leadpoet Subnet Dashboard
+              Leadpoet<span className="ml-3 hidden border-l border-[var(--line-3)] pl-3 text-[12px] font-normal tracking-normal text-[var(--muted)] sm:inline">Research lab</span>
             </span>
             <span className="font-mono text-[10px] md:text-[10.5px] uppercase tracking-[0.18em] text-[var(--muted-2)] whitespace-nowrap">
-              SN&nbsp;71 · Bittensor
+              SN&nbsp;71
             </span>
           </div>
         </header>
@@ -83,11 +83,11 @@ export function DashboardClient() {
         <Tabs
           value={activeTab}
           onValueChange={(value) => activateTab(normalizeDashboardTab(value, visibleTabs))}
-          className="space-y-4 md:space-y-6"
+          className="gap-0"
         >
           <div ref={navWrapRef} className="relative">
             <TabsList className={cn('flex w-full justify-start gap-8 sm:gap-10 overflow-x-auto no-scrollbar rounded-none border-0 border-b border-[var(--line)] bg-transparent h-auto p-0')}>
-              <DashboardTabTrigger value="research-lab" label="Open Source Agent Competition" shortLabel="Competition" />
+              <DashboardTabTrigger value="research-lab" label="Competition" />
               <DashboardTabTrigger value="faq" label="FAQ" />
             </TabsList>
             <span

@@ -115,7 +115,7 @@ const FAQ_SCHEMA_JSON = JSON.stringify(buildFaqSchema(FAQ_DATA))
  * ============================================================ */
 
 export function FAQ() {
-  const [openIds, setOpenIds] = useState<Set<string>>(new Set([FAQ_DATA[0]?.id ?? '']))
+  const [openIds, setOpenIds] = useState<Set<string>>(new Set())
 
   // Hash-based deep linking is still supported (e.g. ?tab=faq#alpha)
   // but no share UI is exposed inside the FAQ.
@@ -160,13 +160,10 @@ export function FAQ() {
       {/* ════════════════════════════════════════════════════════════
           Hero: overline + title + subtitle
           ════════════════════════════════════════════════════════════ */}
-      <header className="mb-6 md:mb-8">
+      <header className="py-7 md:py-9">
         <h2 className="text-2xl md:text-3xl font-semibold text-slate-100 tracking-tight">
           Frequently asked questions
         </h2>
-        <p className="text-sm text-slate-400 mt-1.5 max-w-2xl">
-          The future of sales intelligence, powered by Bittensor.
-        </p>
       </header>
 
       {/* ════════════════════════════════════════════════════════════
@@ -174,7 +171,7 @@ export function FAQ() {
           Left: flat accordion. Right: sidebar with about + links.
           ════════════════════════════════════════════════════════════ */}
       <div className="grid lg:grid-cols-[1fr_280px] gap-6 lg:gap-8">
-        <div className="rounded-xl border border-slate-800/70 bg-slate-950/40 overflow-hidden divide-y divide-slate-800/60">
+        <div className="overflow-hidden border-y border-[var(--line)] divide-y divide-[var(--line)]">
           {FAQ_DATA.map((item) => (
             <FAQAccordionItem
               key={item.id}
@@ -190,7 +187,6 @@ export function FAQ() {
         </aside>
       </div>
 
-      <ContactBlock />
     </div>
   )
 }
@@ -285,38 +281,12 @@ function FAQAccordionItem({
  * ============================================================ */
 function Sidebar() {
   return (
-    <div className="space-y-4">
-      <section className="rounded-xl border border-slate-800/70 bg-slate-950/40 p-5">
-        <h3 className="text-[11px] uppercase tracking-[0.14em] text-slate-300 font-semibold mb-3">
-          About Leadpoet
-        </h3>
-        <p className="text-[12px] text-slate-400 leading-relaxed">
-          Leadpoet is Subnet 71 on Bittensor, building the intelligence layer
-          for modern sales. The subnet powers a continuously improving AI sales
-          agent. Its purpose is to turn decentralized research and validation
-          into the world&apos;s first full-funnel sales LLM.
-        </p>
-      </section>
-
-      <section className="rounded-xl border border-slate-800/70 bg-slate-950/40 overflow-hidden">
-        <header className="px-4 py-2 border-b border-slate-800/70 bg-gradient-to-b from-slate-900/80 to-slate-900/40">
-          <span className="text-[10px] uppercase tracking-[0.14em] text-slate-300 font-semibold">
-            Quick links
-          </span>
-        </header>
-        <div className="divide-y divide-slate-800/60">
-          <SidebarLink href="https://github.com/leadpoet/leadpoet">
-            GitHub
-          </SidebarLink>
-          <SidebarLink href="https://leadpoet.com">
-            leadpoet.com
-          </SidebarLink>
-          <SidebarLink href="mailto:hello@leadpoet.com">
-            hello@leadpoet.com
-          </SidebarLink>
-        </div>
-      </section>
-    </div>
+    <nav aria-label="Leadpoet links" className="border-t border-[var(--line)] pt-4 lg:border-t-0 lg:border-l lg:pl-6">
+      <h3 className="mb-3 px-4 text-[12px] text-[var(--muted)]">Explore Leadpoet</h3>
+      <SidebarLink href="https://github.com/leadpoet/leadpoet">GitHub</SidebarLink>
+      <SidebarLink href="https://leadpoet.com">Website</SidebarLink>
+      <SidebarLink href="mailto:hello@leadpoet.com">Contact</SidebarLink>
+    </nav>
   )
 }
 
@@ -337,38 +307,5 @@ function SidebarLink({
     >
       <span className="flex-1 truncate font-mono">{children}</span>
     </a>
-  )
-}
-
-/* ============================================================
- * ContactBlock. Understated CTA with a top gold accent rule.
- * ============================================================ */
-function ContactBlock() {
-  return (
-    <section
-      aria-label="Contact"
-      className="mt-10 lg:mt-12 rounded-2xl border border-slate-800/70 bg-slate-950/40 overflow-hidden"
-    >
-      <div className="px-6 py-6 flex flex-col md:flex-row md:items-center gap-4 md:gap-6">
-        <div className="flex items-center gap-3">
-          <div>
-            <div className="text-sm font-semibold text-slate-100">Still have questions?</div>
-            <p className="text-[12px] text-slate-400 mt-0.5 max-w-md">
-              Can&apos;t find what you&apos;re looking for? Reach out and we&apos;ll get back to you.
-            </p>
-          </div>
-        </div>
-        <a
-          href="mailto:hello@leadpoet.com"
-          className={cn(
-            'md:ml-auto inline-flex items-center gap-1.5 px-3.5 py-2 rounded-md text-[12px] font-medium',
-            'text-slate-200 bg-slate-900/60 border border-slate-700/50 hover:bg-slate-800/60 hover:border-slate-600/60 transition-colors',
-            'focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-500/50'
-          )}
-        >
-          hello@leadpoet.com
-        </a>
-      </div>
-    </section>
   )
 }

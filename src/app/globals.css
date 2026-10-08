@@ -541,3 +541,30 @@ body::before {
   opacity: 0.6;
   animation: ring-pulse 2.6s cubic-bezier(0.4, 0, 0.2, 1) infinite;
 }
+
+/* Public research dashboard: quiet surfaces and readable secondary type. */
+.dashboard-surface {
+  --canvas: #0b0d10;
+  --surface: #111418;
+  --white: #f3f5f7;
+  --platinum: #e1e5e9;
+  --muted: #a0a7b0;
+  --muted-2: #8b929d;
+  --line: rgba(224, 232, 242, 0.09);
+  --line-2: rgba(224, 232, 242, 0.15);
+  --line-3: rgba(224, 232, 242, 0.24);
+  background: var(--canvas);
+  font-family: var(--font-geist-sans), sans-serif;
+}
+
+.dashboard-surface :is(button, a, summary, [role="tab"]):focus-visible {
+  outline: 2px solid var(--white) !important;
+  outline-offset: -2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dashboard-surface *, .dashboard-surface *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}

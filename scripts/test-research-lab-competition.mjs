@@ -25,14 +25,15 @@ try {
     competitionSubmissionEvaluationNotice,
     competitionSubmissionStatusLabel,
     competitionRoundOptions,
-    competitionBaselineHistory,
+    competitionChampionHistory,
     formatCompetitionScore,
-    latestPublishedBaselineRound,
+    currentChampionRound,
     normalizeCompetitionBenchmark,
     normalizeCompetitionCode,
     normalizeCompetitionResults,
     normalizeCompetitionSnapshot,
     normalizeCompetitionSubmissions,
+    normalizeValidatorNames,
     isCompetitionReviewExcluded,
     COMPANY_CHECK_LABELS,
   } = require(join(outDir, 'research-lab-competition.js'))
@@ -74,76 +75,60 @@ try {
   assert.equal(snapshot.latestCompletedRound.promotionMargin, 1, 'legacy rounds retain their 1-point promotion rule')
   assert.equal(snapshot.latestCompletedRound.evaluationDate, '2026-09-05')
   assert.deepEqual(competitionRoundOptions(snapshot).map((round) => round.roundId), ['arena-2026-09-09', 'arena-2026-09-05'])
-  assert.equal(
-    latestPublishedBaselineRound(snapshot, snapshot.latestRound)?.roundId,
-    'arena-2026-09-05',
-    'a cancelled newer round must retain its workspace while the older published baseline stays visible',
-  )
-  assert.equal(
-    latestPublishedBaselineRound(snapshot, snapshot.latestRound)?.baseline?.finalScore,
-    0,
-    'a published zero remains a real latest baseline score',
-  )
-  assert.equal(
-    latestPublishedBaselineRound(snapshot, snapshot.latestCompletedRound),
-    null,
-    'the selected published round must not duplicate its own baseline summary',
-  )
-  assert.equal(
-    latestPublishedBaselineRound({ ...snapshot, latestCompletedRound: { ...snapshot.latestCompletedRound, baseline: null } }, snapshot.latestRound),
-    null,
-    'a missing published baseline score must fail closed',
-  )
-  assert.equal(
-    latestPublishedBaselineRound({ ...snapshot, latestCompletedRound: { ...snapshot.latestCompletedRound, baseline: { ...snapshot.latestCompletedRound.baseline, finalScore: null } } }, snapshot.latestRound),
-    null,
-    'a null published baseline score must fail closed',
-  )
-  assert.equal(
-    latestPublishedBaselineRound({ ...snapshot, latestCompletedRound: { ...snapshot.latestCompletedRound, status: 'scored' } }, snapshot.latestRound),
-    null,
-    'an unpublished completed round must not expose a baseline score',
-  )
   const activeRound = { ...snapshot.latestRound, roundId: 'arena-2026-09-10', status: 'stage2', cancelReason: null }
   const activeSnapshot = { ...snapshot, latestRound: activeRound }
-  assert.equal(competitionRoundOptions(activeSnapshot)[0].roundId, activeRound.roundId, 'the newer active round must remain selected')
-  assert.equal(
-    latestPublishedBaselineRound(activeSnapshot, activeRound)?.roundId,
-    'arena-2026-09-05',
-    'a newer active round must not hide the latest real published baseline',
-  )
+  assert.equal(competitionRoundOptions(activeSnapshot)[0].roundId, activeRound.roundId, 'the newer active round remains selected')
+  assert.equal(currentChampionRound(snapshot), null, 'a baseline must never masquerade as a champion')
   const historyRound = (date, finalScore, overrides = {}) => ({
     ...snapshot.latestCompletedRound, roundId: `arena-${date}`, evaluationDate: date,
-    publishedAt: `${date}T18:00:00Z`, baseline: { submissionId: 'baseline', minerHotkey: '5baseline', finalScore },
+    publishedAt: `${date}T18:00:00Z`, baseline: { submissionId: 'baseline', minerHotkey: '5baseline', finalScore: 99 },
+    champion: { submissionId: `winner-${date}`, minerHotkey: '5winner', finalScore, outcome: 'new_king' }, promotionStatus: 'promoted',
     ...overrides,
   })
   const historySnapshot = (rounds, refs = {}) => ({ ...snapshot, rounds, latestRound: null, latestCompletedRound: null, openRound: null, ...refs })
-  assert.deepEqual(competitionBaselineHistory(historySnapshot([])), [])
+  assert.deepEqual(competitionChampionHistory(historySnapshot([])), [])
   const canonical = historyRound('2026-09-05', 0)
-  const history = competitionBaselineHistory(historySnapshot([
+  const history = competitionChampionHistory(historySnapshot([
     historyRound('2026-09-10', 4.633), historyRound('2026-09-06', null), canonical,
     historyRound('2026-09-07', 80, { status: 'cancelled' }),
     historyRound('2026-09-08', 70, { status: 'stage2' }),
     historyRound('2026-09-09', 60, { status: 'scoring_failed' }),
     historyRound(null, 90), historyRound('2026-02-30', 90),
-  ], { latestCompletedRound: { ...canonical, baseline: { ...canonical.baseline, finalScore: 99 } } }))
+  ], { latestCompletedRound: { ...canonical, champion: { ...canonical.champion, finalScore: 99 } } }))
   assert.deepEqual(history.map((point) => point.evaluationDate), ['2026-09-05', '2026-09-06', '2026-09-07', '2026-09-08', '2026-09-09', '2026-09-10'], 'history sorts valid UTC evaluation dates and fills calendar gaps')
   assert.deepEqual(history.map((point) => point.score), [0, null, null, null, null, 4.633], 'true zero is retained; pending, failed, cancelled and missing scores remain gaps')
   assert.equal(history[0].timestamp, Date.parse('2026-09-05T00:00:00Z'))
   assert.equal(history[0].roundId, canonical.roundId, 'canonical history wins over stale round references')
-  assert.equal(competitionBaselineHistory(historySnapshot([canonical, canonical])).length, 1, 'duplicate references do not add chart points')
-  assert.equal(competitionBaselineHistory(historySnapshot([], { latestCompletedRound: canonical }))[0].score, 0, 'a published canonical reference outside the history list is included')
+  assert.equal(competitionChampionHistory(historySnapshot([canonical, canonical])).length, 1, 'duplicate references do not add chart points')
+  assert.equal(competitionChampionHistory(historySnapshot([], { latestCompletedRound: canonical }))[0].score, 0, 'a published canonical reference outside the history list is included')
   const laterRelease = historyRound('2026-09-05', 2, { roundId: 'arena-rerun', publishedAt: '2026-09-05T20:00:00Z' })
-  assert.equal(competitionBaselineHistory(historySnapshot([laterRelease, canonical]))[0].score, 2, 'a repeated evaluation day uses the latest published release regardless of input order')
-  assert.equal(competitionBaselineHistory(historySnapshot([
+  assert.equal(competitionChampionHistory(historySnapshot([laterRelease, canonical]))[0].score, 2, 'a repeated evaluation day uses the latest published release regardless of input order')
+  assert.equal(competitionChampionHistory(historySnapshot([
     laterRelease, historyRound('2026-09-05', 3, { roundId: 'offset-release', publishedAt: '2026-09-05T17:00:00-04:00' }),
   ]))[0].score, 3, 'release ordering compares UTC instants rather than timestamp strings')
-  const windowedHistory = competitionBaselineHistory(historySnapshot([canonical, historyRound('2026-09-30', 5)]))
+  const windowedHistory = competitionChampionHistory(historySnapshot([canonical, historyRound('2026-09-30', 5)]))
   assert.equal(windowedHistory.length, 14, 'chart limits history to the most recent 14 evaluation days')
   assert.equal(windowedHistory[0].evaluationDate, '2026-09-17')
   assert.equal(windowedHistory.at(-1).score, 5)
-  const rolloverHistory = competitionBaselineHistory(historySnapshot([historyRound('2026-12-31', 1), historyRound('2027-01-02', 2)]))
+  const rolloverHistory = competitionChampionHistory(historySnapshot([historyRound('2026-12-31', 1), historyRound('2027-01-02', 2)]))
   assert.deepEqual(rolloverHistory.map((point) => point.evaluationDate), ['2026-12-31', '2027-01-01', '2027-01-02'], 'history crosses UTC year boundaries without a local-time shift')
+
+  const promoted = historyRound('2026-10-07', 5.75)
+  const inProgress = historyRound('2026-10-08', 88, { status: 'stage2' })
+  const pending = historyRound('2026-10-09', 90, { promotionStatus: 'pending' })
+  const superseded = historyRound('2026-10-10', 95, { promotionStatus: 'superseded' })
+  const held = historyRound('2026-10-11', null, { champion: null, promotionStatus: 'not_required' })
+  const championSnapshot = historySnapshot([held, superseded, pending, inProgress, promoted], { latestRound: inProgress, latestCompletedRound: held })
+  assert.equal(currentChampionRound(championSnapshot)?.roundId, promoted.roundId, 'active, pending, superseded and no-winner rounds cannot replace the reigning champion')
+  assert.equal(currentChampionRound(championSnapshot)?.champion.finalScore, 5.75, 'headline uses winning score instead of a subsequent baseline evaluation')
+  assert.equal(currentChampionRound(historySnapshot([canonical]))?.champion.finalScore, 0, 'zero is a valid winning score')
+  assert.equal(currentChampionRound(historySnapshot([], { latestCompletedRound: promoted }))?.roundId, promoted.roundId, 'include published references outside history')
+  assert.equal(currentChampionRound(historySnapshot([promoted], { latestCompletedRound: { ...promoted, champion: { ...promoted.champion, finalScore: 99 } } }))?.champion.finalScore, 5.75, 'canonical record wins over a stale reference')
+  const missingChampionScore = historyRound('2026-10-12', null)
+  assert.equal(currentChampionRound(historySnapshot([promoted, missingChampionScore]))?.champion.finalScore, null, 'a newer promoted champion with a missing score must not inherit the old champion score')
+  assert.equal(currentChampionRound(historySnapshot([historyRound(null, 99)])), null, 'unknown evaluation dates must not displace the current champion')
+  assert.deepEqual(competitionChampionHistory(championSnapshot).slice(-5).map((point) => point.score), [5.75, null, 90, 95, null], 'history shows published round winners; absent winners and unfinished rounds stay gaps')
+  assert.equal(competitionChampionHistory(championSnapshot).at(-2).promotionStatus, 'superseded', 'history preserves promotion outcome for tooltip context')
 
   const legacySnapshot = normalizeCompetitionSnapshot({
     mode: 'live', network_name: 'finney', netuid: 71, rounds: [{
@@ -302,7 +287,7 @@ try {
   const renderedModule = { exports: {} }
   vm.runInNewContext(ts.transpileModule(component, {
     compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX },
-  }).outputText + '\nexports.BaselineScoreHistory = BaselineScoreHistory; exports.ScoreHistoryTooltip = ScoreHistoryTooltip; exports.RoundSummary = RoundSummary; exports.LatestPublishedBaseline = LatestPublishedBaseline; exports.SubmissionTable = SubmissionTable; exports.PublishedResults = PublishedResults; exports.ScoringAttributionSummary = ScoringAttributionSummary; exports.IcpList = IcpList; exports.CompanyDiagnostics = CompanyDiagnostics; exports.SourcePanel = SourcePanel;', {
+  }).outputText + '\nexports.ValidatorNamesContext = ValidatorNamesContext; exports.ChampionScoreHistory = ChampionScoreHistory; exports.ScoreHistoryTooltip = ScoreHistoryTooltip; exports.RoundSummary = RoundSummary; exports.ChampionSummary = ChampionSummary; exports.SubmissionTable = SubmissionTable; exports.PublishedResults = PublishedResults; exports.ScoringAttributionSummary = ScoringAttributionSummary; exports.IcpList = IcpList; exports.CompanyDiagnostics = CompanyDiagnostics; exports.SourcePanel = SourcePanel;', {
     module: renderedModule, exports: renderedModule.exports,
     require(name) {
       if (name === '@/lib/research-lab-competition') return require(join(outDir, 'research-lab-competition.js'))
@@ -311,6 +296,33 @@ try {
       return require(name)
     },
   })
+  const evaluationRow = (evaluation, status = 'scoring') => normalizeCompetitionSubmissions({ submissions: [{
+    submission_id: 'agent-progress', miner_hotkey: '5miner', status, evaluation,
+  }] })[0]
+  const evaluating = evaluationRow({ state: 'evaluating', validators: [{ hotkey: primaryHotkey, phase: 'scoring' }, { hotkey: yumaHotkey, phase: 'executing' }] })
+  const queued = evaluationRow({ state: 'queued', validators: [] })
+  assert.equal(competitionSubmissionStatusLabel(queued, pendingRound), 'Queued for validation')
+  assert.equal(competitionSubmissionStatusLabel(evaluating, pendingRound), 'Evaluating')
+  assert.equal(competitionSubmissionStatusLabel(evaluationRow({ state: 'finalizing', validators: [] }), pendingRound), 'Finalizing results')
+  for (const evaluation of [null, { state: 'evaluating', validators: [] }, { state: 'queued', validators: [{ hotkey: primaryHotkey, phase: 'scoring' }] }, { state: 'evaluating', validators: [{ hotkey: primaryHotkey, phase: 'unknown' }] }]) {
+    assert.equal(competitionSubmissionStatusLabel(evaluationRow(evaluation), pendingRound), 'Awaiting evaluation update', 'missing or invalid progress must not imply an active assignment')
+  }
+  assert.equal(evaluationRow({ state: 'evaluating', validators: [{ hotkey: primaryHotkey, phase: 'scoring' }] }, 'review_failed').evaluation, null)
+  const validatorNames = normalizeValidatorNames({ names: { [primaryHotkey]: 'Leadpoet', [yumaHotkey]: 'Yuma', ghost: 'Wrong identity' }, hotkeyToUid: { [primaryHotkey]: 0, [yumaHotkey]: 155 } })
+  assert.deepEqual(validatorNames, { [primaryHotkey]: 'Leadpoet', [yumaHotkey]: 'Yuma' })
+  assert.deepEqual(normalizeValidatorNames({ names: { [primaryHotkey]: 'Leadpoet' } }), {})
+  const withNames = (node) => React.createElement(renderedModule.exports.ValidatorNamesContext.Provider, { value: validatorNames }, node)
+  const progressMarkup = renderToStaticMarkup(withNames(React.createElement(renderedModule.exports.SubmissionTable, {
+    submissions: [evaluating, { ...queued, submissionId: 'waiting' }], round: pendingRound, selectedId: null, onSelect() {},
+  })))
+  assert.match(progressMarkup, /Evaluating/)
+  assert.match(progressMarkup, /Scoring · .*Leadpoet/)
+  assert.match(progressMarkup, /Running · .*Yuma/)
+  assert.match(progressMarkup, /Queued for validation/)
+  const namedAttribution = renderToStaticMarkup(withNames(React.createElement(renderedModule.exports.ScoringAttributionSummary, { attribution: attributedResults.scoringAttribution })))
+  assert.match(namedAttribution, /Leadpoet, Yuma/)
+  assert.match(namedAttribution, new RegExp(primaryHotkey), 'full hotkeys remain available in expanded attribution')
+
   const renderSummary = (round) => renderToStaticMarkup(React.createElement(renderedModule.exports.RoundSummary, { round }))
   for (const status of ['open', 'committed', 'stage1', 'stage1_scored', 'stage2', 'scored']) {
     const markup = renderSummary({ ...snapshot.latestCompletedRound, status, publishedAt: null, baseline: null })
@@ -321,17 +333,17 @@ try {
     if (status === 'scored') assert.match(markup, /Publishing results/)
     else if (status !== 'open') assert.match(markup, /Scoring/)
   }
-  const historyMarkup = renderToStaticMarkup(React.createElement(renderedModule.exports.BaselineScoreHistory, { points: history }))
-  assert.match(historyMarkup, /Baseline score over time/)
-  assert.match(historyMarkup, /Published rounds · UTC/)
-  assert.match(historyMarkup, /Gaps have no published score/)
-  const emptyHistoryMarkup = renderToStaticMarkup(React.createElement(renderedModule.exports.BaselineScoreHistory, { points: [] }))
-  assert.match(emptyHistoryMarkup, /No published score history yet/)
-  const onePointMarkup = renderToStaticMarkup(React.createElement(renderedModule.exports.BaselineScoreHistory, { points: [history[0]] }))
-  assert.match(onePointMarkup, /One published score/)
+  const historyMarkup = renderToStaticMarkup(React.createElement(renderedModule.exports.ChampionScoreHistory, { points: history }))
+  assert.match(historyMarkup, /Champion history/)
+  assert.match(historyMarkup, /Past competitions/)
+  assert.match(historyMarkup, /UTC/)
+  const emptyHistoryMarkup = renderToStaticMarkup(React.createElement(renderedModule.exports.ChampionScoreHistory, { points: [] }))
+  assert.match(emptyHistoryMarkup, /No champion scores yet/)
+  const onePointMarkup = renderToStaticMarkup(React.createElement(renderedModule.exports.ChampionScoreHistory, { points: [history[0]] }))
+  assert.match(onePointMarkup, /First published champion/)
   const tooltipMarkup = renderToStaticMarkup(React.createElement(renderedModule.exports.ScoreHistoryTooltip, { active: true, payload: [{ payload: history[0] }] }))
   assert.match(tooltipMarkup, /Evaluation · Sep 5, 2026 · UTC/)
-  assert.match(tooltipMarkup, /Baseline 0\.00 \/100/)
+  assert.match(tooltipMarkup, /Champion 0\.00 \/100/)
   assert.equal(renderToStaticMarkup(React.createElement(renderedModule.exports.ScoreHistoryTooltip, { active: true, payload: [{ payload: history[1] }] })), '', 'a missing point must not expose a zero tooltip')
   const finalMarkup = renderSummary(snapshot.latestCompletedRound)
   const datedRound = {
@@ -342,7 +354,6 @@ try {
   }
   for (const status of ['stage1', 'published']) {
     const markup = renderSummary({ ...datedRound, status })
-    assert.match(markup, /Evaluation day · Oct 6, 2026 · UTC<\/h3>/)
     assert.match(markup, /Submission day<\/div><div[^>]*>Oct 5, 2026 · UTC/)
     assert.match(markup, /Evaluation day<\/div><div[^>]*>Oct 6, 2026 · UTC/)
     assert.doesNotMatch(markup, /Day 0|Day 1/)
@@ -353,9 +364,9 @@ try {
     publicAt: '2027-01-01T00:00:00Z',
   })
   assert.match(rolloverMarkup, /Submission day<\/div><div[^>]*>Dec 31, 2026 · UTC/)
-  assert.match(rolloverMarkup, /Evaluation day · Jan 1, 2027 · UTC<\/h3>/)
+  assert.match(rolloverMarkup, /Evaluation day<\/div><div[^>]*>Jan 1, 2027 · UTC/)
   const historicalMarkup = renderSummary({ ...datedRound, evaluationDate: '2026-10-09', publicAt: '2026-10-09T18:00:00Z' })
-  assert.match(historicalMarkup, /Evaluation day · Oct 9, 2026 · UTC<\/h3>/, 'the API evaluation day must take precedence over any next-day assumption')
+  assert.match(historicalMarkup, /Evaluation day<\/div><div[^>]*>Oct 9, 2026 · UTC/, 'the API evaluation day must take precedence over any next-day assumption')
   const completedBaselineRound = {
     ...activeRound, baseline: { submissionId: 'baseline', minerHotkey: '5baseline', finalScore: 0 },
   }
@@ -365,8 +376,6 @@ try {
   assert.match(renderSummary({ ...completedBaselineRound, status: 'scored' }), /Evaluations complete. Publication pending/)
   assert.match(completedBaselineMarkup, /Pending/)
   assert.doesNotMatch(completedBaselineMarkup, /Awaiting score|No champion was published/)
-  assert.equal(latestPublishedBaselineRound(activeSnapshot, completedBaselineRound), null,
-    'the current completed baseline replaces the older fallback, including a true zero')
   assert.equal(competitionSubmissionStatusLabel({ ...submissions[0], status: 'scored' }, activeRound),
     'Scored · round in progress', 'a completed model must not imply a winner or promotion')
   assert.match(finalMarkup, /Promotion margin · \+1\.00 points/)
@@ -375,12 +384,15 @@ try {
   assert.match(finalMarkup, /0\.00/, 'a published zero baseline is not pending')
   assert.match(renderSummary(snapshot.latestRound), /Cancelled round/)
   assert.doesNotMatch(renderSummary(snapshot.latestRound), /Decision follows completed evaluation/)
-  const publishedBaselineMarkup = renderToStaticMarkup(React.createElement(renderedModule.exports.LatestPublishedBaseline, { round: snapshot.latestCompletedRound }))
-  assert.match(publishedBaselineMarkup, /Latest published baseline/)
-  assert.match(publishedBaselineMarkup, /Public agent/)
-  assert.match(publishedBaselineMarkup, /Evaluation day Sep 5, 2026 · UTC/)
-  assert.match(publishedBaselineMarkup, /arena-2026-09-05/)
-  assert.match(publishedBaselineMarkup, /0\.00/)
+  const championMarkup = renderToStaticMarkup(React.createElement(renderedModule.exports.ChampionSummary, { round: currentChampionRound(championSnapshot) }))
+  assert.match(championMarkup, /Current champion/)
+  assert.match(championMarkup, /5\.75/)
+  assert.match(championMarkup, /Winning score · Oct 7, 2026 · UTC/)
+  assert.doesNotMatch(championMarkup, /99\.00|Baseline score/)
+  const noChampionMarkup = renderToStaticMarkup(React.createElement(renderedModule.exports.ChampionSummary, { round: null }))
+  assert.match(noChampionMarkup, /No promoted champion in published history/)
+  assert.doesNotMatch(noChampionMarkup, />0\.00</)
+  assert.match(renderToStaticMarkup(React.createElement(renderedModule.exports.ScoreHistoryTooltip, { active: true, payload: [{ payload: { ...history[0], promotionStatus: 'superseded' } }] })), /Superseded/)
   for (const promotionStatus of ['pending', 'promoted']) {
     const markup = renderSummary({ ...snapshot.latestCompletedRound, promotionStatus,
       champion: { submissionId: 'winner', minerHotkey: '5winner', finalScore: 51, outcome: 'new_king' } })
@@ -470,7 +482,6 @@ try {
       results: dynamicResult, resultsState: 'available',
     }))
     assert.match(dynamicMarkup, new RegExp(`Public ICPs \\(${count}\\)`))
-    assert.match(dynamicMarkup, new RegExp(`All ${count} ICPs are public`))
     const gatedMarkup = renderToStaticMarkup(React.createElement(renderedModule.exports.PublishedResults, {
       submission: submissions[0], round: dynamicRound, benchmark: null, benchmarkState: 'gated',
       results: dynamicResult, resultsState: 'available',
@@ -690,7 +701,7 @@ try {
   assert.equal(competitionSubmissionStatusLabel(legacyPending, pendingRound), 'Code review unavailable')
   assert.doesNotMatch(competitionSubmissionStatusLabel(legacyPending, pendingRound), /credential|retrying/i, 'legacy generic failures must not invent a cause or retry state')
   assert.equal(competitionSubmissionStatusLabel(reviewingWithStaleError, pendingRound), 'Code review in progress')
-  assert.equal(competitionSubmissionStatusLabel(passedWithStaleError, pendingRound), 'Queued')
+  assert.equal(competitionSubmissionStatusLabel(passedWithStaleError, pendingRound), 'Queued for validation')
   assert.equal(competitionSubmissionEvaluationNotice(passedWithStaleError, pendingRound), null, 'a passed review must ignore an old error document')
 
   const reviewRowsMarkup = renderToStaticMarkup(React.createElement(renderedModule.exports.SubmissionTable, {
@@ -713,7 +724,7 @@ try {
     onSelectFile() {}, onRequest() {},
   }))
   assert.match(reviewSourceMarkup, /Source was not published because this submission was not evaluated/)
-  assert.doesNotMatch(reviewSourceMarkup, /View released source|Source locked|Awaiting source release/)
+  assert.doesNotMatch(reviewSourceMarkup, /View source|Source locked|Awaiting source release/)
 
   // Public September 12 state, reduced to fields needed for status rendering.
   const credentialFixture = JSON.parse(await readFile(resolve('scripts/fixtures/competition-credential-error-20260912.json'), 'utf8'))
@@ -802,11 +813,10 @@ try {
   assert.match(component, /Competition data is temporarily unavailable\. This page will retry automatically\./)
   assert.doesNotMatch(component, /settlement|LabEmissionSplit|\/api\/research-lab\?/)
   assert.match(component, /const selectedRound = roundOptions\[0\] \?\? null/, 'the displayed round must follow the automatic priority order on every refresh')
-  assert.ok(component.indexOf('<LatestPublishedBaseline') < component.indexOf('<RoundSummary'), 'the separate published baseline must appear before the selected round details')
+  assert.ok(component.indexOf('<ChampionSummary') < component.indexOf('<RoundSummary'), 'champion headline is separate from the active round')
   assert.doesNotMatch(component, /selectedRoundId|setSelectedRoundId|onSelectRound|roundOptionLabel|Competition round/, 'manual round selection must remain absent')
   assert.match(component, /Public ICPs \(\$\{benchmark\.benchmarkIcpCount\}\)/)
-  assert.match(component, /Improve the public agent and compete on the same daily ICPs\./)
-  assert.match(component, /All \{icps\.length\} ICPs are public for this round\./)
+  assert.match(component, /Open-source sales intelligence\./)
   assert.doesNotMatch(component, /server-held .* evaluation view/)
   assert.match(component, /response\.status === 403/)
   assert.match(component, /icp\.position/)
@@ -817,7 +827,6 @@ try {
   assert.ok(component.indexOf('if (!selectedSubmissionId || reviewExcluded) return') < component.indexOf('fetchReleasedJson(`/api/research-lab/rounds/${encodeURIComponent(requestedRoundId)}/results/'), 'the review exclusion gate must run before the result request')
   assert.match(component, /Last known submissions are shown below/)
   assert.match(component, /normalized\?\.roundId !== requestedRoundId/)
-  assert.match(component, /Submitted code is frozen for this round\. Released files are read-only\./)
   assert.match(component, /This round was cancelled\. Aggregate and per-ICP scores were not published\./)
   assert.match(component, /This round was cancelled\. Source code was not published\./)
   assert.match(component, /This model’s score and diagnostics appear when its evaluation and cost checks are complete\./)
@@ -850,7 +859,7 @@ try {
   assert.match(codeRoute, /encodeURIComponent\(submissionId\)/)
 
   const shell = await readFile(resolve('src/components/dashboard/DashboardClient.tsx'), 'utf8')
-  assert.match(shell, /label="Open Source Agent Competition"/)
+  assert.match(shell, /label="Competition"/)
   const faq = await readFile(resolve('src/components/dashboard/FAQ.tsx'), 'utf8')
   assert.doesNotMatch(faq, /24.hour|24 hours|keeps the complementary|fixed 10-ICP/i)
 

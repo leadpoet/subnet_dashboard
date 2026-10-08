@@ -86,9 +86,10 @@ const round = {
 }
 const snapshot = { mode: 'live', network_name: 'finney', netuid: 71, latest_round: round, rounds: [round] }
 const baseline = { submission_id: 'baseline', miner_hotkey: '5Baseline', status: 'scoring', is_baseline: true, code: { available: false } }
-const competitor = { submission_id: 'competitor', miner_hotkey: '5Competitor', status: 'scoring', code: { available: false } }
+const competitor = { submission_id: 'competitor', miner_hotkey: '5Competitor', status: 'scoring', evaluation: { state: 'queued', validators: [] }, code: { available: false } }
 let benchmarkGated = true
 const publicResponse = (url) => {
+  if (url.endsWith('/metagraph')) return Response.json({ hotkeyToUid: { '5Validator': 0 }, names: { '5Validator': 'Leadpoet' } })
   if (url.endsWith('/competition')) return Response.json(snapshot)
   const roundId = url.match(/\/rounds\/([^/]+)/)?.[1]
   if (url.endsWith('/submissions')) return Response.json({ round_id: roundId, submissions: [baseline, competitor] })
@@ -127,27 +128,38 @@ try {
 
   // Exercise the actual parent/child refresh cascade and saved visible output.
   await act(async () => { renderer = TestRenderer.create(React.createElement(ResearchLab), rendererOptions) })
-  assert.equal(calls.length, 4)
+  assert.equal(calls.length, 5)
+  assert.equal(count('/metagraph'), 1)
+  assert.match(markup(), /Queued for validation/)
+  const inspectionToggle = () => renderer.root.findAllByType('button').find((button) => typeof button.props['aria-expanded'] === 'boolean')
+  assert.equal(inspectionToggle().props['aria-expanded'], false, 'submission details start collapsed')
+  competitor.evaluation = { state: 'evaluating', validators: [{ hotkey: '5Validator', phase: 'scoring' }] }
   await advance(60_000)
-  assert.equal(calls.length, 8, 'one public polling cycle makes four requests, including the summary')
+  assert.match(markup(), /Evaluating/)
+  assert.match(markup(), /Leadpoet/)
+  assert.equal(calls.length, 9, 'one public polling cycle makes four requests, including the summary')
+  assert.equal(count('/metagraph'), 1, 'validator identity polling is shared and less frequent than progress polling')
   assert.equal(count('/results/baseline'), 2)
   assert.equal(calls.some((url) => url.endsWith('/code')), false, 'source remains on demand')
   await act(async () => { renderer.root.findAllByType('button').find((button) => button.props['aria-pressed'] === false).props.onClick() })
   assert.equal(count('/results/competitor'), 1, 'selecting another submission immediately loads its results')
+  assert.equal(inspectionToggle().props['aria-expanded'], true, 'selecting a submission opens its evaluation and source')
+  await act(async () => { inspectionToggle().props.onClick() })
+  assert.equal(inspectionToggle().props['aria-expanded'], false, 'submission details can be collapsed again')
   const beforeHidden = calls.length
   await setVisibility('hidden')
   await advance(5 * 60_000)
   assert.equal(calls.length, beforeHidden, 'hidden public tabs do no polling')
   benchmarkGated = false
   await setVisibility('visible')
-  assert.equal(calls.length, beforeHidden + 4, 'resuming refreshes each endpoint once')
+  assert.equal(calls.length, beforeHidden + 5, 'resuming refreshes each endpoint once')
   assert.match(markup(), /Public ICP 1/, 'a previously gated benchmark becomes visible after release')
   const beforeInactive = calls.length
   await act(async () => { renderer.update(React.createElement(ResearchLab, { active: false })) })
   await advance(2 * 60_000)
   assert.equal(calls.length, beforeInactive, 'switching to FAQ pauses the kept-mounted competition')
   await act(async () => { renderer.update(React.createElement(ResearchLab, { active: true })) })
-  assert.equal(calls.length, beforeInactive + 4)
+  assert.equal(calls.length, beforeInactive + 5)
   const pending = deferred()
   respond = async (url) => {
     if (url.endsWith('/submissions')) await pending.promise
