@@ -158,7 +158,7 @@ function RoundSummary({ round }: { round: CompetitionRoundSummary }) {
 function ChampionScoreHistory({ points }: { points: CompetitionScoreHistoryPoint[] }) {
   const publishedScores = points.filter((point) => point.score !== null)
   const maxScore = Math.max(0, ...publishedScores.map((point) => point.score ?? 0))
-  const upperBound = maxScore <= 5 ? 5 : maxScore <= 10 ? 10 : Math.min(100, Math.ceil(maxScore / 10) * 10)
+  const upperBound = Math.max(5, Math.ceil((maxScore + Math.max(1, maxScore / 10)) / 5) * 5)
   const ticks = [0, upperBound / 2, upperBound]
   return <div className="min-w-0" role="region" aria-label="Champion score history">
     <div className="flex flex-wrap items-baseline justify-between gap-2">
@@ -173,7 +173,7 @@ function ChampionScoreHistory({ points }: { points: CompetitionScoreHistoryPoint
             <XAxis dataKey="timestamp" type="number" scale="time" domain={points.length === 1 ? [points[0].timestamp - 43_200_000, points[0].timestamp + 43_200_000] : ['dataMin', 'dataMax']} ticks={historyTicks(points)} tickFormatter={formatHistoryDate} stroke="var(--line)" tick={{ fill: 'var(--muted-2)', fontSize: 10 }} tickLine={false} axisLine={false} minTickGap={25} tickMargin={10} />
             <YAxis domain={[0, upperBound]} ticks={ticks} tick={{ fill: 'var(--muted-2)', fontSize: 10 }} tickLine={false} axisLine={false} width={30} tickMargin={8} />
             <Tooltip content={<ScoreHistoryTooltip />} cursor={{ stroke: 'var(--line-3)', strokeDasharray: '3 3' }} />
-            <Line type="linear" dataKey="score" name="Champion score" stroke="var(--brand)" strokeWidth={2} connectNulls={false} dot={{ r: 3, strokeWidth: 0, fill: 'var(--brand)' }} activeDot={{ r: 5, stroke: 'var(--surface)', strokeWidth: 2 }} isAnimationActive={false} />
+            <Line type="linear" dataKey="score" name="Champion score" stroke="var(--brand)" strokeWidth={2} connectNulls dot={{ r: 3, strokeWidth: 0, fill: 'var(--brand)' }} activeDot={{ r: 5, stroke: 'var(--surface)', strokeWidth: 2 }} isAnimationActive={false} />
           </LineChart>
         </ResponsiveContainer>
       </div>
