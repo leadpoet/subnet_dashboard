@@ -537,12 +537,14 @@ function ScoringAttributionSummary({ attribution, loading = false }: { attributi
     </summary>
     <div className="space-y-3 pb-4">{attribution?.validators.map((validator) => {
       const codeVersions = attribution.codeVersions?.filter((version) => version.validatorHotkey === validator.hotkey) ?? []
+      const missingCommitCount = Math.max(0, validator.icpCount - new Set(codeVersions.flatMap((version) => version.icpPositions)).size)
       return <div key={validator.hotkey}>
       <div className="text-[12px] leading-relaxed text-[var(--platinum)]"><ValidatorIdentity hotkey={validator.hotkey} full /></div>
       <div className="mt-1 text-[11px] text-[var(--muted)]">{formatIcpCount(validator.icpCount)} · {validator.reusedIcpCount} reused</div>
       <div className="mt-3 space-y-1 text-[11px] text-[var(--muted)]">
         <p className="mb-2 text-[10px] text-[var(--muted-2)]">Validator code commits</p>
         {codeVersions.length ? codeVersions.map((version) => <p className="break-all" key={`${version.commit}-${version.workingTree}`}><ValidatorCodeVersion commit={version.commit} workingTree={version.workingTree} full /> · {formatIcpCount(version.icpPositions.length)}</p>) : <p>Commit not recorded for accepted judgments.</p>}
+        {codeVersions.length > 0 && missingCommitCount > 0 ? <p>Commit not recorded for {formatIcpCount(missingCommitCount)}.</p> : null}
       </div>
     </div>})}
     {!loading && attribution ? <p className="text-[11px] text-[var(--muted)]">Unattributed ICPs {attribution.unattributedIcpCount}</p> : <p className="text-[11px] text-[var(--muted)]">{loading ? 'Loading validator attribution…' : 'Validator attribution is unavailable for this result.'}</p>}</div>
