@@ -300,7 +300,7 @@ try {
   const renderedModule = { exports: {} }
   vm.runInNewContext(ts.transpileModule(component, {
     compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX },
-  }).outputText + '\nexports.ValidatorNamesContext = ValidatorNamesContext; exports.ChampionScoreHistory = ChampionScoreHistory; exports.ScoreHistoryTooltip = ScoreHistoryTooltip; exports.RoundSummary = RoundSummary; exports.ChampionSummary = ChampionSummary; exports.SubmissionTable = SubmissionTable; exports.PublishedResults = PublishedResults; exports.ScoringAttributionSummary = ScoringAttributionSummary; exports.IcpList = IcpList; exports.CompanyDiagnostics = CompanyDiagnostics; exports.SourcePanel = SourcePanel;', {
+  }).outputText + '\nexports.ValidatorNamesContext = ValidatorNamesContext; exports.ChampionScoreHistory = ChampionScoreHistory; exports.ScoreHistoryTooltip = ScoreHistoryTooltip; exports.RoundSummary = RoundSummary; exports.ChampionSummary = ChampionSummary; exports.SubmissionTable = SubmissionTable; exports.PublishedResults = PublishedResults; exports.ScoringAttributionSummary = ScoringAttributionSummary; exports.IcpList = IcpList; exports.CompanyDiagnostics = CompanyDiagnostics; exports.SourcePanel = SourcePanel; exports.CompetitionActivity = CompetitionActivity; exports.EvaluationRunSummary = EvaluationRunSummary; exports.filterSubmissions = filterSubmissions;', {
     module: renderedModule, exports: renderedModule.exports,
     require(name) {
       if (name === '@/lib/research-lab-competition') return require(join(outDir, 'research-lab-competition.js'))
@@ -321,6 +321,35 @@ try {
     assert.equal(competitionSubmissionStatusLabel(evaluationRow(evaluation), pendingRound), 'In evaluation', 'missing or invalid progress must not imply an active assignment')
   }
   assert.equal(evaluationRow({ state: 'evaluating', validators: [{ hotkey: primaryHotkey, phase: 'scoring' }] }, 'review_failed').evaluation, null)
+  const taskCounts = { queued: 2, active: 1, completed: 4, failed: 1, retrying: 1 }
+  const evaluationVersion = { validator_hotkey: primaryHotkey, phase: 'executing', commit: 'b'.repeat(40), working_tree: 'clean' }
+  const versionedEvaluation = evaluationRow({ state: 'evaluating', counts: taskCounts, validators: [{ hotkey: primaryHotkey, phase: 'executing', commit: 'b'.repeat(40), working_tree: 'dirty' }], code_versions: [evaluationVersion] })
+  assert.deepEqual(versionedEvaluation.evaluation.counts, taskCounts)
+  assert.equal(versionedEvaluation.evaluation.validators[0].commit, 'b'.repeat(40))
+  assert.equal(versionedEvaluation.evaluation.validators[0].workingTree, 'dirty')
+  assert.deepEqual(versionedEvaluation.evaluation.codeVersions, [{ validatorHotkey: primaryHotkey, phase: 'executing', commit: 'b'.repeat(40), workingTree: 'clean' }])
+  const multiVersionValidators = [
+    { hotkey: primaryHotkey, phase: 'executing', commit: 'b'.repeat(40), working_tree: 'clean' },
+    { hotkey: primaryHotkey, phase: 'executing', commit: 'c'.repeat(40), working_tree: 'clean' },
+    { hotkey: primaryHotkey, phase: 'executing', commit: 'c'.repeat(40), working_tree: 'dirty' },
+    { hotkey: yumaHotkey, phase: 'scoring', commit: null, working_tree: 'unknown' },
+  ]
+  const multiVersionEvaluation = evaluationRow({ state: 'evaluating', validators: multiVersionValidators })
+  assert.equal(multiVersionEvaluation.evaluation.state, 'evaluating', 'workers on multiple commits remain active')
+  assert.equal(multiVersionEvaluation.evaluation.validators.length, 4)
+  assert.equal(evaluationRow({ state: 'evaluating', validators: [...multiVersionValidators, multiVersionValidators[0]] }).evaluation, null, 'exact duplicate version tuples remain invalid')
+  assert.equal(competitionSubmissionStatusLabel(evaluationRow({ state: 'unavailable', validators: [] }), pendingRound), 'Evaluation status unavailable')
+  const completedEvaluation = evaluationRow({ state: 'completed', validators: [], counts: { ...taskCounts, active: 0, retrying: 0 }, code_versions: [evaluationVersion] }, 'scored')
+  assert.equal(completedEvaluation.evaluation.state, 'completed', 'completed historical submissions retain their own run versions')
+  assert.equal(evaluationRow({ state: 'failed', validators: [] }, 'scoring_failed').evaluation.state, 'failed')
+  assert.equal(competitionSubmissionStatusLabel(evaluationRow({ state: 'retrying', validators: [] }), pendingRound), 'Evaluation retrying')
+  for (const counts of [{ ...taskCounts, active: -1 }, { ...taskCounts, queued: '2' }, { ...taskCounts, retrying: 0.5 }, { active: 1 }]) {
+    assert.equal(evaluationRow({ state: 'evaluating', validators: [{ hotkey: primaryHotkey, phase: 'scoring' }], counts }).evaluation.counts, undefined, 'invalid optional task counts must not discard confirmed assignments')
+  }
+  const unknownVersion = evaluationRow({ state: 'completed', validators: [], code_versions: [{ ...evaluationVersion, commit: 'main', working_tree: 'unexpected' }] }, 'scored')
+  assert.equal(unknownVersion.evaluation.codeVersions[0].commit, null)
+  assert.equal(unknownVersion.evaluation.codeVersions[0].workingTree, 'unknown')
+  assert.deepEqual(evaluationRow({ state: 'completed', validators: [], code_versions: [{ ...evaluationVersion, phase: 'unknown' }] }, 'scored').evaluation.codeVersions, [])
   const validatorNames = normalizeValidatorNames({ names: { [primaryHotkey]: 'Leadpoet', [yumaHotkey]: 'Yuma', ghost: 'Wrong identity' }, hotkeyToUid: { [primaryHotkey]: 0, [yumaHotkey]: 155 } })
   assert.deepEqual(validatorNames, { [primaryHotkey]: 'Leadpoet', [yumaHotkey]: 'Yuma' })
   assert.deepEqual(normalizeValidatorNames({ names: { [primaryHotkey]: 'Leadpoet' } }), {})
@@ -332,8 +361,46 @@ try {
   assert.match(progressMarkup, /Scoring · .*Leadpoet/)
   assert.match(progressMarkup, /Running · .*Yuma/)
   assert.match(progressMarkup, /Queued for validation/)
+  assert.match(progressMarkup, /Commit not recorded/, 'legacy progress must not infer the current validator version')
+  const activeVersionMarkup = renderToStaticMarkup(withNames(React.createElement(renderedModule.exports.SubmissionTable, {
+    submissions: [versionedEvaluation], round: pendingRound, selectedId: null, onSelect() {},
+  })))
+  assert.match(activeVersionMarkup, /local modifications/)
+  assert.ok(activeVersionMarkup.includes(`/commit/${'b'.repeat(40)}`))
+  assert.match(activeVersionMarkup, /retrying tasks/)
+  const multiVersionMarkup = renderToStaticMarkup(withNames(React.createElement(renderedModule.exports.SubmissionTable, {
+    submissions: [multiVersionEvaluation], round: pendingRound, selectedId: null, onSelect() {},
+  })))
+  assert.match(multiVersionMarkup, /Evaluating/)
+  assert.match(multiVersionMarkup, /bbbbbbbbbbbb/)
+  assert.match(multiVersionMarkup, /cccccccccccc/)
+  assert.match(multiVersionMarkup, /local modifications/)
+  const multiVersionActivity = renderToStaticMarkup(withNames(React.createElement(renderedModule.exports.CompetitionActivity, { submissions: [multiVersionEvaluation] })))
+  assert.equal((multiVersionActivity.match(/Leadpoet/g) ?? []).length, 1, 'the activity summary shows each validator identity once per phase')
+  const activityMarkup = renderToStaticMarkup(withNames(React.createElement(renderedModule.exports.CompetitionActivity, {
+    submissions: [versionedEvaluation, queued, completedEvaluation],
+  })))
+  assert.match(activityMarkup, /Active models/)
+  assert.match(activityMarkup, /Active validators/)
+  assert.match(activityMarkup, /Queued models/)
+  assert.match(activityMarkup, /Retrying models/)
+  assert.match(activityMarkup, /Leadpoet/)
+  const archivedVersionMarkup = renderToStaticMarkup(withNames(React.createElement(renderedModule.exports.EvaluationRunSummary, { submission: completedEvaluation })))
+  assert.match(archivedVersionMarkup, /Execution/)
+  assert.match(archivedVersionMarkup, new RegExp('b'.repeat(40)))
+  assert.match(archivedVersionMarkup, /clean checkout/)
+  assert.match(archivedVersionMarkup, /original judgments/)
+  assert.match(archivedVersionMarkup, /4 completed/)
+  const unknownVersionMarkup = renderToStaticMarkup(React.createElement(renderedModule.exports.EvaluationRunSummary, { submission: unknownVersion }))
+  assert.match(unknownVersionMarkup, /Commit not recorded/)
+  const missingVersionMarkup = renderToStaticMarkup(React.createElement(renderedModule.exports.EvaluationRunSummary, { submission: { ...completedEvaluation, evaluation: null } }))
+  assert.match(missingVersionMarkup, /Evaluation run versions were not recorded/)
+  const filterRows = [versionedEvaluation, queued, completedEvaluation, evaluationRow({ state: 'failed', validators: [] }, 'scoring_failed')]
+  assert.deepEqual(renderedModule.exports.filterSubmissions(filterRows, '', 'retrying').map((row) => row.status), ['scoring'])
+  assert.deepEqual(renderedModule.exports.filterSubmissions(filterRows, '', 'failed').map((row) => row.status), ['scoring_failed'])
+  assert.deepEqual(renderedModule.exports.filterSubmissions(filterRows, '', 'scored').map((row) => row.status), ['scored'])
   const namedAttribution = renderToStaticMarkup(withNames(React.createElement(renderedModule.exports.ScoringAttributionSummary, { attribution: attributedResults.scoringAttribution })))
-  assert.match(namedAttribution, /Leadpoet, Yuma/)
+  assert.match(namedAttribution, /Leadpoet \(5FNVgRnrx…xEBLo9\), Yuma \(5Chnr6Y72…LmU4BW\)/)
   assert.match(namedAttribution, new RegExp(primaryHotkey), 'full hotkeys remain available in expanded attribution')
 
   const renderSummary = (round) => renderToStaticMarkup(React.createElement(renderedModule.exports.RoundSummary, { round }))
@@ -446,15 +513,16 @@ try {
   assert.match(attributionSummaryMarkup, /12 ICPs · 3 reused/)
   assert.match(attributionSummaryMarkup, /7 ICPs · 1 reused/)
   assert.match(attributionSummaryMarkup, /Unattributed ICPs 1/)
-  assert.doesNotMatch(attributionSummaryMarkup, /Validator code commits|not recorded/)
+  assert.match(attributionSummaryMarkup, /Commit not recorded for accepted judgments/)
   for (const workingTree of ['unknown', 'clean', 'dirty']) {
     const codeVersionMarkup = renderToStaticMarkup(React.createElement(renderedModule.exports.ScoringAttributionSummary, {
       attribution: withVersions([{ ...version, working_tree: workingTree }]).scoringAttribution,
     }))
     assert.match(codeVersionMarkup, /Validator code commits/)
     assert.ok(codeVersionMarkup.includes(`href="https://github.com/leadpoet/leadpoet/commit/${version.commit}"`))
-    assert.doesNotMatch(codeVersionMarkup, /not recorded/)
+    assert.equal((codeVersionMarkup.match(/Commit not recorded for accepted judgments/g) ?? []).length, 1, 'the second validator still has no recorded commit')
     assert.equal(codeVersionMarkup.includes('local modifications'), workingTree === 'dirty')
+    assert.equal(codeVersionMarkup.includes('checkout state unknown'), workingTree === 'unknown')
   }
   const legacyAttributionMarkup = renderToStaticMarkup(React.createElement(renderedModule.exports.ScoringAttributionSummary, {
     attribution: null,
