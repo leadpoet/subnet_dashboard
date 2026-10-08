@@ -524,6 +524,18 @@ try {
     assert.equal(codeVersionMarkup.includes('local modifications'), workingTree === 'dirty')
     assert.equal(codeVersionMarkup.includes('checkout state unknown'), workingTree === 'unknown')
   }
+  const renderCommitCoverage = (positions) => renderToStaticMarkup(React.createElement(renderedModule.exports.ScoringAttributionSummary, {
+    attribution: {
+      validators: [{ hotkey: primaryHotkey, icpCount: 10, reusedIcpCount: 2 }],
+      icps: [], unattributedIcpCount: 0,
+      codeVersions: positions.map((icpPositions, index) => ({ validatorHotkey: primaryHotkey, commit: String(index + 1).repeat(40), workingTree: 'clean', icpPositions })),
+    },
+  }))
+  assert.match(renderCommitCoverage([[0, 1, 2, 3, 4, 5, 6, 7]]), /Commit not recorded for 2 ICPs\./, 'partial historical commit coverage must be explicit')
+  const overlappingCommitCoverage = renderCommitCoverage([[0, 1, 2, 3, 4], [3, 4, 5, 6, 7]])
+  assert.match(overlappingCommitCoverage, /Commit not recorded for 2 ICPs\./, 'overlapping commit positions count once')
+  assert.doesNotMatch(overlappingCommitCoverage, /Commit not recorded for accepted judgments/)
+  assert.doesNotMatch(renderCommitCoverage([[0, 1, 2, 3, 4, 5, 6, 7, 8, 9], [0, 1]]), /Commit not recorded/, 'complete union coverage must not show a missing commit count')
   const legacyAttributionMarkup = renderToStaticMarkup(React.createElement(renderedModule.exports.ScoringAttributionSummary, {
     attribution: null,
   }))
