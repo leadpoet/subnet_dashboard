@@ -172,6 +172,39 @@ try {
   await act(async () => { pending.resolve() })
   await unmount()
 
+  // Live counts, task retries, and recorded run versions advance with each poll.
+  const taskCounts = { queued: 0, active: 0, completed: 0, failed: 0, retrying: 2 }
+  competitor.evaluation = { state: 'retrying', validators: [], counts: taskCounts, code_versions: [] }
+  respond = publicResponse
+  await act(async () => { renderer = TestRenderer.create(React.createElement(RoundWorkspace, { round: normalizedRound, active: true }), rendererOptions) })
+  assert.match(markup(), /Evaluation retrying/)
+  await act(async () => { renderer.root.findByType('select').props.onChange({ target: { value: 'retrying' } }) })
+  assert.match(markup(), /competitor/)
+  competitor.evaluation = { state: 'evaluating', validators: [{ hotkey: '5Validator', phase: 'executing', commit: 'c'.repeat(40), working_tree: 'clean' }], counts: { ...taskCounts, active: 1, retrying: 1 }, code_versions: [{ validator_hotkey: '5Validator', phase: 'executing', commit: 'c'.repeat(40), working_tree: 'clean' }] }
+  await advance(60_000)
+  assert.match(markup(), /Running/)
+  assert.match(markup(), /cccccccccccc/)
+  assert.match(markup(), /retrying tasks/)
+  competitor.evaluation = { state: 'failed', validators: [], counts: { ...taskCounts, failed: 2, retrying: 0 }, code_versions: competitor.evaluation.code_versions }
+  await advance(60_000)
+  assert.match(markup(), /No miners match these filters/)
+  await act(async () => { renderer.root.findByType('select').props.onChange({ target: { value: 'failed' } }) })
+  assert.match(markup(), /Evaluation failed/)
+  competitor.status = 'scored'
+  competitor.evaluation = { ...competitor.evaluation, state: 'completed', counts: { ...taskCounts, completed: 2, retrying: 0 } }
+  await advance(60_000)
+  await act(async () => { renderer.root.findByType('select').props.onChange({ target: { value: 'scored' } }) })
+  assert.match(markup(), /Scored/)
+  await act(async () => { renderer.root.findAllByType('button').find((button) => button.props.title === 'competitor').props.onClick() })
+  assert.match(markup(), /Submission · /)
+  assert.match(markup(), /Miner hotkey · /)
+  assert.match(markup(), /Evaluation run versions/)
+  assert.match(markup(), new RegExp('c'.repeat(40)))
+  assert.equal(calls.some((url) => url.endsWith('/code')), false)
+  await unmount()
+  competitor.status = 'scoring'
+  competitor.evaluation = { state: 'evaluating', validators: [{ hotkey: '5Validator', phase: 'scoring' }] }
+
   // A new round still starts fetching immediately and ignores the old request.
   const oldRound = deferred()
   respond = async (url) => {
@@ -205,6 +238,23 @@ try {
   assert.match(markup(), /Submission details are unavailable/)
   assert.equal(count('/results/baseline'), 0)
   await unmount()
+
+  // The opened historical evaluation refreshes its own model's run metadata.
+  competitor.status = 'scored'
+  competitor.evaluation = { state: 'completed', validators: [], counts: { queued: 0, active: 0, completed: 2, failed: 0, retrying: 0 }, code_versions: [{ validator_hotkey: '5HistoricalValidator', phase: 'scoring', commit: 'd'.repeat(40), working_tree: 'unknown' }] }
+  await act(async () => { renderer = TestRenderer.create(React.createElement(RoundWorkspace, { round: { ...normalizedRound, status: 'published' }, active: true, inspectionOnly: true, initialSubmissionId: 'competitor' }), rendererOptions) })
+  assert.match(markup(), /5HistoricalValidator/)
+  assert.match(markup(), new RegExp('d'.repeat(40)))
+  assert.match(markup(), /checkout state unknown/)
+  const historicalResultReads = count('/results/competitor')
+  competitor.evaluation.code_versions[0].commit = 'e'.repeat(40)
+  await advance(60_000)
+  assert.match(markup(), new RegExp('e'.repeat(40)))
+  assert.doesNotMatch(markup(), new RegExp('d'.repeat(40)))
+  assert.equal(count('/results/competitor'), historicalResultReads + 1, 'historical selected results refresh with submissions')
+  await unmount()
+  competitor.status = 'scoring'
+  competitor.evaluation = { state: 'evaluating', validators: [{ hotkey: '5Validator', phase: 'scoring' }] }
 
   const oldHistory = deferred()
   respond = async (url) => {

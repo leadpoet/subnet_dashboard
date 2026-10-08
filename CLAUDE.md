@@ -1,3 +1,17 @@
+## Scoped production authorization: October 8 evaluation dashboard
+
+The user authorized exposing live and historical Arena evaluation progress,
+validator hotkeys and recorded validator source commits on subnet_dashboard.
+Use existing claims, runs, results and trajectories; add only narrow public
+projections and metadata persistence if needed. Authority includes protected
+read-only production inspection, focused tests, exact committed migrations,
+safe push/merge, canonical deployment, and read-only Sentry and OnePatch checks.
+Preserve scoring, assignments, round lifecycle, champion selection, private
+model-code and ICP disclosure, accepted data and concurrent work. No new
+tracking system, fabricated runs, forced failure or paid rerun is authorized
+solely to demonstrate dashboard states. Authority ends after live and historical
+rendered verification.
+
 # Scoped authorization: October 6 score history and simpler dashboard
 
 The user authorized a score-over-time chart and less repeated dashboard text,

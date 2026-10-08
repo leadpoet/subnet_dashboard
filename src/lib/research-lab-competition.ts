@@ -56,8 +56,10 @@ export type CompetitionSubmission = {
 }
 
 export type CompetitionEvaluation = {
-  state: 'queued' | 'evaluating' | 'finalizing'
-  validators: Array<{ hotkey: string; phase: 'executing' | 'scoring' }>
+  state: 'queued' | 'evaluating' | 'retrying' | 'completed' | 'failed' | 'finalizing' | 'unavailable'
+  validators: Array<{ hotkey: string; phase: 'executing' | 'scoring'; commit?: string | null; workingTree?: 'clean' | 'dirty' | 'unknown' }>
+  counts?: { queued: number; active: number; completed: number; failed: number; retrying: number }
+  codeVersions?: Array<{ validatorHotkey: string; phase: 'executing' | 'scoring'; commit: string | null; workingTree: 'clean' | 'dirty' | 'unknown' }>
 }
 
 export function normalizeValidatorNames(value: unknown): Record<string, string> {
@@ -72,19 +74,40 @@ export function normalizeValidatorNames(value: unknown): Record<string, string> 
 function normalizeEvaluation(value: unknown): CompetitionEvaluation | null {
   const source = record(value)
   const state = source?.state
-  if (!source || (state !== 'queued' && state !== 'evaluating' && state !== 'finalizing') || !Array.isArray(source.validators)) return null
+  if (!source || !['queued', 'evaluating', 'retrying', 'completed', 'failed', 'finalizing', 'unavailable'].includes(text(state)) || !Array.isArray(source.validators)) return null
   const validators: CompetitionEvaluation['validators'] = []
   for (const value of source.validators) {
     const row = record(value)
     const hotkey = text(row?.hotkey)
     const phase = text(row?.phase)
-    if (!hotkey || (phase !== 'executing' && phase !== 'scoring')) return null
-    if (validators.some((item) => item.hotkey === hotkey && item.phase === phase)) return null
-    validators.push({ hotkey, phase })
+    if (!row || !hotkey || (phase !== 'executing' && phase !== 'scoring')) return null
+    const version = Object.hasOwn(row, 'commit') || Object.hasOwn(row, 'working_tree')
+      ? { commit: validatorCommit(row?.commit), workingTree: validatorWorkingTree(row?.working_tree) } : {}
+    if (validators.some((item) => item.hotkey === hotkey && item.phase === phase
+      && (item.commit ?? null) === (version.commit ?? null)
+      && (item.workingTree ?? 'unknown') === (version.workingTree ?? 'unknown'))) return null
+    validators.push({ hotkey, phase, ...version })
   }
   if ((state === 'evaluating') !== (validators.length > 0)) return null
-  return { state, validators }
+  const evaluation: CompetitionEvaluation = { state: state as CompetitionEvaluation['state'], validators }
+  const counts = record(source.counts)
+  if (counts && ['queued', 'active', 'completed', 'failed', 'retrying'].every((key) => Number.isSafeInteger(counts[key]) && integer(counts[key]) !== null)) {
+    evaluation.counts = { queued: Number(counts.queued), active: Number(counts.active), completed: Number(counts.completed), failed: Number(counts.failed), retrying: Number(counts.retrying) }
+  }
+  if (Array.isArray(source.code_versions)) {
+    evaluation.codeVersions = source.code_versions.flatMap((value) => {
+      const row = record(value)
+      const validatorHotkey = text(row?.validator_hotkey)
+      const phase = row?.phase
+      if (!validatorHotkey || (phase !== 'executing' && phase !== 'scoring')) return []
+      return [{ validatorHotkey, phase, commit: validatorCommit(row?.commit), workingTree: validatorWorkingTree(row?.working_tree) }]
+    })
+  }
+  return evaluation
 }
+
+function validatorCommit(value: unknown): string | null { const commit = text(value); return /^[a-f0-9]{40}$/.test(commit) ? commit : null }
+function validatorWorkingTree(value: unknown): 'clean' | 'dirty' | 'unknown' { return value === 'clean' || value === 'dirty' ? value : 'unknown' }
 
 export type CompetitionCodeReview = {
   status: string | null
@@ -282,7 +305,7 @@ export function normalizeCompetitionSubmissions(value: unknown): CompetitionSubm
       isBaseline: row.is_baseline === true,
       status,
       failureReason: row.failure_reason === 'credential_error' ? 'credential_error' as const : null,
-      evaluation: !reviewExcluded && status === 'scoring' ? normalizeEvaluation(row.evaluation) : null,
+      evaluation: !reviewExcluded ? normalizeEvaluation(row.evaluation) : null,
       submittedAt: nullableText(row.submitted_at),
       stage1Score: reviewExcluded ? null : score(row.stage1_score),
       finalScore: reviewExcluded ? null : score(row.final_score),
@@ -533,6 +556,10 @@ export function competitionSubmissionStatusLabel(
     if (submission.evaluation?.state === 'queued') return 'Queued for validation'
     if (submission.evaluation?.state === 'evaluating') return 'Evaluating'
     if (submission.evaluation?.state === 'finalizing') return 'Finalizing results'
+    if (submission.evaluation?.state === 'retrying') return 'Evaluation retrying'
+    if (submission.evaluation?.state === 'failed') return 'Evaluation failed'
+    if (submission.evaluation?.state === 'completed') return 'Evaluation complete · finalizing'
+    if (submission.evaluation?.state === 'unavailable') return 'Evaluation status unavailable'
     return 'In evaluation'
   }
   return humanizeStatus(submission.status)
