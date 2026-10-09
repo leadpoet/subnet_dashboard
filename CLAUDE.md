@@ -1,3 +1,10 @@
+## Scoped production authorization: October 9 baseline-first table
+
+The user authorized showing the baseline first in the dashboard submissions
+list, with focused checks, safe push/merge, normal dashboard deployment and live
+browser verification. Preserve filters, miner ordering, row data, pagination,
+scoring, evaluation order and concurrent work. Authority ends after validation.
+
 ## Scoped production authorization: October 9 dashboard cleanup and failure audit
 
 The user authorized removal of the duplicate live activity summary and checkout

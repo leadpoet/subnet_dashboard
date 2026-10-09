@@ -380,7 +380,7 @@ function filterSubmissions(submissions: CompetitionSubmission[], query: string, 
     if (status === 'review') return submission.status === 'review_failed' || ['pending', 'running', 'in_progress', 'error'].includes(submission.codeReview.status ?? '')
     if (status === 'scored') return submission.evaluation?.state === 'completed' || ['scored', 'champion'].includes(submission.status)
     return true
-  })
+  }).sort((left, right) => Number(right.isBaseline) - Number(left.isBaseline))
 }
 
 function isSubmissionRetrying(submission: CompetitionSubmission) {

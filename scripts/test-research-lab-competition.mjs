@@ -433,6 +433,15 @@ try {
   assert.deepEqual(renderedModule.exports.filterSubmissions(filterRows, '', 'retrying').map((row) => row.status), ['scoring'])
   assert.deepEqual(renderedModule.exports.filterSubmissions(filterRows, '', 'failed').map((row) => row.status), ['scoring_failed'])
   assert.deepEqual(renderedModule.exports.filterSubmissions(filterRows, '', 'scored').map((row) => row.status), ['scored'])
+  const baselineRow = { ...completedEvaluation, submissionId: 'baseline-round', isBaseline: true }
+  const rowsWithBaselineLast = [...filterRows, baselineRow]
+  const orderedRows = renderedModule.exports.filterSubmissions(rowsWithBaselineLast, '', 'all')
+  assert.equal(orderedRows[0], baselineRow, 'the baseline is first before table pagination')
+  assert.deepEqual(orderedRows.slice(1), filterRows, 'miner order and row data remain unchanged')
+  assert.equal(rowsWithBaselineLast.at(-1), baselineRow, 'display ordering must not mutate the source list')
+  assert.deepEqual(renderedModule.exports.filterSubmissions(rowsWithBaselineLast, '', 'failed'),
+    renderedModule.exports.filterSubmissions(filterRows, '', 'failed'), 'the baseline must still match the selected filter')
+  assert.deepEqual(renderedModule.exports.filterSubmissions(rowsWithBaselineLast, 'baseline-round', 'all'), [baselineRow])
   const namedAttribution = renderToStaticMarkup(withNames(React.createElement(renderedModule.exports.ScoringAttributionSummary, { attribution: attributedResults.scoringAttribution })))
   assert.match(namedAttribution, /Leadpoet \(5FNVgRnrx…xEBLo9\), Yuma \(5Chnr6Y72…LmU4BW\)/)
   assert.match(namedAttribution, new RegExp(primaryHotkey), 'full hotkeys remain available in expanded attribution')
