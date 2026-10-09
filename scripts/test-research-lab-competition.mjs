@@ -300,7 +300,7 @@ try {
   const renderedModule = { exports: {} }
   vm.runInNewContext(ts.transpileModule(component, {
     compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX },
-  }).outputText + '\nexports.ValidatorNamesContext = ValidatorNamesContext; exports.ChampionScoreHistory = ChampionScoreHistory; exports.ScoreHistoryTooltip = ScoreHistoryTooltip; exports.RoundSummary = RoundSummary; exports.ChampionSummary = ChampionSummary; exports.SubmissionTable = SubmissionTable; exports.PublishedResults = PublishedResults; exports.ScoringAttributionSummary = ScoringAttributionSummary; exports.IcpList = IcpList; exports.CompanyDiagnostics = CompanyDiagnostics; exports.SourcePanel = SourcePanel; exports.CompetitionActivity = CompetitionActivity; exports.EvaluationRunSummary = EvaluationRunSummary; exports.filterSubmissions = filterSubmissions;', {
+  }).outputText + '\nexports.ValidatorNamesContext = ValidatorNamesContext; exports.ChampionScoreHistory = ChampionScoreHistory; exports.ScoreHistoryTooltip = ScoreHistoryTooltip; exports.RoundSummary = RoundSummary; exports.ChampionSummary = ChampionSummary; exports.SubmissionTable = SubmissionTable; exports.PublishedResults = PublishedResults; exports.ScoringAttributionSummary = ScoringAttributionSummary; exports.IcpList = IcpList; exports.CompanyDiagnostics = CompanyDiagnostics; exports.SourcePanel = SourcePanel; exports.EvaluationRunSummary = EvaluationRunSummary; exports.filterSubmissions = filterSubmissions;', {
     module: renderedModule, exports: renderedModule.exports,
     require(name) {
       if (name === '@/lib/research-lab-competition') return require(join(outDir, 'research-lab-competition.js'))
@@ -361,30 +361,20 @@ try {
   assert.match(progressMarkup, /Scoring · .*Leadpoet/)
   assert.match(progressMarkup, /Running · .*Yuma/)
   assert.match(progressMarkup, /Queued for validation/)
-  assert.match(progressMarkup, /Commit not recorded/, 'legacy progress must not infer the current validator version')
+  assert.doesNotMatch(progressMarkup, /Commit not recorded|checkout state unknown/, 'live rows show status and validator, without missing technical metadata')
   const activeVersionMarkup = renderToStaticMarkup(withNames(React.createElement(renderedModule.exports.SubmissionTable, {
     submissions: [versionedEvaluation], round: pendingRound, selectedId: null, onSelect() {},
   })))
-  assert.match(activeVersionMarkup, /local modifications/)
-  assert.ok(activeVersionMarkup.includes(`/commit/${'b'.repeat(40)}`))
+  assert.doesNotMatch(activeVersionMarkup, /local modifications|\/commit\//)
+  assert.match(activeVersionMarkup, /Running · .*Leadpoet/)
   assert.match(activeVersionMarkup, /retrying tasks/)
   const multiVersionMarkup = renderToStaticMarkup(withNames(React.createElement(renderedModule.exports.SubmissionTable, {
     submissions: [multiVersionEvaluation], round: pendingRound, selectedId: null, onSelect() {},
   })))
   assert.match(multiVersionMarkup, /Evaluating/)
-  assert.match(multiVersionMarkup, /bbbbbbbbbbbb/)
-  assert.match(multiVersionMarkup, /cccccccccccc/)
-  assert.match(multiVersionMarkup, /local modifications/)
-  const multiVersionActivity = renderToStaticMarkup(withNames(React.createElement(renderedModule.exports.CompetitionActivity, { submissions: [multiVersionEvaluation] })))
-  assert.equal((multiVersionActivity.match(/Leadpoet/g) ?? []).length, 1, 'the activity summary shows each validator identity once per phase')
-  const activityMarkup = renderToStaticMarkup(withNames(React.createElement(renderedModule.exports.CompetitionActivity, {
-    submissions: [versionedEvaluation, queued, completedEvaluation],
-  })))
-  assert.match(activityMarkup, /Active models/)
-  assert.match(activityMarkup, /Active validators/)
-  assert.match(activityMarkup, /Queued models/)
-  assert.match(activityMarkup, /Retrying models/)
-  assert.match(activityMarkup, /Leadpoet/)
+  assert.doesNotMatch(multiVersionMarkup, /bbbbbbbbbbbb|cccccccccccc|local modifications|checkout state unknown/)
+  assert.equal((multiVersionMarkup.match(/Leadpoet/g) ?? []).length, 1, 'live rows show each validator once per phase')
+  assert.match(multiVersionMarkup, /Scoring · .*Yuma/)
   const archivedVersionMarkup = renderToStaticMarkup(withNames(React.createElement(renderedModule.exports.EvaluationRunSummary, { submission: completedEvaluation })))
   assert.match(archivedVersionMarkup, /Execution/)
   assert.match(archivedVersionMarkup, new RegExp('b'.repeat(40)))

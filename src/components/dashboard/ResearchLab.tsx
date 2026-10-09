@@ -357,7 +357,6 @@ function RoundWorkspace({ round, active, initialSubmissionId = null, inspectionO
   if (inspectionOnly) return roundLoading ? <div className="p-5"><SubmissionRowsLoading /></div> : inspection ?? <InlineNotice>{roundError ?? 'Submission details are unavailable.'}</InlineNotice>
   return <section className="pt-10" aria-label="Current submissions">
     <div className="mb-5 flex items-end justify-between gap-4"><div><h3 className="font-display text-[22px] font-medium tracking-[-0.025em] text-[var(--platinum)]">Submissions</h3><p className="mt-1 text-[12px] text-[var(--muted-2)]">{formatDay(round.evaluationDate)}</p></div><span className="font-mono text-[10px] text-[var(--muted-2)]">{submissions.length} total</span></div>
-    {!roundLoading ? <CompetitionActivity submissions={submissions} /> : null}
     <div className="mb-4 flex flex-col gap-3 sm:flex-row"><label className="flex-1"><span className="sr-only">Find your miner</span><input type="search" value={query} onChange={(event) => { setQuery(event.target.value); setPage(0) }} placeholder="Search miner hotkey or submission" className={filterClass} /></label><label><span className="sr-only">Submission status</span><select value={statusFilter} onChange={(event) => { setStatusFilter(event.target.value); setPage(0) }} className={filterClass}><option value="all">All statuses</option><option value="evaluating">Evaluating</option><option value="queued">Queued</option><option value="retrying">Retrying</option><option value="failed">Failed</option><option value="review">Code review</option><option value="rejected">Review rejected</option><option value="scored">Completed</option></select></label></div>
     {roundError ? <div className="mb-3"><InlineNotice>{roundError} Last known submissions are shown below.</InlineNotice></div> : null}
     {roundLoading ? <SubmissionRowsLoading /> : filtered.length ? <><SubmissionTable submissions={filtered.slice(currentPage * 15, (currentPage + 1) * 15)} round={round} selectedId={inspectionOpen ? selectedSubmissionId : null} expandedContent={inspectionOpen ? inspection : null} onSelect={(id) => { selectSubmission(id); setInspectionOpen(id !== selectedSubmissionId || !inspectionOpen) }} /><Pagination page={currentPage} hasNext={currentPage + 1 < pageCount} onPrevious={() => setPage(currentPage - 1)} onNext={() => setPage(currentPage + 1)} label={`${filtered.length} ${query || statusFilter !== 'all' ? 'matches' : 'submissions'}`} /></> : <InlineNotice>{submissions.length ? 'No miners match these filters.' : 'No submissions are public for this round.'}</InlineNotice>}
@@ -388,19 +387,6 @@ function isSubmissionRetrying(submission: CompetitionSubmission) {
   return ['scoring', 'queued', 'accepted'].includes(submission.status) && (submission.evaluation?.state === 'retrying'
     || (submission.evaluation?.counts?.retrying ?? 0) > 0
     || (submission.codeReview.status === 'error' && submission.codeReview.retryable === true))
-}
-
-function CompetitionActivity({ submissions }: { submissions: CompetitionSubmission[] }) {
-  const activeModels = submissions.filter((submission) => submission.evaluation?.state === 'evaluating')
-  const activeValidators = [...new Set(activeModels.flatMap((submission) => submission.evaluation!.validators.map(({ hotkey }) => hotkey)))]
-  const queued = submissions.filter((submission) => submission.evaluation?.state === 'queued' || ['accepted', 'queued'].includes(submission.status)).length
-  const retrying = submissions.filter(isSubmissionRetrying).length
-  const unavailable = submissions.some((submission) => submission.status === 'scoring' && (!submission.evaluation || submission.evaluation.state === 'unavailable'))
-  return <div aria-label="Evaluation activity" className="mb-5 rounded-lg border border-[var(--line)] bg-[var(--surface)] p-4">
-    <dl className="grid grid-cols-2 gap-4 text-[11px] sm:grid-cols-4">{[['Active models', activeModels.length], ['Active validators', activeValidators.length], ['Queued models', queued], ['Retrying models', retrying]].map(([label, count]) => <div key={label}><dt className="text-[var(--muted-2)]">{label}</dt><dd className="mt-1 font-mono text-[16px] text-[var(--platinum)]">{unavailable && (label === 'Active models' || label === 'Active validators') ? `${count}+` : count}</dd></div>)}</dl>
-    {activeModels.length ? <div className="mt-3 space-y-1 border-t border-[var(--line)] pt-3 text-[10px] text-[var(--muted)]">{activeModels.slice(0, 3).map((submission) => <p key={submission.submissionId} className="break-all"><span className="font-mono text-[var(--platinum)]" title={submission.submissionId}>{shortId(submission.submissionId)}</span> · <span title={submission.minerHotkey}>{shortHotkey(submission.minerHotkey)}</span> · {submission.evaluation!.validators.filter((validator, index, validators) => validators.findIndex((item) => item.hotkey === validator.hotkey && item.phase === validator.phase) === index).map(({ hotkey, phase }) => <span key={`${hotkey}-${phase}`} className="mr-2"><ValidatorIdentity hotkey={hotkey} /></span>)}</p>)}{activeModels.length > 3 ? <p>{activeModels.length - 3} more active models in the table below.</p> : null}</div> : null}
-    {unavailable ? <p className="mt-3 text-[11px] text-[var(--muted-2)]">Some live assignments are unavailable. Counts show confirmed activity.</p> : null}
-  </div>
 }
 
 function EvaluationRunSummary({ submission }: { submission: CompetitionSubmission }) {
@@ -499,7 +485,7 @@ function ValidatorIdentity({ hotkey, full = false }: { hotkey: string; full?: bo
 function SubmissionStatus({ submission, round }: { submission: CompetitionSubmission; round: CompetitionRoundSummary }) {
   const evaluating = submission.status === 'scoring' && submission.evaluation?.state === 'evaluating'
   const retrying = isSubmissionRetrying(submission) && submission.evaluation?.state === 'evaluating'
-  return <div><span className={evaluating ? 'text-[var(--platinum)]' : ''}>{competitionSubmissionStatusLabel(submission, round)}</span>{retrying ? <span className="ml-1">· retrying tasks</span> : null}{evaluating ? <div className="mt-1 space-y-1 text-[10px] text-[var(--muted-2)]">{submission.evaluation?.validators.map(({ hotkey, phase, commit, workingTree }) => <div key={`${hotkey}-${phase}-${commit ?? "unknown"}-${workingTree ?? "unknown"}`}><div>{phase === 'scoring' ? 'Scoring' : 'Running'} · <ValidatorIdentity hotkey={hotkey} /></div><div className="mt-0.5"><ValidatorCodeVersion commit={commit ?? null} workingTree={workingTree ?? 'unknown'} /></div></div>)}</div> : null}</div>
+  return <div><span className={evaluating ? 'text-[var(--platinum)]' : ''}>{competitionSubmissionStatusLabel(submission, round)}</span>{retrying ? <span className="ml-1">· retrying tasks</span> : null}{evaluating ? <div className="mt-1 space-y-1 text-[10px] text-[var(--muted-2)]">{submission.evaluation?.validators.filter((validator, index, validators) => validators.findIndex((item) => item.hotkey === validator.hotkey && item.phase === validator.phase) === index).map(({ hotkey, phase }) => <div key={`${hotkey}-${phase}`}>{phase === 'scoring' ? 'Scoring' : 'Running'} · <ValidatorIdentity hotkey={hotkey} /></div>)}</div> : null}</div>
 }
 
 function ValidatorCodeVersion({ commit, workingTree, full = false }: { commit: string | null; workingTree: 'clean' | 'dirty' | 'unknown'; full?: boolean }) {

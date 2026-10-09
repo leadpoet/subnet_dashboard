@@ -1,3 +1,12 @@
+## Scoped production authorization: October 9 dashboard cleanup and failure audit
+
+The user authorized removal of the duplicate live activity summary and checkout
+metadata from active table rows, then investigation and narrow correction of
+incorrect evaluation failures. This includes focused tests, safe push/merge,
+normal dashboard deployment, live browser QA and read-only Sentry/OnePatch
+inspection. Preserve detailed audit metadata, scores, completed work, disclosure,
+champion selection and concurrent changes. Authority ends after live validation.
+
 ## Scoped production authorization: October 8 evaluation dashboard
 
 The user authorized exposing live and historical Arena evaluation progress,

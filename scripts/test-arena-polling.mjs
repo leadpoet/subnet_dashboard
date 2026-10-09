@@ -136,6 +136,7 @@ try {
   competitor.evaluation = { state: 'evaluating', validators: [{ hotkey: '5Validator', phase: 'scoring' }] }
   await advance(60_000)
   assert.match(markup(), /Evaluating/)
+  assert.doesNotMatch(markup(), /Evaluation activity|more active models|checkout state unknown/)
   assert.match(markup(), /Leadpoet/)
   assert.equal(calls.length, 9, 'one public polling cycle makes four requests, including the summary')
   assert.equal(count('/metagraph'), 1, 'validator identity polling is shared and less frequent than progress polling')
@@ -183,7 +184,8 @@ try {
   competitor.evaluation = { state: 'evaluating', validators: [{ hotkey: '5Validator', phase: 'executing', commit: 'c'.repeat(40), working_tree: 'clean' }], counts: { ...taskCounts, active: 1, retrying: 1 }, code_versions: [{ validator_hotkey: '5Validator', phase: 'executing', commit: 'c'.repeat(40), working_tree: 'clean' }] }
   await advance(60_000)
   assert.match(markup(), /Running/)
-  assert.match(markup(), /cccccccccccc/)
+  assert.doesNotMatch(markup(), /cccccccccccc|checkout state unknown/)
+  assert.match(markup(), /5Validator/)
   assert.match(markup(), /retrying tasks/)
   competitor.evaluation = { state: 'failed', validators: [], counts: { ...taskCounts, failed: 2, retrying: 0 }, code_versions: competitor.evaluation.code_versions }
   await advance(60_000)
