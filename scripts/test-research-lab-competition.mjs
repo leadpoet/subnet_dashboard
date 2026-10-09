@@ -156,7 +156,7 @@ try {
   )
   assert.equal(
     competitionSubmissionStatusLabel({ ...submissions[0], status: 'scoring_failed' }, pendingRound),
-    'Scoring failed',
+    'Evaluation failed',
     'a failed submission must not look scored or promotable',
   )
   assert.equal(formatCompetitionScore(0), '0.00', 'a real zero score must remain published')
@@ -343,6 +343,46 @@ try {
   assert.equal(completedEvaluation.evaluation.state, 'completed', 'completed historical submissions retain their own run versions')
   assert.equal(evaluationRow({ state: 'failed', validators: [] }, 'scoring_failed').evaluation.state, 'failed')
   assert.equal(competitionSubmissionStatusLabel(evaluationRow({ state: 'retrying', validators: [] }), pendingRound), 'Evaluation retrying')
+  const failureLabels = {
+    execution_window: 'Evaluation incomplete · execution window ended',
+    review: 'Evaluation incomplete · review did not finish',
+    provider_credentials: 'Provider access failed',
+    provider: 'Provider request failed',
+    execution: 'Model execution failed',
+    unknown: 'Evaluation failed',
+  }
+  for (const [reason, label] of Object.entries(failureLabels)) {
+    for (const status of ['scoring', 'scoring_failed']) {
+      const row = evaluationRow({ state: 'failed', validators: [], failure_reasons: [reason] }, status)
+      assert.deepEqual(row.evaluation.failureReasons, [reason])
+      assert.equal(competitionSubmissionStatusLabel(row, pendingRound), label)
+    }
+  }
+  for (const status of ['scoring', 'scoring_failed']) {
+    assert.equal(competitionSubmissionStatusLabel(evaluationRow({ state: 'failed', validators: [] }, status), pendingRound), 'Evaluation failed')
+    assert.equal(competitionSubmissionStatusLabel(evaluationRow({ state: 'failed', validators: [], failure_reasons: ['review', 'execution_window'] }, status), pendingRound), 'Evaluation incomplete · multiple causes')
+  }
+  const unclaimedRows = Array.from({ length: 49 }, () => evaluationRow({
+    state: 'failed', validators: [], counts: { queued: 0, active: 0, completed: 0, failed: 10, retrying: 0 },
+    code_versions: [], failure_reasons: ['execution_window'],
+  }))
+  assert.ok(unclaimedRows.every((row) => competitionSubmissionStatusLabel(row, pendingRound) === failureLabels.execution_window))
+  assert.ok(unclaimedRows.every((row) => row.evaluation.validators.length === 0 && row.evaluation.counts.failed === 10))
+  for (const reasons of ['review', [null], ['private-raw-error'], ['review', 'private-raw-error'], [{}], Array(7).fill('review')]) {
+    const row = evaluationRow({ state: 'failed', validators: [], failure_reasons: reasons, terminal_doc: 'private-detail' })
+    assert.equal(row.evaluation.failureReasons, undefined, 'invalid optional causes must not be accepted or replace progress')
+    assert.equal(competitionSubmissionStatusLabel(row, pendingRound), 'Evaluation failed')
+    assert.doesNotMatch(JSON.stringify(row), /private/)
+  }
+  const repeatedReason = evaluationRow({ state: 'failed', validators: [], failure_reasons: ['review', 'review'] })
+  assert.deepEqual(repeatedReason.evaluation.failureReasons, ['review'])
+  assert.equal(competitionSubmissionStatusLabel(repeatedReason, pendingRound), failureLabels.review)
+  for (const [state, label] of [['queued', 'Queued for validation'], ['retrying', 'Evaluation retrying'], ['completed', 'Evaluation complete · finalizing']]) {
+    assert.equal(competitionSubmissionStatusLabel(evaluationRow({ state, validators: [], failure_reasons: ['provider_credentials'] }), pendingRound), label)
+  }
+  for (const [status, label] of [['review_failed', 'Code review could not complete'], ['review_rejected', 'Code review rejected'], ['champion', 'Champion · promotion pending'], ['scored', 'Scored · not promoted']]) {
+    assert.equal(competitionSubmissionStatusLabel(evaluationRow({ state: 'failed', validators: [], failure_reasons: ['execution_window'] }, status), pendingRound), label)
+  }
   for (const counts of [{ ...taskCounts, active: -1 }, { ...taskCounts, queued: '2' }, { ...taskCounts, retrying: 0.5 }, { active: 1 }]) {
     assert.equal(evaluationRow({ state: 'evaluating', validators: [{ hotkey: primaryHotkey, phase: 'scoring' }], counts }).evaluation.counts, undefined, 'invalid optional task counts must not discard confirmed assignments')
   }
@@ -860,7 +900,7 @@ try {
   const failedSubmission = liveSubmissions.find((row) => row.submissionId === credentialFixture.failed_result.submission_id)
   assert.equal(failedSubmission.status, 'scoring_failed', 'the competition status must stay unchanged')
   assert.equal(failedSubmission.finalScore, null)
-  assert.equal(competitionSubmissionStatusLabel(failedSubmission, credentialFixture.round), 'Provider credential error')
+  assert.equal(competitionSubmissionStatusLabel(failedSubmission, credentialFixture.round), 'Provider access failed')
   for (let index = 0; index < projected.submissions.length; index++) {
     const { failure_reason, ...unchanged } = projected.submissions[index]
     assert.deepEqual(unchanged, credentialFixture.submissions.submissions[index], 'scores, code access, and other submission fields stay unchanged')
@@ -872,12 +912,12 @@ try {
   const tableMarkup = renderToStaticMarkup(React.createElement(renderedModule.exports.SubmissionTable, {
     submissions: liveSubmissions, round: credentialFixture.round, selectedId: failedSubmission.submissionId, onSelect() {},
   }))
-  assert.match(tableMarkup, /Provider credential error/)
+  assert.match(tableMarkup, /Provider access failed/)
   assert.doesNotMatch(tableMarkup, /Scoring failed/)
   const renderFailedResults = (submission) => renderToStaticMarkup(React.createElement(renderedModule.exports.PublishedResults, {
     submission, round: credentialFixture.round, benchmark, benchmarkState: 'available', results: null, resultsState: 'error',
   }))
-  assert.match(renderFailedResults(failedSubmission), /Provider credential error\. No complete evaluation score is available\./)
+  assert.match(renderFailedResults(failedSubmission), /Provider access failed\. No complete evaluation score is available\./)
   assert.doesNotMatch(renderFailedResults(failedSubmission), />0\.00</, 'failed-run placeholders must remain hidden')
   for (const [detail, status] of [
     [{ error: 'temporarily unavailable' }, 503],
@@ -889,8 +929,8 @@ try {
     const fallback = await projectSubmissions(detail, status)
     assert.deepEqual(fallback, credentialFixture.submissions, 'unverified and other failures keep the original projection')
     const submission = normalizeCompetitionSubmissions(fallback).find((row) => row.submissionId === failedSubmission.submissionId)
-    assert.equal(competitionSubmissionStatusLabel(submission, credentialFixture.round), 'Scoring failed')
-    assert.match(renderFailedResults(submission), /Scoring failed\. No complete evaluation score is available\./)
+    assert.equal(competitionSubmissionStatusLabel(submission, credentialFixture.round), 'Evaluation failed')
+    assert.match(renderFailedResults(submission), /Evaluation failed\. No complete evaluation score is available\./)
   }
   for (const status of ['queued', 'running', 'accepted', 'failed', 'scored', 'champion', 'cancelled', 'not_selected']) {
     for (const isBaseline of [false, true]) {
