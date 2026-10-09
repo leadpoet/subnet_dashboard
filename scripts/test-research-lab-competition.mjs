@@ -361,6 +361,10 @@ try {
   for (const status of ['scoring', 'scoring_failed']) {
     assert.equal(competitionSubmissionStatusLabel(evaluationRow({ state: 'failed', validators: [] }, status), pendingRound), 'Evaluation failed')
     assert.equal(competitionSubmissionStatusLabel(evaluationRow({ state: 'failed', validators: [], failure_reasons: ['review', 'execution_window'] }, status), pendingRound), 'Evaluation incomplete · multiple causes')
+    assert.equal(competitionSubmissionStatusLabel({
+      ...evaluationRow({ state: 'failed', validators: [], failure_reasons: ['unknown'] }, status),
+      failureReason: 'credential_error',
+    }, pendingRound), 'Provider access failed', 'keep the recorded credential cause when older run metadata is missing')
   }
   const unclaimedRows = Array.from({ length: 49 }, () => evaluationRow({
     state: 'failed', validators: [], counts: { queued: 0, active: 0, completed: 0, failed: 10, retrying: 0 },

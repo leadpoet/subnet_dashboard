@@ -543,7 +543,6 @@ function evaluationFailureLabel(submission: Pick<CompetitionSubmission, 'failure
     case 'provider_credentials': return 'Provider access failed'
     case 'provider': return 'Provider request failed'
     case 'execution': return 'Model execution failed'
-    case 'unknown': return 'Evaluation failed'
   }
   return submission.failureReason === 'credential_error' ? 'Provider access failed' : 'Evaluation failed'
 }
