@@ -55,10 +55,14 @@ export type CompetitionSubmission = {
   }
 }
 
+const EVALUATION_FAILURE_REASONS = ['provider_credentials', 'execution_window', 'review', 'provider', 'execution', 'unknown'] as const
+type EvaluationFailureReason = typeof EVALUATION_FAILURE_REASONS[number]
+
 export type CompetitionEvaluation = {
   state: 'queued' | 'evaluating' | 'retrying' | 'completed' | 'failed' | 'finalizing' | 'unavailable'
   validators: Array<{ hotkey: string; phase: 'executing' | 'scoring'; commit?: string | null; workingTree?: 'clean' | 'dirty' | 'unknown' }>
   counts?: { queued: number; active: number; completed: number; failed: number; retrying: number }
+  failureReasons?: EvaluationFailureReason[]
   codeVersions?: Array<{ validatorHotkey: string; phase: 'executing' | 'scoring'; commit: string | null; workingTree: 'clean' | 'dirty' | 'unknown' }>
 }
 
@@ -90,6 +94,10 @@ function normalizeEvaluation(value: unknown): CompetitionEvaluation | null {
   }
   if ((state === 'evaluating') !== (validators.length > 0)) return null
   const evaluation: CompetitionEvaluation = { state: state as CompetitionEvaluation['state'], validators }
+  if (Array.isArray(source.failure_reasons) && source.failure_reasons.length <= EVALUATION_FAILURE_REASONS.length
+    && source.failure_reasons.every((reason) => EVALUATION_FAILURE_REASONS.includes(reason as EvaluationFailureReason))) {
+    evaluation.failureReasons = [...new Set(source.failure_reasons)] as EvaluationFailureReason[]
+  }
   const counts = record(source.counts)
   if (counts && ['queued', 'active', 'completed', 'failed', 'retrying'].every((key) => Number.isSafeInteger(counts[key]) && integer(counts[key]) !== null)) {
     evaluation.counts = { queued: Number(counts.queued), active: Number(counts.active), completed: Number(counts.completed), failed: Number(counts.failed), retrying: Number(counts.retrying) }
@@ -526,6 +534,19 @@ export function competitionChampionHistory(snapshot: CompetitionSnapshot): Compe
   return points
 }
 
+function evaluationFailureLabel(submission: Pick<CompetitionSubmission, 'failureReason' | 'evaluation'>): string {
+  const reasons = submission.evaluation?.failureReasons
+  if (reasons && reasons.length > 1) return 'Evaluation incomplete · multiple causes'
+  switch (reasons?.[0]) {
+    case 'execution_window': return 'Evaluation incomplete · execution window ended'
+    case 'review': return 'Evaluation incomplete · review did not finish'
+    case 'provider_credentials': return 'Provider access failed'
+    case 'provider': return 'Provider request failed'
+    case 'execution': return 'Model execution failed'
+  }
+  return submission.failureReason === 'credential_error' ? 'Provider access failed' : 'Evaluation failed'
+}
+
 export function competitionSubmissionStatusLabel(
   submission: Pick<CompetitionSubmission, 'isBaseline' | 'isChampion' | 'status' | 'failureReason' | 'codeReview' | 'evaluation'>,
   round: Pick<CompetitionRoundSummary, 'promotionStatus' | 'status'>,
@@ -544,9 +565,7 @@ export function competitionSubmissionStatusLabel(
   if (submission.status === 'scored' && round.status !== 'published') {
     return 'Scored · round in progress'
   }
-  if (submission.status === 'scoring_failed' && submission.failureReason === 'credential_error') {
-    return 'Provider credential error'
-  }
+  if (submission.status === 'scoring_failed') return evaluationFailureLabel(submission)
   if (submission.status === 'queued' || submission.status === 'accepted') {
     const reviewIssue = codeReviewIssueLabel(submission.codeReview)
     if (reviewIssue) return reviewIssue
@@ -557,7 +576,7 @@ export function competitionSubmissionStatusLabel(
     if (submission.evaluation?.state === 'evaluating') return 'Evaluating'
     if (submission.evaluation?.state === 'finalizing') return 'Finalizing results'
     if (submission.evaluation?.state === 'retrying') return 'Evaluation retrying'
-    if (submission.evaluation?.state === 'failed') return 'Evaluation failed'
+    if (submission.evaluation?.state === 'failed') return evaluationFailureLabel(submission)
     if (submission.evaluation?.state === 'completed') return 'Evaluation complete · finalizing'
     if (submission.evaluation?.state === 'unavailable') return 'Evaluation status unavailable'
     return 'In evaluation'
