@@ -29,7 +29,7 @@ export async function GET() {
   let arenaStatus: number | null = null
   let arenaDetail: string | null = null
   try {
-    const result = await fetchPublicArenaJson('/arena/v1/current', 3_000)
+    const result = await fetchPublicArenaJson('/arena/v1/current')
     arenaStatus = result.status
     arenaOk = result.status >= 200 && result.status < 300
     if (!arenaOk) arenaDetail = `Arena returned HTTP ${result.status}`
