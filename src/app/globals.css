@@ -543,7 +543,8 @@ body::before {
 }
 
 /* Public research dashboard: quiet surfaces and readable secondary type. */
-.dashboard-surface {
+.dashboard-surface,
+.dashboard-popover {
   --canvas: #0b0d10;
   --surface: #111418;
   --white: #f3f5f7;
@@ -553,9 +554,11 @@ body::before {
   --line: rgba(224, 232, 242, 0.09);
   --line-2: rgba(224, 232, 242, 0.15);
   --line-3: rgba(224, 232, 242, 0.24);
-  background: var(--canvas);
   font-family: var(--font-geist-sans), sans-serif;
 }
+
+.dashboard-surface { background: var(--canvas); color-scheme: dark; }
+.dashboard-popover { background: var(--surface); }
 
 .dashboard-surface :is(button, a, summary, [role="tab"]):focus-visible {
   outline: 2px solid var(--white) !important;
@@ -563,7 +566,8 @@ body::before {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .dashboard-surface *, .dashboard-surface *::after {
+  .dashboard-surface *, .dashboard-surface *::after,
+  .dashboard-popover *, .dashboard-popover *::after {
     animation: none !important;
     transition: none !important;
   }
