@@ -119,16 +119,16 @@ try {
   respond = publicResponse
   const normalizedRound = normalizeCompetitionSnapshot(snapshot).latestRound
   await act(async () => { renderer = TestRenderer.create(React.createElement(RoundWorkspace, { round: normalizedRound, active: true }), rendererOptions) })
-  assert.equal(calls.length, 3, 'initial view reads submissions, benchmark, and selected results once')
+  assert.equal(calls.length, 1, 'initial table reads only submissions; collapsed details make no requests')
   await act(async () => { renderer.update(React.createElement(RoundWorkspace, { round: { ...normalizedRound }, active: true })) })
-  assert.equal(calls.length, 3, 'an equivalent summary must not restart polling or re-fetch results')
+  assert.equal(calls.length, 1, 'an equivalent summary must not restart polling or re-fetch results')
   await advance(60_000)
-  assert.equal(calls.length, 6, 'one interval refreshes each detail endpoint once')
+  assert.equal(calls.length, 2, 'one interval refreshes only visible submissions')
   await unmount()
 
   // Exercise the actual parent/child refresh cascade and saved visible output.
   await act(async () => { renderer = TestRenderer.create(React.createElement(ResearchLab), rendererOptions) })
-  assert.equal(calls.length, 5)
+  assert.equal(calls.length, 3)
   assert.equal(count('/metagraph'), 1)
   assert.match(markup(), /Queued for validation/)
   const inspectionToggle = () => renderer.root.findAllByType('button').find((button) => button.props.title === 'competitor')
@@ -138,13 +138,15 @@ try {
   assert.match(markup(), /Evaluating/)
   assert.doesNotMatch(markup(), /Evaluation activity|more active models|checkout state unknown/)
   assert.match(markup(), /Leadpoet/)
-  assert.equal(calls.length, 9, 'one public polling cycle makes four requests, including the summary')
+  assert.equal(calls.length, 5, 'one public polling cycle makes only summary and submissions requests')
   assert.equal(count('/metagraph'), 1, 'validator identity polling is shared and less frequent than progress polling')
-  assert.equal(count('/results/baseline'), 2)
+  assert.equal(count('/results/baseline'), 0)
   assert.equal(calls.some((url) => url.endsWith('/code')), false, 'source remains on demand')
   await act(async () => { inspectionToggle().props.onClick() })
   assert.equal(count('/results/competitor'), 1, 'selecting another submission immediately loads its results')
   assert.equal(inspectionToggle().props['aria-expanded'], true, 'selecting a submission opens its evaluation and source')
+  assert.match(markup(), /ICPs become public/, 'opening details still respects the release gate')
+  assert.doesNotMatch(markup(), /Public ICP 1/)
   await act(async () => { inspectionToggle().props.onClick() })
   assert.equal(inspectionToggle().props['aria-expanded'], false, 'submission details can be collapsed again')
   const beforeHidden = calls.length
@@ -153,7 +155,7 @@ try {
   assert.equal(calls.length, beforeHidden, 'hidden public tabs do no polling')
   benchmarkGated = false
   await setVisibility('visible')
-  assert.equal(calls.length, beforeHidden + 5, 'resuming refreshes each endpoint once')
+  assert.equal(calls.length, beforeHidden + 3, 'resuming refreshes only visible endpoints once')
   await act(async () => { inspectionToggle().props.onClick() })
   assert.match(markup(), /Public ICP 1/, 'a previously gated benchmark becomes visible after release')
   const beforeInactive = calls.length
@@ -171,6 +173,34 @@ try {
   await advance(3 * 60_000)
   assert.equal(count('/submissions'), beforeSlow + 1, 'slow detail requests do not overlap or restart on summary updates')
   await act(async () => { pending.resolve() })
+  await unmount()
+
+  // Slow benchmarks must not hide ready submissions or block table updates.
+  const slowBenchmark = deferred()
+  respond = async (url) => {
+    if (url.endsWith('/benchmark')) await slowBenchmark.promise
+    return publicResponse(url)
+  }
+  await act(async () => { renderer = TestRenderer.create(React.createElement(RoundWorkspace, { round: normalizedRound, active: true }), rendererOptions) })
+  assert.equal(count('/benchmark'), 0)
+  assert.match(markup(), /5Competitor/)
+  assert.doesNotMatch(markup(), /Loading submissions/)
+  const toggle = () => renderer.root.findAllByType('button').find((button) => button.props.title === 'competitor')
+  await act(async () => { toggle().props.onClick() })
+  assert.equal(count('/benchmark'), 1)
+  assert.equal(count('/results/competitor'), 1)
+  const beforeSlowBenchmark = count('/submissions')
+  await advance(60_000)
+  assert.equal(count('/submissions'), beforeSlowBenchmark + 1, 'table refresh continues while the benchmark is pending')
+  assert.equal(count('/benchmark'), 1, 'slow benchmark requests never overlap')
+  await act(async () => { slowBenchmark.resolve() })
+  assert.match(markup(), /Public ICP 1/)
+  await act(async () => { toggle().props.onClick() })
+  const collapsedBenchmark = count('/benchmark')
+  const collapsedResults = count('/results/competitor')
+  await advance(60_000)
+  assert.equal(count('/benchmark'), collapsedBenchmark, 'collapsed benchmarks stop polling')
+  assert.equal(count('/results/competitor'), collapsedResults, 'collapsed results stop polling')
   await unmount()
 
   // Live counts, task retries, and recorded run versions advance with each poll.
@@ -218,7 +248,7 @@ try {
   await act(async () => { oldRound.resolve() })
   assert.equal(count('/arena-2026-09-23/submissions'), 1)
   assert.equal(count('/arena-2026-09-22/results/baseline'), 0, 'a completed old-round request cannot select an old submission')
-  assert.equal(count('/arena-2026-09-23/results/baseline'), 1)
+  assert.equal(count('/arena-2026-09-23/results/baseline'), 0, 'new-round details remain on demand')
   await unmount()
 
   // Filtering applies before pagination, including miners beyond the first page.

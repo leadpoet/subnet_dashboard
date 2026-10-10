@@ -240,6 +240,7 @@ function RoundWorkspace({ round, active, initialSubmissionId = null, inspectionO
   const [selectedFile, setSelectedFile] = useState<string | null>(null)
   const [roundRevision, setRoundRevision] = useState(0)
   const roundRequestRef = useRef(0)
+  const benchmarkRequestRef = useRef(0)
   const roundSnapshotRef = useRef(false)
   const benchmarkReleasedRef = useRef(false)
   const selectedSubmissionIdRef = useRef<string | null>(null)
@@ -255,15 +256,14 @@ function RoundWorkspace({ round, active, initialSubmissionId = null, inspectionO
     setInspectionOpen(inspectionOnly)
     setPage(0)
     setRoundLoading(true); setRoundError(null); setBenchmark(null); setBenchmarkState('loading'); setSubmissions([]); selectSubmission(initialSubmissionId)
-    return () => { roundRequestRef.current += 1 }
+    return () => { roundRequestRef.current += 1; benchmarkRequestRef.current += 1 }
   }, [roundId, selectSubmission, initialSubmissionId, inspectionOnly])
 
   const refreshRound = useCallback(async () => {
     const initial = !roundSnapshotRef.current
     const request = ++roundRequestRef.current
-    const [submissionRequest, benchmarkRequest] = await Promise.allSettled([
+    const [submissionRequest] = await Promise.allSettled([
       fetchReleasedJson(`/api/research-lab/rounds/${encodeURIComponent(roundId)}/submissions`),
-      fetchReleasedJson(`/api/research-lab/rounds/${encodeURIComponent(roundId)}/benchmark`),
     ])
     if (request !== roundRequestRef.current) return
     if (submissionRequest.status === 'fulfilled' && submissionRequest.value.state === 'available') {
@@ -282,22 +282,37 @@ function RoundWorkspace({ round, active, initialSubmissionId = null, inspectionO
         ? `Latest submission refresh failed: ${errorMessage(submissionRequest.reason, 'request failed')}`
         : 'Latest submission refresh did not return public data.')
     }
-    if (benchmarkRequest.status === 'fulfilled' && benchmarkRequest.value.state === 'available') {
-      const next = normalizeCompetitionBenchmark(benchmarkRequest.value.body, { roundId, icpSetDate, publicAt, benchmarkIcpCount })
-      benchmarkReleasedRef.current = next !== null
-      setBenchmark(next); setBenchmarkState(next ? 'available' : 'error')
-    } else if (benchmarkRequest.status === 'fulfilled') {
-      if (!benchmarkReleasedRef.current) {
-        setBenchmark(null); setBenchmarkState(benchmarkRequest.value.state)
-      } else if (!initial) setRoundError('Latest benchmark refresh failed. The last public snapshot remains shown.')
-    } else if (initial) setBenchmarkState('error')
-    else setRoundError(`Latest benchmark refresh failed: ${errorMessage(benchmarkRequest.reason, 'request failed')}. The last public snapshot remains shown.`)
     roundSnapshotRef.current = true
     setRoundLoading(false)
     setRoundRevision((current) => current + 1)
-  }, [roundId, icpSetDate, publicAt, benchmarkIcpCount, selectSubmission, inspectionOnly, initialSubmissionId])
+  }, [roundId, selectSubmission, inspectionOnly, initialSubmissionId])
 
   useVisiblePolling(refreshRound, 60_000, { enabled: active })
+
+  // The table needs only submissions. Fetch the benchmark and evaluation when
+  // opened, so slow detail reads cannot hold up the main view or its refresh.
+  const refreshBenchmark = useCallback(async () => {
+    const request = ++benchmarkRequestRef.current
+    try {
+      const response = await fetchReleasedJson(`/api/research-lab/rounds/${encodeURIComponent(roundId)}/benchmark`)
+      if (request !== benchmarkRequestRef.current) return
+      if (response.state === 'available') {
+        const next = normalizeCompetitionBenchmark(response.body, { roundId, icpSetDate, publicAt, benchmarkIcpCount })
+        if (next) {
+          benchmarkReleasedRef.current = true
+          setBenchmark(next); setBenchmarkState('available')
+        } else setBenchmarkState('error')
+      } else if (!benchmarkReleasedRef.current) {
+        setBenchmark(null); setBenchmarkState(response.state)
+      }
+    } catch {
+      if (request !== benchmarkRequestRef.current) return
+      if (!benchmarkReleasedRef.current) setBenchmarkState('error')
+      else setRoundError('Latest benchmark refresh failed. The last public snapshot remains shown.')
+    }
+  }, [roundId, icpSetDate, publicAt, benchmarkIcpCount])
+
+  useVisiblePolling(refreshBenchmark, 60_000, { enabled: active && inspectionOpen })
 
   useEffect(() => {
     setResults(null); setCode(null); setCodeState('idle'); setSelectedFile(null)
@@ -309,13 +324,13 @@ function RoundWorkspace({ round, active, initialSubmissionId = null, inspectionO
   const reviewExcluded = selectedSubmission ? isCompetitionReviewExcluded(selectedSubmission) : false
 
   useEffect(() => {
-    if (!selectedSubmissionId || reviewExcluded) return
+    if (!inspectionOpen || !selectedSubmissionId || reviewExcluded) return
     const requestedRoundId = roundId
     const requestedSubmissionId = selectedSubmissionId
-    let active = true
+    let current = true
     setResultsState((current) => current === 'available' ? current : 'loading')
     fetchReleasedJson(`/api/research-lab/rounds/${encodeURIComponent(requestedRoundId)}/results/${encodeURIComponent(requestedSubmissionId)}`).then((response) => {
-      if (!active) return
+      if (!current) return
       if (response.state !== 'available') { setResultsState(response.state); return }
       const normalized = normalizeCompetitionResults(response.body, { roundId, benchmarkIcpCount })
       if (
@@ -326,9 +341,9 @@ function RoundWorkspace({ round, active, initialSubmissionId = null, inspectionO
         setResults(null); setResultsState('error'); return
       }
       setResults(normalized); setResultsState('available')
-    }).catch(() => { if (active) setResultsState('error') })
-    return () => { active = false }
-  }, [reviewExcluded, roundId, benchmarkIcpCount, roundRevision, selectedSubmissionId])
+    }).catch(() => { if (current) setResultsState('error') })
+    return () => { current = false }
+  }, [inspectionOpen, reviewExcluded, roundId, benchmarkIcpCount, roundRevision, selectedSubmissionId])
 
   const selectedCodeFile = code?.files.find((file) => file.path === selectedFile) ?? code?.files[0] ?? null
   const requestCode = async () => {

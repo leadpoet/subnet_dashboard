@@ -1,4 +1,5 @@
 import { invalidPublicArenaId, proxyPublicArenaJson, publicArenaId } from '@/lib/arena-public-proxy'
+import { normalizeCompetitionSubmissions } from '@/lib/research-lab-competition'
 import { NextResponse } from 'next/server'
 
 export const dynamic = 'force-dynamic'
@@ -14,6 +15,10 @@ export async function GET(_request: Request, context: { params: Promise<{ roundI
   // Add display context only; keep the gateway's competition status unchanged.
   await Promise.all(body.submissions.map(async (submission: { status?: string; submission_id?: string; failure_reason?: string } | null) => {
     if (submission?.status !== 'scoring_failed' || typeof submission.submission_id !== 'string') return
+    // Current gateway summaries already explain failures. Full result reads are
+    // only needed for legacy rows whose displayed reason still uses the fallback.
+    const reasons = normalizeCompetitionSubmissions({ submissions: [submission] })[0]?.evaluation?.failureReasons
+    if (reasons?.length && (reasons.length > 1 || reasons[0] !== 'unknown')) return
     const submissionId = publicArenaId(submission.submission_id)
     if (!submissionId) return
     const result = await proxyPublicArenaJson(`/arena/v1/rounds/${encodeURIComponent(roundId)}/results/${encodeURIComponent(submissionId)}`)
