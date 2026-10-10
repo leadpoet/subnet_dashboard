@@ -465,7 +465,7 @@ function CompetitionHistory({ active }: { active: boolean }) {
   useVisiblePolling(refresh, 300_000, { enabled: active })
   return <section aria-label="Competition history" className="pb-8">
     <form className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-end" onSubmit={(event) => { event.preventDefault(); setPage(0); setCursors([null]); setFilters({ day, hotkey: hotkey.trim() }) }}>
-      <label className="flex-1"><span className="mb-2 block text-[11px] text-[var(--muted)]">Miner hotkey</span><input type="search" value={hotkey} maxLength={128} pattern="[A-Za-z0-9]*" onChange={(event) => setHotkey(event.target.value)} placeholder="All miners" className={filterClass} /></label>
+      <label className="flex-1"><span className="mb-2 block text-[11px] text-[var(--muted)]">Miner hotkey</span><input type="search" value={hotkey} maxLength={128} pattern="[A-Za-z0-9]*" onChange={(event) => setHotkey(event.target.value.trim())} placeholder="All miners" className={filterClass} /></label>
       <label><span className="mb-2 block text-[11px] text-[var(--muted)]">Evaluation day</span><input type="date" value={day} onChange={(event) => setDay(event.target.value)} className={filterClass} /></label>
       <button type="submit" className="h-10 rounded-md bg-[var(--white)] px-5 text-[12px] font-medium text-black">Search history</button>
       {(day || hotkey || filters.day || filters.hotkey) ? <button type="button" onClick={() => { setDay(''); setHotkey(''); setPage(0); setCursors([null]); setFilters({ day: '', hotkey: '' }) }} className="h-10 px-2 text-[12px] text-[var(--muted)]">Clear</button> : null}
