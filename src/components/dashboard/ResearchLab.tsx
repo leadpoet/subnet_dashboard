@@ -77,7 +77,7 @@ export function ResearchLab({
   return (
     <ValidatorNamesContext.Provider value={validatorNames}><div className="w-full pb-12">
       <CompetitionHeader historyOpen={historyOpen} onHistory={() => setHistoryOpen((open) => !open)} />
-      {historyOpen ? <CompetitionHistory active={active} /> : !competition ? <Unavailable message="Competition data is temporarily unavailable. This page will retry automatically." /> : selectedRound ? <><ChampionSummary round={championRound} history={competitionChampionHistory(competition)} /><RoundSummary round={selectedRound} /><RoundWorkspace round={selectedRound} active={active} /></> : <p className="border-b border-[var(--line)] py-12 text-[14px] text-[var(--muted)]">No production competition round is available.</p>}
+      {historyOpen ? <CompetitionHistory active={active} /> : !competition ? <Unavailable message="Competition data is temporarily unavailable. This page will retry automatically." /> : selectedRound ? <><ChampionSummary round={championRound} history={competitionChampionHistory(competition)} active={active} /><RoundSummary round={selectedRound} /><RoundWorkspace round={selectedRound} active={active} /></> : <p className="border-b border-[var(--line)] py-12 text-[14px] text-[var(--muted)]">No production competition round is available.</p>}
       {error && competition ? <p className="mt-5 text-[12px] text-[var(--muted-2)]">Latest refresh failed: {error}</p> : null}
     </div></ValidatorNamesContext.Provider>
   )
@@ -114,7 +114,7 @@ function CompetitionHeader({ historyOpen = false, onHistory }: { historyOpen?: b
   )
 }
 
-function ChampionSummary({ round, history = [] }: { round: CompetitionRoundSummary | null; history?: CompetitionScoreHistoryPoint[] }) {
+function ChampionSummary({ round, history = [], active = true }: { round: CompetitionRoundSummary | null; history?: CompetitionScoreHistoryPoint[]; active?: boolean }) {
   const champion = round?.champion
   const [historyExpanded, setHistoryExpanded] = useState(false)
   const historyId = useId()
@@ -142,7 +142,7 @@ function ChampionSummary({ round, history = [] }: { round: CompetitionRoundSumma
       <button type="button" aria-expanded={historyExpanded} aria-controls={historyId} onClick={() => setHistoryExpanded((expanded) => !expanded)} className="mt-4 flex min-h-11 w-full items-center justify-between border-t border-[var(--line)] pt-3 text-[13px] text-[var(--platinum)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 md:hidden">
         <span>{historyExpanded ? 'Hide score history' : 'Show score history'}</span><ChevronDown aria-hidden className={`h-4 w-4 transition-transform ${historyExpanded ? 'rotate-180' : ''}`} />
       </button>
-      <div id={historyId} className={`${historyExpanded ? 'block pt-4' : 'hidden'} min-w-0 md:block md:pt-0`}>{desktopHistory || historyExpanded ? <ChampionScoreHistory points={history} /> : null}</div>
+      <div id={historyId} className={`${historyExpanded ? 'block pt-4' : 'hidden'} min-w-0 md:block md:pt-0`}>{active && (desktopHistory || historyExpanded) ? <ChampionScoreHistory points={history} /> : null}</div>
     </section>
   )
 }

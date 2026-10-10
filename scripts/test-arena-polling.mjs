@@ -166,12 +166,17 @@ try {
   assert.equal(calls.length, beforeHidden + 3, 'resuming refreshes only visible endpoints once')
   await act(async () => { inspectionToggle().props.onClick() })
   assert.match(markup(), /Public ICP 1/, 'a previously gated benchmark becomes visible after release')
+  await act(async () => { historyToggle().props.onClick() })
+  assert.match(markup(), /Champion score history/, 'expanded score history is visible before changing tabs')
   const beforeInactive = calls.length
   await act(async () => { renderer.update(React.createElement(ResearchLab, { active: false })) })
   await advance(2 * 60_000)
   assert.equal(calls.length, beforeInactive, 'switching to FAQ pauses the kept-mounted competition')
+  assert.doesNotMatch(markup(), /Champion score history/, 'hidden competition must not measure a chart inside the inactive panel')
   await act(async () => { renderer.update(React.createElement(ResearchLab, { active: true })) })
   assert.equal(calls.length, beforeInactive + 5)
+  assert.equal(historyToggle().props['aria-expanded'], true, 'returning to competition preserves expanded score history')
+  assert.match(markup(), /Champion score history/, 'score history returns when competition becomes visible')
   const pending = deferred()
   respond = async (url) => {
     if (url.endsWith('/submissions')) await pending.promise
