@@ -417,7 +417,7 @@ try {
   })))
   assert.match(multiVersionMarkup, /Evaluating/)
   assert.doesNotMatch(multiVersionMarkup, /bbbbbbbbbbbb|cccccccccccc|local modifications|checkout state unknown/)
-  assert.equal((multiVersionMarkup.match(/Leadpoet/g) ?? []).length, 1, 'live rows show each validator once per phase')
+  assert.equal((multiVersionMarkup.match(/Leadpoet/g) ?? []).length, 2, 'each mutually exclusive mobile/desktop status shows a validator once per phase')
   assert.match(multiVersionMarkup, /Scoring · .*Yuma/)
   const archivedVersionMarkup = renderToStaticMarkup(withNames(React.createElement(renderedModule.exports.EvaluationRunSummary, { submission: completedEvaluation })))
   assert.match(archivedVersionMarkup, /Execution/)
@@ -447,14 +447,20 @@ try {
   assert.match(namedAttribution, new RegExp(primaryHotkey), 'full hotkeys remain available in expanded attribution')
 
   const renderSummary = (round) => renderToStaticMarkup(React.createElement(renderedModule.exports.RoundSummary, { round }))
-  for (const status of ['open', 'committed', 'stage1', 'stage1_scored', 'stage2', 'scored']) {
+  for (const [status, label] of Object.entries({
+    open: 'Open for submissions', committed: 'Preparing evaluation',
+    stage1: 'Initial evaluation in progress', stage1_closed: 'Initial evaluation in progress',
+    stage1_scoring: 'Initial scoring in progress', stage1_judged: 'Initial scoring in progress',
+    stage1_scored: 'Preparing final evaluation', stage2: 'Final evaluation in progress',
+    stage2_closed: 'Final evaluation in progress', stage2_scoring: 'Final scoring in progress',
+    stage2_judged: 'Final scoring in progress', scored: 'Publishing results',
+  })) {
     const markup = renderSummary({ ...snapshot.latestCompletedRound, status, publishedAt: null, baseline: null })
     assert.match(markup, /Pending/, `${status} must not imply a final promotion decision`)
     assert.match(markup, /Decision follows completed evaluation/)
     assert.match(markup, /Awaiting score/, `${status} must distinguish a missing baseline score from zero`)
     assert.doesNotMatch(markup, /Not required|No champion was published|Stage1 scored/)
-    if (status === 'scored') assert.match(markup, /Publishing results/)
-    else if (status !== 'open') assert.match(markup, /Scoring/)
+    assert.ok(markup.includes(label), `${status} must use a readable round status`)
   }
   const historyMarkup = renderToStaticMarkup(React.createElement(renderedModule.exports.ChampionScoreHistory, { points: history }))
   assert.match(historyMarkup, /Champion history/)
@@ -500,7 +506,7 @@ try {
   assert.match(completedBaselineMarkup, /Pending/)
   assert.doesNotMatch(completedBaselineMarkup, /Awaiting score|No champion was published/)
   assert.equal(competitionSubmissionStatusLabel({ ...submissions[0], status: 'scored' }, activeRound),
-    'Scored · round in progress', 'a completed model must not imply a winner or promotion')
+    'Scored · provisional', 'a completed model must not imply a winner or promotion')
   assert.match(finalMarkup, /Promotion margin · \+1\.00 points/)
   assert.match(finalMarkup, /Not required/)
   assert.match(finalMarkup, /No champion was published/)
@@ -510,8 +516,24 @@ try {
   const championMarkup = renderToStaticMarkup(React.createElement(renderedModule.exports.ChampionSummary, { round: currentChampionRound(championSnapshot) }))
   assert.match(championMarkup, /Current champion/)
   assert.match(championMarkup, /5\.75/)
-  assert.match(championMarkup, /Winning score · Oct 7, 2026 · UTC/)
+  assert.match(championMarkup, /Published winning score · Oct 7, 2026 · UTC/)
   assert.doesNotMatch(championMarkup, /99\.00|Baseline score/)
+  const renderScoreTable = (round, finalScore, selectedId = null) => renderToStaticMarkup(React.createElement(renderedModule.exports.SubmissionTable, {
+    submissions: [{ ...submissions[0], submissionId: 'score-label-control', status: 'scored', finalScore }],
+    round, selectedId, onSelect: () => {},
+  }))
+  const provisionalTable = renderScoreTable(activeRound, 0)
+  assert.match(provisionalTable, />Provisional score</)
+  assert.match(provisionalTable, />0\.00</, 'a provisional zero remains a real score')
+  assert.match(provisionalTable, /View evaluation/)
+  assert.match(provisionalTable, /aria-expanded="false"/)
+  assert.match(renderScoreTable(activeRound, null), />—</, 'missing scores stay missing')
+  const publishedTable = renderScoreTable(snapshot.latestCompletedRound, 0, 'score-label-control')
+  assert.match(publishedTable, />Score</)
+  assert.doesNotMatch(publishedTable, /Provisional score|Scored · provisional/)
+  assert.match(publishedTable, /Close evaluation/)
+  assert.match(publishedTable, /aria-expanded="true"/)
+  assert.doesNotMatch(renderScoreTable(snapshot.latestRound, null), /Provisional score/)
   const noChampionMarkup = renderToStaticMarkup(React.createElement(renderedModule.exports.ChampionSummary, { round: null }))
   assert.match(noChampionMarkup, /No promoted champion in published history/)
   assert.doesNotMatch(noChampionMarkup, />0\.00</)

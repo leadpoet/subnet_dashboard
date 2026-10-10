@@ -19,6 +19,7 @@ const calls = []
 const timers = new Map()
 const listeners = new Set()
 const window = {
+  matchMedia: () => ({ matches: false, addEventListener() {}, removeEventListener() {} }),
   setTimeout(callback, delay) {
     const id = ++nextTimer
     timers.set(id, { callback, at: now + delay })
@@ -131,6 +132,13 @@ try {
   assert.equal(calls.length, 3)
   assert.equal(count('/metagraph'), 1)
   assert.match(markup(), /Queued for validation/)
+  const historyToggle = () => renderer.root.findAllByType('button').find((button) => button.children.some((child) => typeof child !== 'string' && child.children.some((text) => text === 'Show score history' || text === 'Hide score history')))
+  assert.equal(historyToggle().props['aria-expanded'], false)
+  await act(async () => { historyToggle().props.onClick() })
+  assert.equal(historyToggle().props['aria-expanded'], true, 'score history can expand without reloading the competition')
+  assert.equal(calls.length, 3, 'opening score history reuses existing public scores')
+  await act(async () => { historyToggle().props.onClick() })
+  assert.equal(historyToggle().props['aria-expanded'], false)
   const inspectionToggle = () => renderer.root.findAllByType('button').find((button) => button.props.title === 'competitor')
   assert.equal(inspectionToggle().props['aria-expanded'], false, 'submission details start collapsed')
   competitor.evaluation = { state: 'evaluating', validators: [{ hotkey: '5Validator', phase: 'scoring' }] }

@@ -1,6 +1,7 @@
 'use client'
 
-import { Fragment, createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
+import { Fragment, createContext, useCallback, useContext, useEffect, useId, useRef, useState, type ReactNode } from 'react'
+import { ChevronDown, ChevronRight } from 'lucide-react'
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { useVisiblePolling } from '@/lib/hooks/useVisiblePolling'
 import {
@@ -84,9 +85,9 @@ export function ResearchLab({
 
 function ResearchLabLoading() {
   return <div aria-busy="true" aria-label="Loading competition"><CompetitionHeader />
-    <section aria-label="Current champion" className="grid min-w-0 gap-8 rounded-xl border border-[var(--line)] bg-[var(--surface)] p-6 md:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)] md:gap-12 md:p-8">
+    <section aria-label="Current champion" className="grid min-w-0 gap-4 rounded-xl border border-[var(--line)] bg-[var(--surface)] p-4 md:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)] md:gap-12 md:p-8">
       <div className="flex flex-col justify-center"><h2 className="text-[13px] text-[var(--muted)]">Current champion</h2><div className="mt-4 h-[88px] w-48 shimmer rounded-md" /><div className="mt-5 h-4 w-56 shimmer rounded" /><div className="mt-2 h-3 w-36 shimmer rounded" /></div>
-      <div><div className="text-[13px] text-[var(--platinum)]">Champion history <span className="text-[11px] text-[var(--muted-2)]">/100</span></div><div className="mt-3 h-[180px] shimmer rounded-md" /><div className="mt-2 h-3 w-36 shimmer rounded" /></div>
+      <div className="hidden md:block"><div className="text-[13px] text-[var(--platinum)]">Champion history <span className="text-[11px] text-[var(--muted-2)]">/100</span></div><div className="mt-3 h-[180px] shimmer rounded-md" /><div className="mt-2 h-3 w-36 shimmer rounded" /></div>
     </section>
     <section className="mt-8 border-y border-[var(--line)] py-5"><div className="grid gap-5 sm:grid-cols-[1fr_2fr]"><div className="h-12 w-32 shimmer rounded" /><div className="grid grid-cols-2 gap-5"><div className="h-12 shimmer rounded" /><div className="h-12 shimmer rounded" /></div></div><div className="mt-5 h-4 w-24 shimmer rounded" /></section>
     <section className="pt-10"><h3 className="font-display text-[22px] text-[var(--platinum)]">Submissions</h3><div className="my-5 h-10 shimmer rounded-md" /><SubmissionRowsLoading /></section>
@@ -103,7 +104,7 @@ function Unavailable({ message }: { message: string }) {
 
 function CompetitionHeader({ historyOpen = false, onHistory }: { historyOpen?: boolean; onHistory?: () => void }) {
   return (
-    <header className="flex flex-wrap items-center justify-between gap-5 py-7 md:py-9">
+    <header className="flex flex-wrap items-center justify-between gap-4 py-5 md:gap-5 md:py-9">
       <div>
         <h1 className="font-display text-[28px] font-medium tracking-[-0.04em] text-[var(--white)] md:text-[36px]">{historyOpen ? 'Competition history' : 'Agent competition'}</h1>
         <p className="mt-2 text-[13px] text-[var(--muted)]">Open-source sales intelligence.</p>
@@ -115,20 +116,33 @@ function CompetitionHeader({ historyOpen = false, onHistory }: { historyOpen?: b
 
 function ChampionSummary({ round, history = [] }: { round: CompetitionRoundSummary | null; history?: CompetitionScoreHistoryPoint[] }) {
   const champion = round?.champion
+  const [historyExpanded, setHistoryExpanded] = useState(false)
+  const historyId = useId()
+  const [desktopHistory, setDesktopHistory] = useState(false)
+  useEffect(() => {
+    const query = window.matchMedia('(min-width: 768px)')
+    const update = () => setDesktopHistory(query.matches)
+    update()
+    query.addEventListener('change', update)
+    return () => query.removeEventListener('change', update)
+  }, [])
   return (
-    <section aria-label="Current champion" className="grid min-w-0 gap-8 rounded-xl border border-[var(--line)] bg-[var(--surface)] p-6 md:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)] md:gap-12 md:p-8">
-      <div className="flex min-w-0 flex-col justify-center">
+    <section aria-label="Current champion" className="grid min-w-0 rounded-xl border border-[var(--line)] bg-[var(--surface)] p-4 md:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)] md:gap-12 md:p-8">
+      <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-3 md:flex md:flex-col md:items-start md:justify-center md:gap-0">
         <h2 className="text-[13px] text-[var(--muted)]">Current champion</h2>
-        <div className="mt-4 font-display text-[clamp(64px,7vw,88px)] font-medium leading-none tracking-[-0.06em] text-[var(--white)]">
-          {formatCompetitionScore(champion?.finalScore ?? null)}<span className="ml-3 text-[22px] tracking-normal text-[var(--muted-2)]">/100</span>
+        <div className="font-display text-[48px] font-medium leading-none tracking-[-0.06em] text-[var(--white)] md:mt-4 md:text-[88px]">
+          {formatCompetitionScore(champion?.finalScore ?? null)}<span className="ml-2 text-[18px] tracking-normal text-[var(--muted)] md:ml-3 md:text-[22px]">/100</span>
         </div>
-        {round && champion ? <div className="mt-5 space-y-1.5 text-[12px] text-[var(--muted)]">
-          <p>Winning score · {formatUtcDate(round.evaluationDate)}</p>
-          <p className="font-mono text-[11px] text-[var(--muted-2)]" title={champion.minerHotkey}>{shortHotkey(champion.minerHotkey)}</p>
+        {round && champion ? <div className="col-span-2 space-y-1.5 text-[12px] text-[var(--muted)] md:mt-5">
+          <p>Published winning score · {formatUtcDate(round.evaluationDate)}</p>
+          <p className="font-mono text-[12px]" title={champion.minerHotkey}>{shortHotkey(champion.minerHotkey)}</p>
           {champion.finalScore === null ? <p>Champion score unavailable.</p> : null}
-        </div> : <p className="mt-5 text-[12px] text-[var(--muted)]">No promoted champion in published history.</p>}
+        </div> : <p className="col-span-2 text-[12px] text-[var(--muted)] md:mt-5">No promoted champion in published history.</p>}
       </div>
-      <ChampionScoreHistory points={history} />
+      <button type="button" aria-expanded={historyExpanded} aria-controls={historyId} onClick={() => setHistoryExpanded((expanded) => !expanded)} className="mt-4 flex min-h-11 w-full items-center justify-between border-t border-[var(--line)] pt-3 text-[13px] text-[var(--platinum)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 md:hidden">
+        <span>{historyExpanded ? 'Hide score history' : 'Show score history'}</span><ChevronDown aria-hidden className={`h-4 w-4 transition-transform ${historyExpanded ? 'rotate-180' : ''}`} />
+      </button>
+      <div id={historyId} className={`${historyExpanded ? 'block pt-4' : 'hidden'} min-w-0 md:block md:pt-0`}>{desktopHistory || historyExpanded ? <ChampionScoreHistory points={history} /> : null}</div>
     </section>
   )
 }
@@ -137,8 +151,8 @@ function RoundSummary({ round }: { round: CompetitionRoundSummary }) {
   const baselineScore = round.baseline?.finalScore ?? null
   const evaluationComplete = round.status === 'published'
   return (
-    <section aria-label="Current round" className="mt-8 border-y border-[var(--line)]">
-      <div className="grid gap-5 py-5 sm:grid-cols-[1fr_2fr] sm:gap-8">
+    <section aria-label="Current round" className="mt-6 md:mt-8 border-y border-[var(--line)]">
+      <div className="grid gap-3 py-4 sm:grid-cols-[1fr_2fr] sm:gap-8 sm:py-5">
         <div>
           <div className="text-[12px] text-[var(--muted)]">Current round</div>
           <div className="mt-2 flex items-center gap-2 text-[14px] text-[var(--platinum)]"><span aria-hidden className="h-1.5 w-1.5 rounded-full bg-[var(--white)]" />{roundStatusLabel(round.status)}</div>
@@ -180,7 +194,7 @@ function ChampionScoreHistory({ points }: { points: CompetitionScoreHistoryPoint
     </div>
     {publishedScores.length ? <>
       <div className="mt-3 h-[180px] w-full min-w-0">
-        <ResponsiveContainer width="100%" height="100%" minWidth={0}>
+        <ResponsiveContainer width="100%" height="100%" minWidth={0} initialDimension={{ width: 320, height: 180 }}>
           <LineChart data={points} accessibilityLayer margin={{ top: 8, right: 9, bottom: 0, left: 0 }}>
             <CartesianGrid vertical={false} stroke="var(--line)" strokeDasharray="3 5" />
             <XAxis dataKey="timestamp" type="number" scale="time" domain={points.length === 1 ? [points[0].timestamp - 43_200_000, points[0].timestamp + 43_200_000] : ['dataMin', 'dataMax']} ticks={historyTicks(points)} tickFormatter={formatHistoryDate} stroke="var(--line)" tick={{ fill: 'var(--muted-2)', fontSize: 10 }} tickLine={false} axisLine={false} minTickGap={25} tickMargin={10} />
@@ -370,8 +384,8 @@ function RoundWorkspace({ round, active, initialSubmissionId = null, inspectionO
     <div className="grid min-w-0 gap-8 xl:grid-cols-[minmax(0,1.5fr)_minmax(260px,0.5fr)]"><PublishedResults benchmark={benchmark} benchmarkState={benchmarkState} results={results} resultsState={resultsState} round={round} submission={selectedSubmission} /><SourcePanel submission={selectedSubmission} cancelled={round.status === 'cancelled'} code={code} codeState={codeState} selectedFile={selectedCodeFile} onSelectFile={setSelectedFile} onRequest={() => void requestCode()} /></div>
   </div> : null
   if (inspectionOnly) return roundLoading ? <div className="p-5"><SubmissionRowsLoading /></div> : inspection ?? <InlineNotice>{roundError ?? 'Submission details are unavailable.'}</InlineNotice>
-  return <section className="pt-10" aria-label="Current submissions">
-    <div className="mb-5 flex items-end justify-between gap-4"><div><h3 className="font-display text-[22px] font-medium tracking-[-0.025em] text-[var(--platinum)]">Submissions</h3><p className="mt-1 text-[12px] text-[var(--muted-2)]">{formatDay(round.evaluationDate)}</p></div><span className="font-mono text-[10px] text-[var(--muted-2)]">{submissions.length} total</span></div>
+  return <section className="pt-6 md:pt-10" aria-label="Current submissions">
+    <div className="mb-5 flex items-end justify-between gap-4"><div><h3 className="font-display text-[22px] font-medium tracking-[-0.025em] text-[var(--platinum)]">Submissions</h3><p className="mt-1 text-[12px] text-[var(--muted-2)]">{formatDay(round.evaluationDate)}</p></div><span className="font-mono text-[12px] text-[var(--muted)]">{submissions.length} total</span></div>
     <div className="mb-4 flex flex-col gap-3 sm:flex-row"><label className="flex-1"><span className="sr-only">Find your miner</span><input type="search" value={query} onChange={(event) => { setQuery(event.target.value); setPage(0) }} placeholder="Search miner hotkey or submission" className={filterClass} /></label><label><span className="sr-only">Submission status</span><select value={statusFilter} onChange={(event) => { setStatusFilter(event.target.value); setPage(0) }} className={filterClass}><option value="all">All statuses</option><option value="evaluating">Evaluating</option><option value="queued">Queued</option><option value="retrying">Retrying</option><option value="failed">Failed</option><option value="review">Code review</option><option value="rejected">Review rejected</option><option value="scored">Completed</option></select></label></div>
     {roundError ? <div className="mb-3"><InlineNotice>{roundError} Last known submissions are shown below.</InlineNotice></div> : null}
     {roundLoading ? <SubmissionRowsLoading /> : filtered.length ? <><SubmissionTable submissions={filtered.slice(currentPage * 15, (currentPage + 1) * 15)} round={round} selectedId={inspectionOpen ? selectedSubmissionId : null} expandedContent={inspectionOpen ? inspection : null} onSelect={(id) => { selectSubmission(id); setInspectionOpen(id !== selectedSubmissionId || !inspectionOpen) }} /><Pagination page={currentPage} hasNext={currentPage + 1 < pageCount} onPrevious={() => setPage(currentPage - 1)} onNext={() => setPage(currentPage + 1)} label={`${filtered.length} ${query || statusFilter !== 'all' ? 'matches' : 'submissions'}`} /></> : <InlineNotice>{submissions.length ? 'No miners match these filters.' : 'No submissions are public for this round.'}</InlineNotice>}
@@ -381,7 +395,7 @@ function RoundWorkspace({ round, active, initialSubmissionId = null, inspectionO
 // Stretch the native button over its row, preserving keyboard and table semantics.
 const evaluationRowButtonClass = 'text-left after:absolute after:inset-0 after:cursor-pointer focus-visible:outline-none focus-visible:after:ring-1 focus-visible:after:ring-inset focus-visible:after:ring-[var(--platinum)]'
 
-const filterClass = 'h-10 w-full rounded-md border border-[var(--line-2)] bg-[var(--surface)] px-3 text-[12px] text-[var(--platinum)] placeholder:text-[var(--muted-2)]'
+const filterClass = 'h-11 w-full rounded-md border border-[var(--line-2)] bg-[var(--surface)] px-3 text-[16px] sm:text-[14px] text-[var(--platinum)] placeholder:text-[var(--muted-2)]'
 
 function filterSubmissions(submissions: CompetitionSubmission[], query: string, status: string) {
   const needle = query.trim().toLowerCase()
@@ -465,25 +479,27 @@ function CompetitionHistory({ active }: { active: boolean }) {
 }
 
 function SubmissionTable({ submissions, round, selectedId, onSelect, expandedContent }: { submissions: CompetitionSubmission[]; round: CompetitionRoundSummary; selectedId: string | null; onSelect: (submissionId: string) => void; expandedContent?: ReactNode }) {
+  const provisional = !['open', 'published', 'cancelled'].includes(round.status)
   return (
     <div className="overflow-x-auto rounded-lg border border-[var(--line)]">
       <table className="w-full border-collapse text-left">
-        <thead className="sticky top-0 z-10 bg-[var(--surface)] text-[11px] text-[var(--muted)]">
-          <tr><th scope="col" className="px-4 py-3 font-normal">Submission</th><th scope="col" className="hidden px-4 py-3 font-normal sm:table-cell">Miner</th><th scope="col" className="px-3 py-3 font-normal">Status</th><th scope="col" className="px-4 py-3 text-right font-normal">Score</th></tr>
+        <thead className="sticky top-0 z-10 bg-[var(--surface)] text-[12px] text-[var(--muted)]">
+          <tr><th scope="col" className="px-4 py-3 font-normal">Submission</th><th scope="col" className="hidden px-4 py-3 font-normal sm:table-cell">Miner</th><th scope="col" className="hidden px-3 py-3 font-normal sm:table-cell">Status</th><th scope="col" className="px-4 py-3 text-right font-normal">{provisional ? 'Provisional score' : 'Score'}</th></tr>
         </thead>
         <tbody>{submissions.map((submission) => {
           const selected = submission.submissionId === selectedId
           return <Fragment key={submission.submissionId}><tr className={`relative cursor-pointer border-t border-[var(--line)] transition-colors ${selected ? 'bg-white/[0.045]' : 'hover:bg-white/[0.02]'}`}>
             <td className="p-0">
-              <button id={`evaluation-toggle-${submission.submissionId}`} type="button" onClick={() => onSelect(submission.submissionId)} className={`w-full px-4 py-3 ${evaluationRowButtonClass}`} aria-expanded={selected} aria-controls={`submission-${submission.submissionId}`} title={submission.submissionId}>
-                <span className="block max-w-[110px] truncate font-mono text-[11px] text-[var(--platinum)] sm:max-w-none">{shortId(submission.submissionId)}</span>
-                {submission.isBaseline ? <span className="mt-1 block text-[10px] text-[var(--muted)]">Baseline</span> : null}
-                <span className="mt-1 block max-w-[110px] truncate font-mono text-[10px] text-[var(--muted-2)] sm:hidden" title={submission.minerHotkey}>{shortHotkey(submission.minerHotkey)}</span>
+              <button id={`evaluation-toggle-${submission.submissionId}`} type="button" onClick={() => onSelect(submission.submissionId)} className={`w-full px-4 py-4 ${evaluationRowButtonClass}`} aria-expanded={selected} aria-controls={`submission-${submission.submissionId}`} title={submission.submissionId}>
+                <span className="flex flex-wrap items-center gap-x-2 gap-y-1"><span className="font-mono text-[12px] text-[var(--platinum)]">{shortId(submission.submissionId)}</span>{submission.isBaseline ? <span className="text-[12px] text-[var(--muted)]">Baseline</span> : null}</span>
+                <span className="mt-1 block font-mono text-[12px] text-[var(--muted)] sm:hidden" title={submission.minerHotkey}>{shortHotkey(submission.minerHotkey)}</span>
+                <span className="mt-2 flex items-center gap-1 text-[12px] text-[var(--platinum)]">{selected ? 'Close evaluation' : 'View evaluation'}<ChevronRight aria-hidden className={`h-3.5 w-3.5 transition-transform ${selected ? 'rotate-90' : ''}`} /></span>
               </button>
+              <div className="px-4 pb-4 text-[13px] leading-relaxed text-[var(--muted)] sm:hidden"><SubmissionStatus submission={submission} round={round} /></div>
             </td>
-            <td className="hidden px-4 py-3 font-mono text-[11px] text-[var(--muted)] sm:table-cell" title={submission.minerHotkey}>{shortHotkey(submission.minerHotkey)}</td>
-            <td className="px-3 py-3 text-[11px] text-[var(--muted)]"><SubmissionStatus submission={submission} round={round} /></td>
-            <td className="px-4 py-3 text-right font-mono text-[12px] text-[var(--platinum)]">{formatCompetitionScore(submission.finalScore)}</td>
+            <td className="hidden px-4 py-4 font-mono text-[12px] text-[var(--muted)] sm:table-cell" title={submission.minerHotkey}>{shortHotkey(submission.minerHotkey)}</td>
+            <td className="hidden px-3 py-4 text-[13px] leading-relaxed text-[var(--muted)] sm:table-cell"><SubmissionStatus submission={submission} round={round} /></td>
+            <td className="px-4 py-4 text-right align-top font-mono text-[14px] text-[var(--platinum)] sm:align-middle">{formatCompetitionScore(submission.finalScore)}</td>
           </tr>{selected && expandedContent ? <tr id={`submission-${submission.submissionId}`}><td colSpan={4} className="border-t border-[var(--line)] bg-[var(--surface)]">{expandedContent}</td></tr> : null}</Fragment>
         })}</tbody>
       </table>
@@ -500,7 +516,7 @@ function ValidatorIdentity({ hotkey, full = false }: { hotkey: string; full?: bo
 function SubmissionStatus({ submission, round }: { submission: CompetitionSubmission; round: CompetitionRoundSummary }) {
   const evaluating = submission.status === 'scoring' && submission.evaluation?.state === 'evaluating'
   const retrying = isSubmissionRetrying(submission) && submission.evaluation?.state === 'evaluating'
-  return <div><span className={evaluating ? 'text-[var(--platinum)]' : ''}>{competitionSubmissionStatusLabel(submission, round)}</span>{retrying ? <span className="ml-1">· retrying tasks</span> : null}{evaluating ? <div className="mt-1 space-y-1 text-[10px] text-[var(--muted-2)]">{submission.evaluation?.validators.filter((validator, index, validators) => validators.findIndex((item) => item.hotkey === validator.hotkey && item.phase === validator.phase) === index).map(({ hotkey, phase }) => <div key={`${hotkey}-${phase}`}>{phase === 'scoring' ? 'Scoring' : 'Running'} · <ValidatorIdentity hotkey={hotkey} /></div>)}</div> : null}</div>
+  return <div><span className={evaluating ? 'text-[var(--platinum)]' : ''}>{competitionSubmissionStatusLabel(submission, round)}</span>{retrying ? <span className="ml-1">· retrying tasks</span> : null}{evaluating ? <div className="mt-1 space-y-1 text-[12px] text-[var(--muted)]">{submission.evaluation?.validators.filter((validator, index, validators) => validators.findIndex((item) => item.hotkey === validator.hotkey && item.phase === validator.phase) === index).map(({ hotkey, phase }) => <div key={`${hotkey}-${phase}`}>{phase === 'scoring' ? 'Scoring' : 'Running'} · <ValidatorIdentity hotkey={hotkey} /></div>)}</div> : null}</div>
 }
 
 function ValidatorCodeVersion({ commit, workingTree, full = false }: { commit: string | null; workingTree: 'clean' | 'dirty' | 'unknown'; full?: boolean }) {
@@ -522,7 +538,7 @@ function PublishedResults({ benchmark, benchmarkState, results, resultsState, ro
   const scores = submission.isBaseline && round.status === 'published'
     ? new Map(benchmark.icps.flatMap((icp) => icp.baselineScore === null ? [] : [[icp.position, icp.baselineScore] as const]))
     : results?.publicScores ?? new Map<number, number>()
-  return <ResultFrame><div className="mb-5 flex flex-wrap gap-5 font-mono text-[10.5px] text-[var(--muted-2)]"><span>Score {formatCompetitionScore(results?.finalScore ?? submission.finalScore)}</span><span>{submission.isBaseline ? 'Public baseline' : shortHotkey(submission.minerHotkey)}</span></div><ScoringAttributionSummary attribution={results?.scoringAttribution ?? null} /><IcpList title={`Public ICPs (${benchmark.benchmarkIcpCount})`} icpSetDate={benchmark.icpSetDate} icps={benchmark.icps} scores={scores} scoringAttribution={results?.scoringAttribution ?? null} companyDiagnostics={results?.companyDiagnostics ?? null} /></ResultFrame>
+  return <ResultFrame><div className="mb-5 flex flex-wrap gap-5 font-mono text-[13px] text-[var(--platinum)]"><span>{round.status === 'published' ? 'Final score' : 'Provisional score'} {formatCompetitionScore(results?.finalScore ?? submission.finalScore)}</span><span>{submission.isBaseline ? 'Public baseline' : shortHotkey(submission.minerHotkey)}</span></div><ScoringAttributionSummary attribution={results?.scoringAttribution ?? null} /><IcpList title={`Public ICPs (${benchmark.benchmarkIcpCount})`} icpSetDate={benchmark.icpSetDate} icps={benchmark.icps} scores={scores} scoringAttribution={results?.scoringAttribution ?? null} companyDiagnostics={results?.companyDiagnostics ?? null} /></ResultFrame>
 }
 
 function ResultFrame({ children }: { children: ReactNode }) { return <div><h3 className="font-display text-[19px] font-medium text-[var(--platinum)]">Evaluation results</h3><div className="mt-4">{children}</div></div> }
@@ -603,7 +619,19 @@ function championMetricDetail(round: CompetitionRoundSummary, championScore: num
   if (round.promotionStatus === 'superseded') return `Superseded · ${formatCompetitionScore(championScore)}`
   return `${humanize(round.champion?.outcome ?? 'champion')} · ${formatCompetitionScore(championScore)}`
 }
-function roundStatusLabel(value: string): string { if (value === 'published') return 'Published result'; if (value === 'cancelled') return 'Cancelled round'; if (value === 'open') return 'Open for submissions'; if (['committed', 'stage1', 'stage1_scored', 'stage2'].includes(value)) return 'Scoring'; if (value === 'scored') return 'Publishing results'; return humanize(value) }
+function roundStatusLabel(value: string): string {
+  if (value === 'published') return 'Published result'
+  if (value === 'cancelled') return 'Cancelled round'
+  if (value === 'open') return 'Open for submissions'
+  if (value === 'committed') return 'Preparing evaluation'
+  if (['stage1', 'stage1_closed'].includes(value)) return 'Initial evaluation in progress'
+  if (['stage1_scoring', 'stage1_judged'].includes(value)) return 'Initial scoring in progress'
+  if (value === 'stage1_scored') return 'Preparing final evaluation'
+  if (['stage2', 'stage2_closed'].includes(value)) return 'Final evaluation in progress'
+  if (['stage2_scoring', 'stage2_judged'].includes(value)) return 'Final scoring in progress'
+  if (value === 'scored') return 'Publishing results'
+  return humanize(value)
+}
 function humanize(value: string): string { const normalized = value.trim().replaceAll('_', ' '); return normalized ? normalized[0].toUpperCase() + normalized.slice(1) : 'Unavailable' }
 function shortId(value: string): string { return value.length > 18 ? `${value.slice(0, 9)}…${value.slice(-6)}` : value }
 function shortHotkey(value: string): string { return value.length > 18 ? `${value.slice(0, 9)}…${value.slice(-6)}` : value }
