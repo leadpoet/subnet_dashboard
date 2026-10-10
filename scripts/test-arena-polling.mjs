@@ -8,6 +8,7 @@ import ts from 'typescript'
 
 const require = createRequire(import.meta.url)
 const previousActEnvironment = globalThis.IS_REACT_ACT_ENVIRONMENT
+const previousWindow = globalThis.window
 globalThis.IS_REACT_ACT_ENVIRONMENT = true
 // Next uses a React 18 concurrent root, including automatic async batching.
 const rendererOptions = { unstable_isConcurrent: true }
@@ -52,9 +53,11 @@ function load(path, extra = '') {
   modules.set(path, module.exports)
   return module.exports
 }
-const { ResearchLab, RoundWorkspace, CompetitionHistory } = load('src/components/dashboard/ResearchLab.tsx', '\nexport { RoundWorkspace, CompetitionHistory };')
+const { ResearchLab, RoundWorkspace, CompetitionHistory, CompetitionSelect } = load('src/components/dashboard/ResearchLab.tsx', '\nexport { RoundWorkspace, CompetitionHistory, CompetitionSelect };')
 const { AdminResearchLab } = load('src/app/admin/_components/AdminResearchLab.tsx')
 const { normalizeCompetitionSnapshot } = load('src/lib/research-lab-competition.ts')
+// Radix controls use window timers when cleaning up their keyboard state.
+globalThis.window = window
 
 async function advance(ms) {
   const end = now + ms
@@ -222,7 +225,7 @@ try {
   respond = publicResponse
   await act(async () => { renderer = TestRenderer.create(React.createElement(RoundWorkspace, { round: normalizedRound, active: true }), rendererOptions) })
   assert.match(markup(), /Evaluation retrying/)
-  await act(async () => { renderer.root.findByType('select').props.onChange({ target: { value: 'retrying' } }) })
+  await act(async () => { renderer.root.findByType(CompetitionSelect).props.onChange('retrying') })
   assert.match(markup(), /competitor/)
   competitor.evaluation = { state: 'evaluating', validators: [{ hotkey: '5Validator', phase: 'executing', commit: 'c'.repeat(40), working_tree: 'clean' }], counts: { ...taskCounts, active: 1, retrying: 1 }, code_versions: [{ validator_hotkey: '5Validator', phase: 'executing', commit: 'c'.repeat(40), working_tree: 'clean' }] }
   await advance(60_000)
@@ -233,12 +236,12 @@ try {
   competitor.evaluation = { state: 'failed', validators: [], counts: { ...taskCounts, failed: 2, retrying: 0 }, code_versions: competitor.evaluation.code_versions }
   await advance(60_000)
   assert.match(markup(), /No miners match these filters/)
-  await act(async () => { renderer.root.findByType('select').props.onChange({ target: { value: 'failed' } }) })
+  await act(async () => { renderer.root.findByType(CompetitionSelect).props.onChange('failed') })
   assert.match(markup(), /Evaluation failed/)
   competitor.status = 'scored'
   competitor.evaluation = { ...competitor.evaluation, state: 'completed', counts: { ...taskCounts, completed: 2, retrying: 0 } }
   await advance(60_000)
-  await act(async () => { renderer.root.findByType('select').props.onChange({ target: { value: 'scored' } }) })
+  await act(async () => { renderer.root.findByType(CompetitionSelect).props.onChange('scored') })
   assert.match(markup(), /Scored/)
   await act(async () => { renderer.root.findAllByType('button').find((button) => button.props.title === 'competitor').props.onClick() })
   assert.match(markup(), /Submission · /)
@@ -271,7 +274,7 @@ try {
   await act(async () => { sourceButton('Retry source').props.onClick() })
   assert.equal(sourceAttempts, 2)
   assert.match(markup(), /recovered source/)
-  await act(async () => { sourceButton('README.md').props.onClick() })
+  await act(async () => { renderer.root.findAllByType(CompetitionSelect).find((select) => select.props.label === 'Source file').props.onChange('README.md') })
   assert.match(markup(), /source readme/)
   assert.doesNotMatch(markup(), /recovered source|Released source is temporarily unavailable/)
   await unmount()
@@ -300,8 +303,13 @@ try {
   assert.match(markup(), /miner-31/)
   assert.match(markup(), /Code review rejected/)
   assert.match(markup(), /1 match · /, 'one filtered submission uses a singular result label')
-  await act(async () => { renderer.root.findByType('input').props.onChange({ target: { value: '' } }); renderer.root.findByType('select').props.onChange({ target: { value: 'rejected' } }) })
+  await act(async () => { renderer.root.findByType('input').props.onChange({ target: { value: '' } }); renderer.root.findByType(CompetitionSelect).props.onChange('rejected') })
   assert.match(markup(), /miner-31/)
+  await act(async () => { renderer.root.findAllByType('button').find((button) => button.props.children === 'Clear filters').props.onClick() })
+  assert.equal(renderer.root.findByType('input').props.value, '')
+  assert.equal(renderer.root.findByType(CompetitionSelect).props.value, 'all')
+  assert.match(markup(), /miner-0/)
+  assert.doesNotMatch(markup(), /miner-31/)
   await unmount()
 
   // A missing archived submission must never silently select the baseline.
@@ -388,4 +396,6 @@ try {
 } finally {
   await act(async () => { renderer?.unmount() })
   globalThis.IS_REACT_ACT_ENVIRONMENT = previousActEnvironment
+  if (previousWindow === undefined) delete globalThis.window
+  else globalThis.window = previousWindow
 }

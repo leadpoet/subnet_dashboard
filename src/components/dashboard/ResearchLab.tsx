@@ -1,7 +1,8 @@
 'use client'
 
 import { Fragment, createContext, useCallback, useContext, useEffect, useId, useRef, useState, type ReactNode } from 'react'
-import { ChevronDown, ChevronRight } from 'lucide-react'
+import { Check, ChevronDown, ChevronRight, ChevronUp } from 'lucide-react'
+import * as Select from '@radix-ui/react-select'
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { useVisiblePolling } from '@/lib/hooks/useVisiblePolling'
 import {
@@ -241,6 +242,7 @@ function RoundWorkspace({ round, active, initialSubmissionId = null, inspectionO
   const [benchmark, setBenchmark] = useState<CompetitionBenchmark | null>(null)
   const [benchmarkState, setBenchmarkState] = useState<ReleaseState>('loading')
   const [query, setQuery] = useState('')
+  const searchInputRef = useRef<HTMLInputElement>(null)
   const [statusFilter, setStatusFilter] = useState('all')
   const [page, setPage] = useState(0)
   const [selectedSubmissionId, setSelectedSubmissionId] = useState<string | null>(initialSubmissionId)
@@ -378,7 +380,7 @@ function RoundWorkspace({ round, active, initialSubmissionId = null, inspectionO
   const pageCount = Math.max(1, Math.ceil(filtered.length / 15))
   const currentPage = Math.min(page, pageCount - 1)
   const inspection = selectedSubmission ? <div className="p-4 sm:p-6" aria-label="Submission evaluation">
-    <div className="mb-6 flex flex-wrap items-start justify-between gap-3"><div className="min-w-0"><h4 className="text-[14px] text-[var(--white)]">Agent evaluation</h4><p className="mt-1 text-[12px] text-[var(--muted)]">{formatDay(round.evaluationDate)}</p><p className="mt-2 break-all font-mono text-[10px] text-[var(--muted-2)]">Submission · {selectedSubmission.submissionId}</p><p className="mt-1 break-all font-mono text-[10px] text-[var(--muted-2)]">Miner hotkey · {selectedSubmission.minerHotkey}</p></div><button type="button" onClick={() => { setInspectionOpen(false); document.getElementById(`evaluation-toggle-${selectedSubmission.submissionId}`)?.focus() }} className={`${inspectionOnly ? 'hidden' : ''} rounded border border-[var(--line-2)] px-3 py-1.5 text-[11px] text-[var(--muted)]`}>Close evaluation</button></div>
+    <div className="mb-6 flex flex-wrap items-start justify-between gap-3"><div className="min-w-0"><h4 className="text-[14px] text-[var(--white)]">Agent evaluation</h4><p className="mt-1 text-[12px] text-[var(--muted)]">{formatDay(round.evaluationDate)}</p><p className="mt-2 break-all font-mono text-[10px] text-[var(--muted-2)]">Submission · {selectedSubmission.submissionId}</p><p className="mt-1 break-all font-mono text-[10px] text-[var(--muted-2)]">Miner hotkey · {selectedSubmission.minerHotkey}</p></div><button type="button" onClick={() => { setInspectionOpen(false); document.getElementById(`evaluation-toggle-${selectedSubmission.submissionId}`)?.focus() }} className={`${inspectionOnly ? 'hidden' : ''} min-h-11 rounded border border-[var(--line-2)] px-3 py-1.5 text-[11px] text-[var(--muted)]`}>Close evaluation</button></div>
     <div className="mb-4 text-[11px] text-[var(--muted)]"><SubmissionStatus submission={selectedSubmission} round={round} /></div>
     <EvaluationRunSummary submission={selectedSubmission} />
     <div className="grid min-w-0 grid-cols-1 gap-8 xl:grid-cols-[minmax(0,1.5fr)_minmax(260px,0.5fr)]"><PublishedResults benchmark={benchmark} benchmarkState={benchmarkState} results={results} resultsState={resultsState} round={round} submission={selectedSubmission} /><SourcePanel submission={selectedSubmission} cancelled={round.status === 'cancelled'} code={code} codeState={codeState} selectedFile={selectedCodeFile} onSelectFile={setSelectedFile} onRequest={() => void requestCode()} /></div>
@@ -386,7 +388,11 @@ function RoundWorkspace({ round, active, initialSubmissionId = null, inspectionO
   if (inspectionOnly) return roundLoading ? <div className="p-5"><SubmissionRowsLoading /></div> : inspection ?? <InlineNotice>{roundError ?? 'Submission details are unavailable.'}</InlineNotice>
   return <section className="pt-6 md:pt-10" aria-label="Current submissions">
     <div className="mb-5 flex items-end justify-between gap-4"><div><h3 className="font-display text-[22px] font-medium tracking-[-0.025em] text-[var(--platinum)]">Submissions</h3><p className="mt-1 text-[12px] text-[var(--muted-2)]">{formatDay(round.evaluationDate)}</p></div><span className="font-mono text-[12px] text-[var(--muted)]">{submissions.length} total</span></div>
-    <div className="mb-4 flex flex-col gap-3 sm:flex-row"><label className="flex-1"><span className="sr-only">Find your miner</span><input type="search" value={query} onChange={(event) => { setQuery(event.target.value); setPage(0) }} placeholder="Search miner hotkey or submission" className={filterClass} /></label><label><span className="sr-only">Submission status</span><select value={statusFilter} onChange={(event) => { setStatusFilter(event.target.value); setPage(0) }} className={filterClass}><option value="all">All statuses</option><option value="evaluating">Evaluating</option><option value="queued">Queued</option><option value="retrying">Retrying</option><option value="failed">Failed</option><option value="review">Code review</option><option value="rejected">Review rejected</option><option value="scored">Completed</option></select></label></div>
+    <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-end">
+      <label className="min-w-0 flex-1"><span className={filterLabelClass}>Find your miner</span><input ref={searchInputRef} type="search" value={query} onChange={(event) => { setQuery(event.target.value); setPage(0) }} placeholder="Miner hotkey or submission" className={filterClass} /></label>
+      <div className="sm:w-48"><span className={filterLabelClass}>Submission status</span><CompetitionSelect label="Submission status" value={statusFilter} onChange={(value) => { setStatusFilter(value); setPage(0) }} options={submissionStatusOptions} /></div>
+      {query || statusFilter !== 'all' ? <button type="button" onClick={() => { setQuery(''); setStatusFilter('all'); setPage(0); searchInputRef.current?.focus() }} className="h-11 shrink-0 self-end rounded-md px-3 text-[12px] text-[var(--muted)] transition-colors hover:bg-white/5 hover:text-[var(--white)]">Clear filters</button> : null}
+    </div>
     {roundError ? <div className="mb-3"><InlineNotice>{roundError} Last known submissions are shown below.</InlineNotice></div> : null}
     {roundLoading ? <SubmissionRowsLoading /> : filtered.length ? <><SubmissionTable submissions={filtered.slice(currentPage * 15, (currentPage + 1) * 15)} round={round} selectedId={inspectionOpen ? selectedSubmissionId : null} expandedContent={inspectionOpen ? inspection : null} onSelect={(id) => { selectSubmission(id); setInspectionOpen(id !== selectedSubmissionId || !inspectionOpen) }} /><Pagination page={currentPage} hasNext={currentPage + 1 < pageCount} onPrevious={() => setPage(currentPage - 1)} onNext={() => setPage(currentPage + 1)} label={`${filtered.length} ${query || statusFilter !== 'all' ? filtered.length === 1 ? 'match' : 'matches' : filtered.length === 1 ? 'submission' : 'submissions'}`} /></> : <InlineNotice>{submissions.length ? 'No miners match these filters.' : 'No submissions are public for this round.'}</InlineNotice>}
   </section>
@@ -395,7 +401,33 @@ function RoundWorkspace({ round, active, initialSubmissionId = null, inspectionO
 // Stretch the native button over its row, preserving keyboard and table semantics.
 const evaluationRowButtonClass = 'text-left after:absolute after:inset-0 after:cursor-pointer focus-visible:outline-none focus-visible:after:ring-1 focus-visible:after:ring-inset focus-visible:after:ring-[var(--platinum)]'
 
-const filterClass = 'h-11 w-full rounded-md border border-[var(--line-2)] bg-[var(--surface)] px-3 text-[16px] sm:text-[14px] text-[var(--platinum)] placeholder:text-[var(--muted-2)]'
+const controlClass = 'h-11 w-full min-w-0 rounded-md border border-[var(--line-2)] bg-[var(--surface)] px-3 text-[var(--platinum)] placeholder:text-[var(--muted-2)] outline-none transition-colors hover:border-[var(--line-3)] focus-visible:border-[var(--platinum)] focus-visible:ring-1 focus-visible:ring-[var(--platinum)]'
+const filterClass = `${controlClass} text-[16px] sm:text-[14px]`
+const filterLabelClass = 'mb-2 block text-[11px] text-[var(--muted)]'
+
+const submissionStatusOptions = [
+  { value: 'all', label: 'All statuses' }, { value: 'evaluating', label: 'Evaluating' },
+  { value: 'queued', label: 'Queued' }, { value: 'retrying', label: 'Retrying' },
+  { value: 'failed', label: 'Failed' }, { value: 'review', label: 'Code review' },
+  { value: 'rejected', label: 'Review rejected' }, { value: 'scored', label: 'Completed' },
+]
+
+function CompetitionSelect({ label, value, options, onChange, mono = false }: { label: string; value: string; options: { value: string; label: string }[]; onChange: (value: string) => void; mono?: boolean }) {
+  return <Select.Root value={value} onValueChange={onChange}>
+    <Select.Trigger aria-label={label} className={`${controlClass} flex items-center justify-between gap-3 text-left ${mono ? 'font-mono text-[12px]' : 'text-[14px]'}`}>
+      <span className="min-w-0 truncate" title={options.find((option) => option.value === value)?.label}><Select.Value /></span>
+      <Select.Icon asChild><ChevronDown aria-hidden className="h-4 w-4 shrink-0 text-[var(--muted)]" /></Select.Icon>
+    </Select.Trigger>
+    <Select.Portal><Select.Content position="popper" sideOffset={6} align="start" collisionPadding={16} className="dashboard-popover z-50 max-h-[min(320px,var(--radix-select-content-available-height))] w-[var(--radix-select-trigger-width)] max-w-[calc(100vw-2rem)] overflow-hidden rounded-lg border border-[var(--line-3)] shadow-xl">
+      <Select.ScrollUpButton className="flex h-7 items-center justify-center text-[var(--muted)]"><ChevronUp aria-hidden className="h-4 w-4" /></Select.ScrollUpButton>
+      <Select.Viewport className="p-1">{options.map((option) => <Select.Item key={option.value} value={option.value} className={`relative flex min-h-11 cursor-default items-center rounded-md py-2.5 pl-3 pr-9 text-[var(--platinum)] outline-none data-[highlighted]:bg-white/8 data-[state=checked]:text-[var(--white)] ${mono ? 'font-mono text-[11px]' : 'text-[13px]'}`}>
+        <Select.ItemText className="min-w-0 flex-1"><span className={mono ? 'break-all' : 'break-words'}>{option.label}</span></Select.ItemText>
+        <Select.ItemIndicator className="absolute right-3"><Check aria-hidden className="h-3.5 w-3.5" /></Select.ItemIndicator>
+      </Select.Item>)}</Select.Viewport>
+      <Select.ScrollDownButton className="flex h-7 items-center justify-center text-[var(--muted)]"><ChevronDown aria-hidden className="h-4 w-4" /></Select.ScrollDownButton>
+    </Select.Content></Select.Portal>
+  </Select.Root>
+}
 
 function filterSubmissions(submissions: CompetitionSubmission[], query: string, status: string) {
   const needle = query.trim().toLowerCase()
@@ -432,12 +464,13 @@ function EvaluationRunSummary({ submission }: { submission: CompetitionSubmissio
 }
 
 function Pagination({ page, hasNext, onPrevious, onNext, label, loading = false }: { page: number; hasNext: boolean; onPrevious: () => void; onNext: () => void; label?: string; loading?: boolean }) {
-  return <nav aria-label="Submission pages" className="mt-4 flex items-center justify-between gap-3 text-[11px] text-[var(--muted)]"><span aria-live="polite">{label ? `${label} · ` : ''}Page {page + 1}</span><div className="flex gap-2"><button type="button" disabled={loading || page === 0} onClick={onPrevious} className="rounded border border-[var(--line-2)] px-3 py-2 disabled:opacity-30 hover:bg-white/5">Previous</button><button type="button" disabled={loading || !hasNext} onClick={onNext} className="rounded border border-[var(--line-2)] px-3 py-2 disabled:opacity-30 hover:bg-white/5">Next</button></div></nav>
+  return <nav aria-label="Submission pages" className="mt-4 flex items-center justify-between gap-3 text-[11px] text-[var(--muted)]"><span aria-live="polite">{label ? `${label} · ` : ''}Page {page + 1}</span><div className="flex gap-2"><button type="button" disabled={loading || page === 0} onClick={onPrevious} className="min-h-11 rounded border border-[var(--line-2)] px-3 py-2 disabled:opacity-30 hover:bg-white/5">Previous</button><button type="button" disabled={loading || !hasNext} onClick={onNext} className="min-h-11 rounded border border-[var(--line-2)] px-3 py-2 disabled:opacity-30 hover:bg-white/5">Next</button></div></nav>
 }
 
 function CompetitionHistory({ active }: { active: boolean }) {
   const [day, setDay] = useState('')
   const [hotkey, setHotkey] = useState('')
+  const hotkeyInputRef = useRef<HTMLInputElement>(null)
   const [filters, setFilters] = useState({ day: '', hotkey: '' })
   const [page, setPage] = useState(0)
   const [cursors, setCursors] = useState<Array<string | null>>([null])
@@ -465,10 +498,10 @@ function CompetitionHistory({ active }: { active: boolean }) {
   useVisiblePolling(refresh, 300_000, { enabled: active })
   return <section aria-label="Competition history" className="pb-8">
     <form className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-end" onSubmit={(event) => { event.preventDefault(); setPage(0); setCursors([null]); setFilters({ day, hotkey: hotkey.trim() }) }}>
-      <label className="flex-1"><span className="mb-2 block text-[11px] text-[var(--muted)]">Miner hotkey</span><input type="search" value={hotkey} maxLength={128} pattern="[A-Za-z0-9]*" onChange={(event) => setHotkey(event.target.value.trim())} placeholder="All miners" className={filterClass} /></label>
-      <label><span className="mb-2 block text-[11px] text-[var(--muted)]">Evaluation day</span><input type="date" value={day} onChange={(event) => setDay(event.target.value)} className={filterClass} /></label>
-      <button type="submit" className="h-10 rounded-md bg-[var(--white)] px-5 text-[12px] font-medium text-black">Search history</button>
-      {(day || hotkey || filters.day || filters.hotkey) ? <button type="button" onClick={() => { setDay(''); setHotkey(''); setPage(0); setCursors([null]); setFilters({ day: '', hotkey: '' }) }} className="h-10 px-2 text-[12px] text-[var(--muted)]">Clear</button> : null}
+      <label className="flex-1"><span className={filterLabelClass}>Miner hotkey</span><input ref={hotkeyInputRef} type="search" value={hotkey} maxLength={128} pattern="[A-Za-z0-9]*" onChange={(event) => setHotkey(event.target.value.trim())} placeholder="All miners" className={filterClass} /></label>
+      <label><span className={filterLabelClass}>Evaluation day</span><input type="date" value={day} onChange={(event) => setDay(event.target.value)} className={filterClass} /></label>
+      <button type="submit" className="h-11 rounded-md bg-[var(--white)] px-5 text-[12px] font-medium text-black">Search history</button>
+      {(day || hotkey || filters.day || filters.hotkey) ? <button type="button" onClick={() => { setDay(''); setHotkey(''); setPage(0); setCursors([null]); setFilters({ day: '', hotkey: '' }); hotkeyInputRef.current?.focus() }} className="h-11 rounded-md px-3 text-[12px] text-[var(--muted)]">Clear</button> : null}
     </form>
     {loading && !history ? <SubmissionRowsLoading /> : error ? <InlineNotice>{error} <button type="button" className="underline" onClick={() => void refresh()}>Retry</button></InlineNotice> : history?.entries.length ? <div className="overflow-x-auto rounded-lg border border-[var(--line)]"><table className="w-full table-fixed text-left"><thead className="bg-[var(--surface)] text-[11px] text-[var(--muted)]"><tr><th className="w-[45%] px-4 py-3 font-normal sm:w-1/2" scope="col">Miner</th><th className="px-3 py-3 font-normal" scope="col">Evaluation day</th><th className="w-[20%] px-4 py-3 text-right font-normal" scope="col">Score</th></tr></thead><tbody>{history.entries.map(({ round, submission }) => {
       const key = `${round.roundId}:${submission.submissionId}`
@@ -599,9 +632,9 @@ function SourcePanel({ submission, cancelled, code, codeState, selectedFile, onS
   if (cancelled && !submission.code.available) return <aside className="min-w-0"><h3 className="font-display text-[19px] font-medium text-[var(--platinum)]">Source code</h3><div className="mt-4"><InlineNotice>This round was cancelled. Source code was not published.</InlineNotice></div></aside>
   const availableAt = submission.code.availableAt ? formatUtc(submission.code.availableAt) : null
   return <aside className="min-w-0"><h3 className="font-display text-[19px] font-medium text-[var(--platinum)]">Source code</h3>
-    {codeState === 'idle' ? <div className="mt-4"><button type="button" disabled={!submission.code.available} onClick={onRequest} className="rounded-md border border-[var(--line-3)] px-3.5 py-2 font-mono text-[10px] uppercase tracking-[0.11em] text-[var(--platinum)] transition-colors hover:text-[var(--white)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand)] disabled:cursor-not-allowed disabled:opacity-45">{submission.code.available ? 'View source' : 'Source locked'}</button>{!submission.code.available ? <p className="mt-2 font-mono text-[9.5px] text-[var(--muted-2)]">{availableAt ? `Available ${availableAt}` : 'Awaiting source release'}</p> : null}</div> : null}
+    {codeState === 'idle' ? <div className="mt-4"><button type="button" disabled={!submission.code.available} onClick={onRequest} className="min-h-11 rounded-md border border-[var(--line-3)] px-3.5 py-2 font-mono text-[10px] uppercase tracking-[0.11em] text-[var(--platinum)] transition-colors hover:text-[var(--white)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand)] disabled:cursor-not-allowed disabled:opacity-45">{submission.code.available ? 'View source' : 'Source locked'}</button>{!submission.code.available ? <p className="mt-2 font-mono text-[9.5px] text-[var(--muted-2)]">{availableAt ? `Available ${availableAt}` : 'Awaiting source release'}</p> : null}</div> : null}
     {codeState === 'loading' ? <div className="mt-4 h-20 shimmer rounded-md" /> : null}{codeState === 'gated' ? <div className="mt-4"><InlineNotice>Source is not public yet. Release follows this round’s schedule.</InlineNotice></div> : null}{codeState === 'error' ? <div className="mt-4"><InlineNotice>Released source is temporarily unavailable. <button type="button" onClick={onRequest} className="mt-2 block min-h-11 rounded border border-[var(--line-2)] px-3 text-[var(--platinum)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2">Retry source</button></InlineNotice></div> : null}
-    {codeState === 'available' && code ? <div className="mt-4 overflow-hidden rounded-md border border-[var(--line)]"><div className="max-h-36 overflow-y-auto border-b border-[var(--line)] bg-[#090909] p-1.5">{code.files.map((file) => <button key={file.path} type="button" onClick={() => onSelectFile(file.path)} className={`block w-full truncate rounded px-2 py-1.5 text-left font-mono text-[10px] focus:outline-none focus-visible:ring-1 focus-visible:ring-[var(--brand)] ${file.path === selectedFile?.path ? 'bg-[rgba(236,234,230,0.07)] text-[var(--white)]' : 'text-[var(--muted-2)] hover:text-[var(--platinum)]'}`} title={file.path}>{file.path}</button>)}</div>{selectedFile ? <pre className="max-h-[420px] overflow-auto bg-[#070707] p-3 text-[10px] leading-[1.65] text-[var(--muted)]"><code>{selectedFile.content}</code></pre> : <p className="p-3 text-[11px] text-[var(--muted-2)]">No text files were released.</p>}{code.truncated ? <p className="border-t border-[var(--line)] px-3 py-2 text-[10px] text-[var(--muted-2)]">Some files are omitted from this preview.</p> : null}</div> : null}
+    {codeState === 'available' && code ? <div className="mt-4 overflow-hidden rounded-md border border-[var(--line)]"><div className="border-b border-[var(--line)] bg-[#090909] p-3"><span className={filterLabelClass}>Source file</span>{code.files.length ? <CompetitionSelect label="Source file" value={selectedFile?.path ?? code.files[0].path} onChange={onSelectFile} options={code.files.map((file) => ({ value: file.path, label: file.path }))} mono /> : null}</div>{selectedFile ? <pre className="max-h-[420px] overflow-auto bg-[#070707] p-3 text-[10px] leading-[1.65] text-[var(--muted)]"><code>{selectedFile.content}</code></pre> : <p className="p-3 text-[11px] text-[var(--muted-2)]">No text files were released.</p>}{code.truncated ? <p className="border-t border-[var(--line)] px-3 py-2 text-[10px] text-[var(--muted-2)]">Some files are omitted from this preview.</p> : null}</div> : null}
   </aside>
 }
 
