@@ -876,7 +876,7 @@ try {
   const credentialFixture = JSON.parse(await readFile(resolve('scripts/fixtures/competition-credential-error-20260912.json'), 'utf8'))
   const submissionsRouteSource = await readFile(resolve('src/app/api/research-lab/rounds/[roundId]/submissions/route.ts'), 'utf8')
   const proxySource = await readFile(resolve('src/lib/arena-public-proxy.ts'), 'utf8')
-  async function projectSubmissions(detail = credentialFixture.failed_result, detailStatus = 200) {
+  async function projectSubmissions(detail = credentialFixture.failed_result, detailStatus = 200, input = credentialFixture.submissions, expectedCalls = 2) {
     const calls = []
     const proxyModule = { exports: {} }
     vm.runInNewContext(ts.transpileModule(proxySource, {
@@ -888,7 +888,7 @@ try {
         assert.equal(options.cache, 'no-store')
         assert.equal(options.method ?? 'GET', 'GET', 'status lookup must be read-only')
         return url.endsWith('/submissions')
-          ? Response.json(credentialFixture.submissions)
+          ? Response.json(input)
           : Response.json(detail, { status: detailStatus })
       },
     })
@@ -897,7 +897,8 @@ try {
       compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
     }).outputText, {
       module: routeModule, exports: routeModule.exports,
-      require: (name) => name === '@/lib/arena-public-proxy' ? proxyModule.exports : require(name),
+      require: (name) => name === '@/lib/arena-public-proxy' ? proxyModule.exports
+        : name === '@/lib/research-lab-competition' ? { normalizeCompetitionSubmissions } : require(name),
     })
     const response = await routeModule.exports.GET(null, { params: Promise.resolve({ roundId: credentialFixture.submissions.round_id }) })
     assert.equal(response.status, 200)
@@ -905,8 +906,27 @@ try {
     assert.deepEqual(calls, [
       `${credentialFixture.source}/submissions`,
       `${credentialFixture.source}/results/${credentialFixture.failed_result.submission_id}`,
-    ], 'only the failed submission needs a detail lookup')
+    ].slice(0, expectedCalls), 'only legacy failures without a displayed reason need a detail lookup')
     return response.json()
+  }
+  const detailedFailures = {
+    ...credentialFixture.submissions,
+    submissions: Array.from({ length: 145 }, (_, index) => ({
+      ...credentialFixture.submissions.submissions.find((row) => row.status === 'scoring_failed'),
+      submission_id: `failed-${index}`,
+      evaluation: { state: 'failed', validators: [], failure_reasons: [['provider_credentials'], ['execution_window'], ['provider'], ['execution'], ['review'], ['unknown', 'execution']][index % 6] },
+    })),
+  }
+  assert.deepEqual(await projectSubmissions(undefined, 200, detailedFailures, 1), detailedFailures,
+    '145 failures with authoritative reasons need one upstream read and preserve all public fields')
+  for (const reasons of [[], ['unknown'], ['future_reason']]) {
+    const legacy = structuredClone(credentialFixture.submissions)
+    legacy.submissions.find((row) => row.status === 'scoring_failed').evaluation = {
+      state: 'failed', validators: [], failure_reasons: reasons,
+    }
+    const fallback = await projectSubmissions(undefined, 200, legacy)
+    assert.equal(fallback.submissions.find((row) => row.status === 'scoring_failed').failure_reason, 'credential_error',
+      'unknown and unsupported reasons retain the verified legacy fallback')
   }
   const projected = await projectSubmissions()
   const liveSubmissions = normalizeCompetitionSubmissions(projected)
@@ -969,8 +989,8 @@ try {
   assert.match(component, /publicIcpStatus !== 'ready'/)
   assert.match(component, /useVisiblePolling\(refreshRound, 60_000, \{ enabled: active \}\)/)
   assert.match(component, /selectedSubmissionIdRef\.current !== requestedSubmissionId/)
-  assert.match(component, /if \(!selectedSubmissionId \|\| reviewExcluded\) return/, 'terminal review failures must not request a result')
-  assert.ok(component.indexOf('if (!selectedSubmissionId || reviewExcluded) return') < component.indexOf('fetchReleasedJson(`/api/research-lab/rounds/${encodeURIComponent(requestedRoundId)}/results/'), 'the review exclusion gate must run before the result request')
+  assert.match(component, /if \(!inspectionOpen \|\| !selectedSubmissionId \|\| reviewExcluded\) return/, 'terminal review failures must not request a result')
+  assert.ok(component.indexOf('if (!inspectionOpen || !selectedSubmissionId || reviewExcluded) return') < component.indexOf('fetchReleasedJson(`/api/research-lab/rounds/${encodeURIComponent(requestedRoundId)}/results/'), 'the review exclusion gate must run before the result request')
   assert.match(component, /Last known submissions are shown below/)
   assert.match(component, /normalized\?\.roundId !== requestedRoundId/)
   assert.match(component, /This round was cancelled\. Aggregate and per-ICP scores were not published\./)
@@ -987,7 +1007,7 @@ try {
   assert.match(component, /Available after evaluation and cost checks\./)
   assert.doesNotMatch(component, /label="Round baseline"|label="Round status"|SummaryMetric/, 'summary must not repeat its score and status in metric cards')
   assert.match(component, /ICP set · \{formatUtcDate\(icpSetDate\)\}/)
-  assert.match(component, /normalizeCompetitionBenchmark\(benchmarkRequest\.value\.body, \{ roundId, icpSetDate, publicAt, benchmarkIcpCount \}\)/)
+  assert.match(component, /normalizeCompetitionBenchmark\(response\.body, \{ roundId, icpSetDate, publicAt, benchmarkIcpCount \}\)/)
   assert.match(component, /Some files are omitted from this preview\./)
   assert.match(component, /promotionStatus === 'promoted'[^]*Becomes next baseline/)
   assert.match(component, /promotionStatus === 'pending'[^]*Promotion pending/)
