@@ -245,6 +245,32 @@ try {
   competitor.status = 'scoring'
   competitor.evaluation = { state: 'evaluating', validators: [{ hotkey: '5Validator', phase: 'scoring' }] }
 
+  // A transient source failure must be recoverable without reloading the page.
+  let sourceAttempts = 0
+  respond = (url) => {
+    if (url.endsWith('/submissions')) return Response.json({ round_id: round.round_id, submissions: [{ ...baseline, code: { available: true } }, competitor] })
+    if (url.endsWith('/code')) {
+      sourceAttempts += 1
+      return sourceAttempts === 1 ? Response.json({ error: 'temporary failure' }, { status: 502 }) : Response.json({
+        submission_id: 'baseline', files: [{ path: 'agent.py', content: 'recovered source' }, { path: 'README.md', content: 'source readme' }],
+      })
+    }
+    return publicResponse(url)
+  }
+  await act(async () => { renderer = TestRenderer.create(React.createElement(RoundWorkspace, { round: normalizedRound, active: true }), rendererOptions) })
+  const sourceButton = (label) => renderer.root.findAllByType('button').find((button) => button.props.children === label)
+  await act(async () => { renderer.root.findAllByType('button').find((button) => button.props.title === 'baseline').props.onClick() })
+  await act(async () => { sourceButton('View source').props.onClick() })
+  assert.match(markup(), /Released source is temporarily unavailable/)
+  assert.ok(sourceButton('Retry source'), 'a failed source request must offer an immediate retry')
+  await act(async () => { sourceButton('Retry source').props.onClick() })
+  assert.equal(sourceAttempts, 2)
+  assert.match(markup(), /recovered source/)
+  await act(async () => { sourceButton('README.md').props.onClick() })
+  assert.match(markup(), /source readme/)
+  assert.doesNotMatch(markup(), /recovered source|Released source is temporarily unavailable/)
+  await unmount()
+
   // A new round still starts fetching immediately and ignores the old request.
   const oldRound = deferred()
   respond = async (url) => {
@@ -268,6 +294,7 @@ try {
   await act(async () => { renderer.root.findByType('input').props.onChange({ target: { value: '5Miner31' } }) })
   assert.match(markup(), /miner-31/)
   assert.match(markup(), /Code review rejected/)
+  assert.match(markup(), /1 match · /, 'one filtered submission uses a singular result label')
   await act(async () => { renderer.root.findByType('input').props.onChange({ target: { value: '' } }); renderer.root.findByType('select').props.onChange({ target: { value: 'rejected' } }) })
   assert.match(markup(), /miner-31/)
   await unmount()

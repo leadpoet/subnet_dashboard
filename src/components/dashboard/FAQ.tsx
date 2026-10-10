@@ -219,6 +219,7 @@ function FAQAccordionItem({
         id={contentId}
         role="region"
         aria-labelledby={buttonId}
+        aria-hidden={!isOpen}
         className={cn(
           'overflow-hidden transition-all duration-300 ease-out motion-reduce:transition-none',
           isOpen ? 'max-h-[900px] opacity-100' : 'max-h-0 opacity-0'
