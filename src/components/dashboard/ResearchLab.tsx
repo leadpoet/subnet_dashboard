@@ -565,7 +565,10 @@ function PublishedResults({ benchmark, benchmarkState, results, resultsState, ro
   if (benchmarkState === 'gated') return <ResultFrame>{attributionSummary}<InlineNotice>All {round.benchmarkIcpCount} ICPs become public{round.publicAt ? ` at ${formatUtc(round.publicAt)}` : ' at the scheduled release'}. Each model’s score appears when its evaluation is complete.</InlineNotice></ResultFrame>
   if (!benchmark || benchmarkState === 'error') return <ResultFrame>{attributionSummary}<InlineNotice>Published public-ICP details are temporarily unavailable.</InlineNotice></ResultFrame>
   if (evaluationNotice) return <PendingIcpResults benchmark={benchmark}>{evaluationNotice}</PendingIcpResults>
-  if (submission.status === 'scoring_failed') return <PendingIcpResults benchmark={benchmark}>{competitionSubmissionStatusLabel(submission, round)}. No complete evaluation score is available.</PendingIcpResults>
+  if (submission.status === 'scoring_failed') {
+    const scores = round.status === 'published' && resultsState === 'available' && results?.publicIcpStatus === 'ready' && results.finalScore === null ? results.publicScores : undefined
+    return <PendingIcpResults benchmark={benchmark} scores={scores}>{competitionSubmissionStatusLabel(submission, round)}. No complete evaluation score is available.</PendingIcpResults>
+  }
   if ((!submission.isBaseline || round.status !== 'published') && resultsState === 'error') return <PendingIcpResults benchmark={benchmark}>The ICPs are public. Published scores are temporarily unavailable.</PendingIcpResults>
   if ((!submission.isBaseline || round.status !== 'published') && (resultsState === 'loading' || resultsState === 'gated' || !results || results.publicIcpStatus !== 'ready')) return <PendingIcpResults benchmark={benchmark}>This model’s score and diagnostics appear when its evaluation and cost checks are complete.</PendingIcpResults>
   const scores = submission.isBaseline && round.status === 'published'
@@ -576,7 +579,7 @@ function PublishedResults({ benchmark, benchmarkState, results, resultsState, ro
 
 function ResultFrame({ children }: { children: ReactNode }) { return <div><h3 className="font-display text-[19px] font-medium text-[var(--platinum)]">Evaluation results</h3><div className="mt-4">{children}</div></div> }
 
-function PendingIcpResults({ benchmark, children }: { benchmark: CompetitionBenchmark; children: ReactNode }) { return <ResultFrame><InlineNotice>{children}</InlineNotice><div className="mt-5"><IcpList title={`Public ICPs (${benchmark.benchmarkIcpCount})`} icpSetDate={benchmark.icpSetDate} icps={benchmark.icps} scores={new Map()} /></div></ResultFrame> }
+function PendingIcpResults({ benchmark, children, scores = new Map<number, number>() }: { benchmark: CompetitionBenchmark; children: ReactNode; scores?: Map<number, number> }) { return <ResultFrame><InlineNotice>{children}</InlineNotice><div className="mt-5"><IcpList title={`Public ICPs (${benchmark.benchmarkIcpCount})`} icpSetDate={benchmark.icpSetDate} icps={benchmark.icps} scores={scores} /></div></ResultFrame> }
 
 function ScoringAttributionSummary({ attribution, loading = false }: { attribution: CompetitionScoringAttribution | null; loading?: boolean }) {
   const names = useContext(ValidatorNamesContext)

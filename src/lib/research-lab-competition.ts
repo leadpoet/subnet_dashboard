@@ -445,7 +445,13 @@ export function normalizeCompetitionResults(
     })
   }
 
-  if (!incomplete && publicIcpStatus === 'ready' && publicScores.size !== benchmarkIcpCount) return null
+  // A published incomplete evaluation can expose its stored per-ICP scores
+  // without claiming an aggregate. Complete results still require every ICP.
+  const publishedPartial = text(source.score_status) === 'published'
+    && submissionScores?.stage_1 === null && submissionScores?.final === null
+    && validPartialScoreRows(scores?.stage_1, benchmarkIcpCount)
+    && validPartialScoreRows(scores?.stage_2, benchmarkIcpCount)
+  if (!incomplete && publicIcpStatus === 'ready' && publicScores.size !== benchmarkIcpCount && !publishedPartial) return null
   return {
     roundId,
     submissionId,
@@ -663,6 +669,19 @@ function perIcpScores(value: unknown, benchmarkIcpCount: number): Map<number, nu
     if (position !== null && position < benchmarkIcpCount && valueScore !== null) result.set(position, valueScore)
   }
   return result
+}
+
+function validPartialScoreRows(value: unknown, benchmarkIcpCount: number): boolean {
+  if (!Array.isArray(value)) return false
+  const positions = new Set<number>()
+  return value.every((item) => {
+    const row = record(item)
+    const position = integer(row?.icp_position)
+    if (!row || position === null || position >= benchmarkIcpCount
+      || score(row.per_icp_score) === null || positions.has(position)) return false
+    positions.add(position)
+    return true
+  })
 }
 
 function mergeScores(...sources: Map<number, number>[]): Map<number, number> {
