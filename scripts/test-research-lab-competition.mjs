@@ -292,6 +292,34 @@ try {
   assert.equal(incomplete.scoringAttribution, null)
   assert.equal(incomplete.companyDiagnostics, null, 'cancelled evidence must not expose company diagnostics')
 
+  // Published Oct10 Tyche: seven stored scores, three unjudged ICPs, no aggregate.
+  const partialPublishedPayload = {
+    round_id: 'arena-2026-10-10', submission_id: 'sub-897a3b2e85aa7a7d57d3f0e34d48b9c6',
+    benchmark_icp_count: 10, score_status: 'published', public_icp_status: 'ready',
+    scores: { stage_1: [], stage_2: [0, 45.5, 0, 0, 0, 0, 35.75].map((per_icp_score, icp_position) => ({ icp_position, per_icp_score })) },
+    submission_scores: { stage_1: null, final: null },
+  }
+  const partialPublished = normalizeCompetitionResults(partialPublishedPayload)
+  assert.ok(partialPublished)
+  assert.equal(partialPublished.finalScore, null)
+  assert.equal(partialPublished.stage1Score, null)
+  assert.deepEqual([...partialPublished.publicScores], [[0, 0], [1, 45.5], [2, 0], [3, 0], [4, 0], [5, 0], [6, 35.75]])
+  for (const position of [7, 8, 9]) assert.equal(partialPublished.publicScores.has(position), false, 'unjudged ICPs must remain missing')
+  for (const submissionScores of [{ final: 0, stage_1: null }, { final: null, stage_1: 50 }, { stage_1: null }]) {
+    assert.equal(normalizeCompetitionResults({ ...partialPublishedPayload, submission_scores: submissionScores }), null, 'a partial result needs explicit null aggregates')
+  }
+  assert.equal(normalizeCompetitionResults({ ...partialPublishedPayload, score_status: 'complete' }), null, 'unpublished partial results still fail closed')
+  for (const extraRow of [null, {}, { icp_position: -1, per_icp_score: 50 }, { icp_position: 10, per_icp_score: 50 }, { icp_position: 1.5, per_icp_score: 50 }, { icp_position: 7, per_icp_score: NaN }, { icp_position: 7, per_icp_score: Infinity }, { icp_position: 7, per_icp_score: -1 }, { icp_position: 7, per_icp_score: 101 }, { icp_position: 7, per_icp_score: '50' }, { icp_position: 1, per_icp_score: 99 }]) {
+    assert.equal(normalizeCompetitionResults({ ...partialPublishedPayload, scores: { stage_1: [], stage_2: [...partialPublishedPayload.scores.stage_2, extraRow] } }), null, 'malformed sparse scores must not become apparently valid partial evidence')
+  }
+  assert.equal(normalizeCompetitionResults({ ...partialPublishedPayload, round_id: '' }), null)
+  assert.equal(normalizeCompetitionResults({ ...partialPublishedPayload, submission_id: '' }), null)
+  assert.equal(normalizeCompetitionResults(partialPublishedPayload, { roundId: 'another-round', benchmarkIcpCount: 10 }), null)
+  const completeTenPayload = { ...partialPublishedPayload, submission_id: 'baseline-2026-10-10', scores: { stage_1: Array.from({ length: 10 }, (_, icp_position) => ({ icp_position, per_icp_score: icp_position === 6 ? 12.75 : 0 })), stage_2: [] }, submission_scores: { stage_1: null, final: 1.275 } }
+  assert.equal(normalizeCompetitionResults(completeTenPayload).publicScores.size, 10, 'complete baseline scores remain available')
+  assert.equal(normalizeCompetitionResults({ ...completeTenPayload, scores: { stage_1: completeTenPayload.scores.stage_1.slice(0, 9), stage_2: [] } }), null, 'a numeric aggregate still requires complete per-ICP coverage')
+  assert.equal(normalizeCompetitionResults({ ...partialPublishedPayload, incomplete: true, round_status: 'cancelled' }).publicScores.size, 0, 'cancelled sparse evidence remains hidden')
+
   const code = normalizeCompetitionCode({ submission_id: 'miner-1', files: [{ path: 'agent.py', content: 'print(1)' }], truncated: true })
   assert.deepEqual(code.files[0], { path: 'agent.py', content: 'print(1)', language: null })
   assert.equal(code.truncated, true)
@@ -312,6 +340,30 @@ try {
   const evaluationRow = (evaluation, status = 'scoring') => normalizeCompetitionSubmissions({ submissions: [{
     submission_id: 'agent-progress', miner_hotkey: '5miner', status, evaluation,
   }] })[0]
+  const partialRound = { ...snapshot.latestCompletedRound, roundId: partialPublished.roundId, status: 'published', benchmarkIcpCount: 10 }
+  const partialBenchmark = { ...benchmark, benchmarkIcpCount: 10, icps: benchmark.icps.slice(0, 10) }
+  const partialSubmission = { ...evaluationRow({ state: 'failed', validators: [], failure_reasons: ['scoring_window'] }, 'scoring_failed'), submissionId: partialPublished.submissionId, finalScore: null }
+  const renderPartial = (overrides = {}) => renderToStaticMarkup(React.createElement(renderedModule.exports.PublishedResults, {
+    submission: partialSubmission, round: partialRound, benchmark: partialBenchmark, benchmarkState: 'available', results: partialPublished, resultsState: 'available', ...overrides,
+  }))
+  const partialMarkup = renderPartial()
+  assert.match(partialMarkup, /Evaluation incomplete · scoring window ended/)
+  assert.match(partialMarkup, /No complete evaluation score is available/)
+  assert.match(partialMarkup, /45\.50/)
+  assert.match(partialMarkup, /35\.75/)
+  assert.equal((partialMarkup.match(/>0\.00<\/span>/g) ?? []).length, 5, 'five stored zero scores must render')
+  assert.equal((partialMarkup.match(/>—<\/span>/g) ?? []).length, 3, 'three unjudged scores must stay blank')
+  assert.doesNotMatch(partialMarkup, /Final score/, 'the renderer must not invent an aggregate')
+  for (const overrides of [
+    { round: { ...partialRound, status: 'cancelled' } },
+    { round: { ...partialRound, status: 'stage2_scoring' } },
+    { benchmark: null, benchmarkState: 'gated' },
+    { results: { ...partialPublished, publicIcpStatus: 'pending' } },
+    { results: { ...partialPublished, finalScore: 99 } },
+    { resultsState: 'loading' }, { resultsState: 'error' },
+    { submission: { ...partialSubmission, status: 'review_failed' } },
+  ]) assert.doesNotMatch(renderPartial(overrides), /45\.50|35\.75/, 'sparse scores must respect publication, disclosure, review, and result-state gates')
+  assert.match(renderPartial({ results: { ...partialPublished, incomplete: true } }), /This round was cancelled/)
   const evaluating = evaluationRow({ state: 'evaluating', validators: [{ hotkey: primaryHotkey, phase: 'scoring' }, { hotkey: yumaHotkey, phase: 'executing' }] })
   const queued = evaluationRow({ state: 'queued', validators: [] })
   assert.equal(competitionSubmissionStatusLabel(queued, pendingRound), 'Queued for validation')
@@ -1021,7 +1073,6 @@ try {
   assert.match(component, /This round was cancelled\. Source code was not published\./)
   assert.match(component, /This model’s score and diagnostics appear when its evaluation and cost checks are complete\./)
   assert.match(component, /<PendingIcpResults benchmark=\{benchmark\}>/)
-  assert.match(component, /if \(submission\.status === 'scoring_failed'\) return <PendingIcpResults benchmark=\{benchmark\}>\{competitionSubmissionStatusLabel\(submission, round\)\}\. No complete evaluation score is available\./, 'failed-run zero placeholders must not render as completed per-ICP evaluations')
   assert.ok(component.indexOf("if (submission.status === 'scoring_failed')") < component.indexOf('const scores = submission.isBaseline'), 'failure status must gate baseline score rendering too')
   assert.doesNotMatch(component, /24.hour|24 hours|private ICP/i)
   assert.match(component, /Submission day/)
