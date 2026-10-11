@@ -1,3 +1,11 @@
+## Scoped production authorization: October 11 failure diagnostics
+
+The user authorized the October 11 scoring incident audit and narrow permanent
+fixes. This includes accurate provider-credit and scoring-window failure labels,
+focused tests, safe merge and normal dashboard deployment, and live read-only
+verification. Preserve scores, published results, qualification, promotion,
+weights, credentials and concurrent changes. Authority ends after verification.
+
 ## Scoped production authorization: October 9 baseline-first table
 
 The user authorized showing the baseline first in the dashboard submissions
