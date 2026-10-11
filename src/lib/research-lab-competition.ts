@@ -55,7 +55,7 @@ export type CompetitionSubmission = {
   }
 }
 
-const EVALUATION_FAILURE_REASONS = ['provider_credentials', 'execution_window', 'review', 'provider', 'execution', 'unknown'] as const
+const EVALUATION_FAILURE_REASONS = ['provider_credentials', 'provider_credit_exhausted', 'execution_window', 'scoring_window', 'review', 'provider', 'execution', 'unknown'] as const
 type EvaluationFailureReason = typeof EVALUATION_FAILURE_REASONS[number]
 
 export type CompetitionEvaluation = {
@@ -539,8 +539,10 @@ function evaluationFailureLabel(submission: Pick<CompetitionSubmission, 'failure
   if (reasons && reasons.length > 1) return 'Evaluation incomplete · multiple causes'
   switch (reasons?.[0]) {
     case 'execution_window': return 'Evaluation incomplete · execution window ended'
+    case 'scoring_window': return 'Evaluation incomplete · scoring window ended'
     case 'review': return 'Evaluation incomplete · review did not finish'
     case 'provider_credentials': return 'Provider access failed'
+    case 'provider_credit_exhausted': return 'Provider credits exhausted'
     case 'provider': return 'Provider request failed'
     case 'execution': return 'Model execution failed'
   }

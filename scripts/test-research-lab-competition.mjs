@@ -345,8 +345,10 @@ try {
   assert.equal(competitionSubmissionStatusLabel(evaluationRow({ state: 'retrying', validators: [] }), pendingRound), 'Evaluation retrying')
   const failureLabels = {
     execution_window: 'Evaluation incomplete · execution window ended',
+    scoring_window: 'Evaluation incomplete · scoring window ended',
     review: 'Evaluation incomplete · review did not finish',
     provider_credentials: 'Provider access failed',
+    provider_credit_exhausted: 'Provider credits exhausted',
     provider: 'Provider request failed',
     execution: 'Model execution failed',
     unknown: 'Evaluation failed',
@@ -372,7 +374,7 @@ try {
   }))
   assert.ok(unclaimedRows.every((row) => competitionSubmissionStatusLabel(row, pendingRound) === failureLabels.execution_window))
   assert.ok(unclaimedRows.every((row) => row.evaluation.validators.length === 0 && row.evaluation.counts.failed === 10))
-  for (const reasons of ['review', [null], ['private-raw-error'], ['review', 'private-raw-error'], [{}], Array(7).fill('review')]) {
+  for (const reasons of ['review', [null], ['private-raw-error'], ['review', 'private-raw-error'], [{}], Array(9).fill('review')]) {
     const row = evaluationRow({ state: 'failed', validators: [], failure_reasons: reasons, terminal_doc: 'private-detail' })
     assert.equal(row.evaluation.failureReasons, undefined, 'invalid optional causes must not be accepted or replace progress')
     assert.equal(competitionSubmissionStatusLabel(row, pendingRound), 'Evaluation failed')
