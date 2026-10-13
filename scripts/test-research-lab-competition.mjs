@@ -470,13 +470,16 @@ try {
     submissions: [multiVersionEvaluation], round: pendingRound, selectedId: null, onSelect() {},
   })))
   assert.match(multiVersionMarkup, /Evaluating/)
-  assert.doesNotMatch(multiVersionMarkup, /bbbbbbbbbbbb|cccccccccccc|local modifications|checkout state unknown/)
+  assert.doesNotMatch(multiVersionMarkup, /bbbbbbbbbbbb|cccccccccccc|Uncommitted files detected|File state not recorded/)
   assert.equal((multiVersionMarkup.match(/Leadpoet/g) ?? []).length, 2, 'each mutually exclusive mobile/desktop status shows a validator once per phase')
   assert.match(multiVersionMarkup, /Scoring · .*Yuma/)
   const archivedVersionMarkup = renderToStaticMarkup(withNames(React.createElement(renderedModule.exports.EvaluationRunSummary, { submission: completedEvaluation })))
   assert.match(archivedVersionMarkup, /Execution/)
   assert.match(archivedVersionMarkup, new RegExp('b'.repeat(40)))
-  assert.match(archivedVersionMarkup, /clean checkout/)
+  assert.match(archivedVersionMarkup, /No uncommitted changes detected/)
+  assert.match(archivedVersionMarkup, /recorded when the validator started/)
+  assert.match(archivedVersionMarkup, /linked commit is the checkout’s base version/)
+  assert.match(archivedVersionMarkup, /does not list them or show that scoring code changed/)
   assert.match(archivedVersionMarkup, /original judgments/)
   assert.match(archivedVersionMarkup, /4 completed/)
   const unknownVersionMarkup = renderToStaticMarkup(React.createElement(renderedModule.exports.EvaluationRunSummary, { submission: unknownVersion }))
@@ -640,8 +643,12 @@ try {
     assert.match(codeVersionMarkup, /Validator code commits/)
     assert.ok(codeVersionMarkup.includes(`href="https://github.com/leadpoet/leadpoet/commit/${version.commit}"`))
     assert.equal((codeVersionMarkup.match(/Commit not recorded for accepted judgments/g) ?? []).length, 1, 'the second validator still has no recorded commit')
-    assert.equal(codeVersionMarkup.includes('local modifications'), workingTree === 'dirty')
-    assert.equal(codeVersionMarkup.includes('checkout state unknown'), workingTree === 'unknown')
+    assert.equal(codeVersionMarkup.includes('· Uncommitted files detected'), workingTree === 'dirty')
+    assert.equal(codeVersionMarkup.includes('· No uncommitted changes detected'), workingTree === 'clean')
+    assert.equal(codeVersionMarkup.includes('· File state not recorded'), workingTree === 'unknown')
+    assert.equal((codeVersionMarkup.match(/recorded when the validator started/g) ?? []).length, 1, 'checkout explanation appears once for all validators')
+    assert.match(codeVersionMarkup, /recorded when the validator started/)
+    assert.match(codeVersionMarkup, /not that files changed/)
   }
   const renderCommitCoverage = (positions) => renderToStaticMarkup(React.createElement(renderedModule.exports.ScoringAttributionSummary, {
     attribution: {
