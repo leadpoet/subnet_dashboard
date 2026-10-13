@@ -558,7 +558,7 @@ function ValidatorCodeVersion({ commit, workingTree, full = false }: { commit: s
 }
 
 function CheckoutStateExplanation() {
-  return <p className="text-[10px] leading-relaxed text-[var(--muted-2)]">This file check was recorded when the validator started. The commit is its Git HEAD. Uncommitted files can include modified, staged, deleted, or untracked files; the record does not list them or show that scoring code changed. “File state not recorded” means the check was unavailable, not that files changed.</p>
+  return <p className="text-[10px] leading-relaxed text-[var(--muted-2)]">This file check was recorded when the validator started. The linked commit is the checkout’s base version (Git HEAD). Uncommitted files can include modified, staged, deleted, or untracked files; the record does not list them or show that scoring code changed. “File state not recorded” means the check was unavailable, not that files changed.</p>
 }
 
 function PublishedResults({ benchmark, benchmarkState, results, resultsState, round, submission }: { benchmark: CompetitionBenchmark | null; benchmarkState: ReleaseState; results: CompetitionSubmissionResults | null; resultsState: ReleaseState; round: CompetitionRoundSummary; submission: CompetitionSubmission }) {

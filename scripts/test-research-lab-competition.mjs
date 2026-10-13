@@ -478,6 +478,7 @@ try {
   assert.match(archivedVersionMarkup, new RegExp('b'.repeat(40)))
   assert.match(archivedVersionMarkup, /No uncommitted changes detected/)
   assert.match(archivedVersionMarkup, /recorded when the validator started/)
+  assert.match(archivedVersionMarkup, /linked commit is the checkout’s base version/)
   assert.match(archivedVersionMarkup, /does not list them or show that scoring code changed/)
   assert.match(archivedVersionMarkup, /original judgments/)
   assert.match(archivedVersionMarkup, /4 completed/)

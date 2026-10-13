@@ -147,7 +147,7 @@ try {
   competitor.evaluation = { state: 'evaluating', validators: [{ hotkey: '5Validator', phase: 'scoring' }] }
   await advance(60_000)
   assert.match(markup(), /Evaluating/)
-  assert.doesNotMatch(markup(), /Evaluation activity|more active models|checkout state unknown/)
+  assert.doesNotMatch(markup(), /Evaluation activity|more active models|File state not recorded/)
   assert.match(markup(), /Leadpoet/)
   assert.equal(calls.length, 5, 'one public polling cycle makes only summary and submissions requests')
   assert.equal(count('/metagraph'), 1, 'validator identity polling is shared and less frequent than progress polling')
@@ -230,7 +230,7 @@ try {
   competitor.evaluation = { state: 'evaluating', validators: [{ hotkey: '5Validator', phase: 'executing', commit: 'c'.repeat(40), working_tree: 'clean' }], counts: { ...taskCounts, active: 1, retrying: 1 }, code_versions: [{ validator_hotkey: '5Validator', phase: 'executing', commit: 'c'.repeat(40), working_tree: 'clean' }] }
   await advance(60_000)
   assert.match(markup(), /Running/)
-  assert.doesNotMatch(markup(), /cccccccccccc|checkout state unknown/)
+  assert.doesNotMatch(markup(), /cccccccccccc|File state not recorded/)
   assert.match(markup(), /5Validator/)
   assert.match(markup(), /retrying tasks/)
   competitor.evaluation = { state: 'failed', validators: [], counts: { ...taskCounts, failed: 2, retrying: 0 }, code_versions: competitor.evaluation.code_versions }
@@ -325,7 +325,8 @@ try {
   await act(async () => { renderer = TestRenderer.create(React.createElement(RoundWorkspace, { round: { ...normalizedRound, status: 'published' }, active: true, inspectionOnly: true, initialSubmissionId: 'competitor' }), rendererOptions) })
   assert.match(markup(), /5HistoricalValidator/)
   assert.match(markup(), new RegExp('d'.repeat(40)))
-  assert.match(markup(), /checkout state unknown/)
+  assert.match(markup(), /File state not recorded/)
+  assert.match(markup(), /linked commit is the checkout’s base version/)
   const historicalResultReads = count('/results/competitor')
   competitor.evaluation.code_versions[0].commit = 'e'.repeat(40)
   await advance(60_000)
