@@ -510,7 +510,7 @@ try {
     stage1_scoring: 'Initial scoring in progress', stage1_judged: 'Initial scoring in progress',
     stage1_scored: 'Preparing final evaluation', stage2: 'Final evaluation in progress',
     stage2_closed: 'Final evaluation in progress', stage2_scoring: 'Final scoring in progress',
-    stage2_judged: 'Final scoring in progress', scored: 'Publishing results',
+    stage2_judged: 'Final scoring in progress', scored: 'Final result pending',
   })) {
     const markup = renderSummary({ ...snapshot.latestCompletedRound, status, publishedAt: null, baseline: null })
     assert.match(markup, /Pending/, `${status} must not imply a final promotion decision`)
@@ -559,7 +559,7 @@ try {
   const completedBaselineMarkup = renderSummary(completedBaselineRound)
   assert.match(completedBaselineMarkup, /0\.00/)
   assert.match(completedBaselineMarkup, /Baseline evaluated/)
-  assert.match(renderSummary({ ...completedBaselineRound, status: 'scored' }), /Evaluations complete. Publication pending/)
+  assert.match(renderSummary({ ...completedBaselineRound, status: 'scored' }), /Final result pending\./)
   assert.match(completedBaselineMarkup, /Pending/)
   assert.doesNotMatch(completedBaselineMarkup, /Awaiting score|No champion was published/)
   assert.equal(competitionSubmissionStatusLabel({ ...submissions[0], status: 'scored' }, activeRound),
