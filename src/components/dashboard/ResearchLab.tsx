@@ -165,7 +165,7 @@ function RoundSummary({ round }: { round: CompetitionRoundSummary }) {
         <div className="grid gap-5 pb-5 text-[12px] leading-relaxed text-[var(--muted)] sm:grid-cols-2">
           <div className="space-y-2">
             <p>Baseline score · <span className="font-mono text-[var(--platinum)]">{baselineScore === null ? 'Awaiting score' : formatCompetitionScore(baselineScore)}</span></p>
-            <p>{baselineScore === null ? 'Available after evaluation and cost checks.' : evaluationComplete ? `${round.publishedAt ? `Published ${formatUtc(round.publishedAt)}` : 'Published result'}` : round.status === 'scored' ? 'Evaluations complete. Publication pending.' : 'Baseline evaluated. Round still in progress.'}</p>
+            <p>{baselineScore === null ? 'Available after evaluation and cost checks.' : evaluationComplete ? `${round.publishedAt ? `Published ${formatUtc(round.publishedAt)}` : 'Published result'}` : round.status === 'scored' ? 'Final result pending.' : 'Baseline evaluated. Round still in progress.'}</p>
             <p>Promotion margin · +{formatCompetitionScore(round.promotionMargin)} points above baseline</p>
             {round.submissionCutoff ? <p>Submissions close · {formatUtc(round.submissionCutoff)}</p> : null}
             {round.publicAt ? <p>ICPs publish · {formatUtc(round.publicAt)}. Scores follow evaluation.</p> : null}
@@ -670,7 +670,7 @@ function roundStatusLabel(value: string): string {
   if (value === 'stage1_scored') return 'Preparing final evaluation'
   if (['stage2', 'stage2_closed'].includes(value)) return 'Final evaluation in progress'
   if (['stage2_scoring', 'stage2_judged'].includes(value)) return 'Final scoring in progress'
-  if (value === 'scored') return 'Publishing results'
+  if (value === 'scored') return 'Final result pending'
   return humanize(value)
 }
 function humanize(value: string): string { const normalized = value.trim().replaceAll('_', ' '); return normalized ? normalized[0].toUpperCase() + normalized.slice(1) : 'Unavailable' }
