@@ -458,7 +458,7 @@ function EvaluationRunSummary({ submission }: { submission: CompetitionSubmissio
     <summary className="flex cursor-pointer list-none items-center justify-between gap-3 py-3 text-[12px] text-[var(--muted)] [&::-webkit-details-marker]:hidden"><span>Evaluation run versions</span><span aria-hidden className="transition-transform group-open:rotate-45">+</span></summary>
     <div className="space-y-3 pb-4 text-[11px] text-[var(--muted)]">{evaluation?.counts ? <p>Tasks · {evaluation.counts.queued} queued · {evaluation.counts.active} active · {evaluation.counts.completed} completed · {evaluation.counts.failed} failed · {evaluation.counts.retrying} retrying</p> : null}
       <p className="text-[var(--muted-2)]">Execution and scoring runs. Accepted scoring attribution below identifies the original judgments, including reused judgments.</p>
-      {versions?.length ? versions.map((version, index) => <div key={`${version.validatorHotkey}-${version.phase}-${version.commit}-${index}`}><p>{version.phase === 'executing' ? 'Execution' : 'Scoring'} · <ValidatorIdentity hotkey={version.validatorHotkey} full /></p><div className="mt-1 break-all"><ValidatorCodeVersion commit={version.commit} workingTree={version.workingTree} full /></div></div>) : <p>Evaluation run versions were not recorded.</p>}
+      {versions?.length ? <><CheckoutStateExplanation />{versions.map((version, index) => <div key={`${version.validatorHotkey}-${version.phase}-${version.commit}-${index}`}><p>{version.phase === 'executing' ? 'Execution' : 'Scoring'} · <ValidatorIdentity hotkey={version.validatorHotkey} full /></p><div className="mt-1 break-all"><ValidatorCodeVersion commit={version.commit} workingTree={version.workingTree} full /></div></div>)}</> : <p>Evaluation run versions were not recorded.</p>}
     </div>
   </details>
 }
@@ -553,7 +553,12 @@ function SubmissionStatus({ submission, round }: { submission: CompetitionSubmis
 }
 
 function ValidatorCodeVersion({ commit, workingTree, full = false }: { commit: string | null; workingTree: 'clean' | 'dirty' | 'unknown'; full?: boolean }) {
-  return <span>{commit ? <a href={`https://github.com/leadpoet/leadpoet/commit/${commit}`} target="_blank" rel="noreferrer" className="relative z-10 font-mono text-[var(--platinum)] underline underline-offset-4" title={commit}>{full ? commit : commit.slice(0, 12)}</a> : 'Commit not recorded'}{commit ? ` · ${workingTree === 'dirty' ? 'local modifications' : workingTree === 'clean' ? 'clean checkout' : 'checkout state unknown'}` : ''}</span>
+  const status = workingTree === 'dirty' ? 'Uncommitted files detected' : workingTree === 'clean' ? 'No uncommitted changes detected' : 'File state not recorded'
+  return <span>{commit ? <a href={`https://github.com/leadpoet/leadpoet/commit/${commit}`} target="_blank" rel="noreferrer" className="relative z-10 font-mono text-[var(--platinum)] underline underline-offset-4" title={commit}>{full ? commit : commit.slice(0, 12)}</a> : 'Commit not recorded'}{commit ? ` · ${status}` : ''}</span>
+}
+
+function CheckoutStateExplanation() {
+  return <p className="text-[10px] leading-relaxed text-[var(--muted-2)]">This file check was recorded when the validator started. The commit is its Git HEAD. Uncommitted files can include modified, staged, deleted, or untracked files; the record does not list them or show that scoring code changed. “File state not recorded” means the check was unavailable, not that files changed.</p>
 }
 
 function PublishedResults({ benchmark, benchmarkState, results, resultsState, round, submission }: { benchmark: CompetitionBenchmark | null; benchmarkState: ReleaseState; results: CompetitionSubmissionResults | null; resultsState: ReleaseState; round: CompetitionRoundSummary; submission: CompetitionSubmission }) {
@@ -588,7 +593,7 @@ function ScoringAttributionSummary({ attribution, loading = false }: { attributi
       <span>Scored by <span className="ml-1 text-[var(--platinum)]">{loading ? 'Loading…' : attribution?.validators.length ? attribution.validators.map(({ hotkey }) => Object.hasOwn(names, hotkey) ? `${names[hotkey]} (${shortHotkey(hotkey)})` : shortHotkey(hotkey)).join(', ') : 'Unavailable'}</span></span>
       <span aria-hidden className="transition-transform group-open:rotate-45">+</span>
     </summary>
-    <div className="space-y-3 pb-4">{attribution?.validators.map((validator) => {
+    <div className="space-y-3 pb-4">{attribution?.codeVersions?.length ? <CheckoutStateExplanation /> : null}{attribution?.validators.map((validator) => {
       const codeVersions = attribution.codeVersions?.filter((version) => version.validatorHotkey === validator.hotkey) ?? []
       const missingCommitCount = Math.max(0, validator.icpCount - new Set(codeVersions.flatMap((version) => version.icpPositions)).size)
       return <div key={validator.hotkey}>
