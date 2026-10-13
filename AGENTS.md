@@ -1,3 +1,11 @@
+## Scoped production authorization: October 13 final-result status
+
+The user authorized the October 13 baseline safety fix and live dashboard
+verification. Correct the pending final-result wording, run focused checks,
+and use the normal dashboard merge and deployment path. Preserve all scores,
+baseline and champion labels, API contracts, polling, and concurrent work.
+This authority ends after the wording is deployed and verified.
+
 ## Scoped production authorization: October 11 failure diagnostics
 
 The user authorized the October 11 scoring incident audit and narrow permanent
