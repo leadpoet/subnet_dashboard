@@ -1,3 +1,14 @@
+## Scoped production authorization: October 14 terminal review diagnostics
+
+The user authorized correction of confirmed Arena diagnostic regressions and
+normal dashboard deployment. Show recorded provider credit or access failures
+for terminal code review failures. Keep unknown causes generic and do not imply
+that terminal failures are retrying. This includes focused checks, safe merge,
+normal deployment and live read-only verification. Preserve API contracts,
+scores, baseline and champion labels, promotion, disclosure and concurrent work.
+The parent task owns push, review and deployment. This authority ends after live
+verification. Keep this file and `CLAUDE.md` byte-identical.
+
 ## Scoped production authorization: October 13 final-result status
 
 The user authorized the October 13 baseline safety fix and live dashboard

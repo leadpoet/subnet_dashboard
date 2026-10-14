@@ -559,7 +559,9 @@ export function competitionSubmissionStatusLabel(
   submission: Pick<CompetitionSubmission, 'isBaseline' | 'isChampion' | 'status' | 'failureReason' | 'codeReview' | 'evaluation'>,
   round: Pick<CompetitionRoundSummary, 'promotionStatus' | 'status'>,
 ): string {
-  if (submission.status === 'review_failed') return 'Code review could not complete'
+  if (submission.status === 'review_failed') {
+    return codeReviewIssueLabel(submission.codeReview, true) ?? 'Code review could not complete'
+  }
   if (submission.status === 'review_rejected') return 'Code review rejected'
   if (submission.isChampion || submission.status === 'champion') {
     if (round.promotionStatus === 'pending') return 'Champion · promotion pending'
@@ -771,17 +773,19 @@ function isReviewExcludedStatus(value: string): boolean {
   return value === 'review_failed' || value === 'review_rejected'
 }
 
-function codeReviewIssueLabel(review: CompetitionCodeReview): string | null {
+function codeReviewIssueLabel(review: CompetitionCodeReview, terminal = false): string | null {
+  if (terminal && review.status !== 'error') return null
   if (review.status === 'reviewing') return 'Code review in progress'
   if (review.status !== 'error') return null
   if (
     review.errorCode === 'code_review_provider_authentication'
     || review.providerHttpStatus === 401
     || review.providerHttpStatus === 403
-  ) return 'Provider credential error'
+  ) return terminal ? 'Code review failed · provider access denied' : 'Provider credential error'
   if (review.errorCode === 'code_review_provider_credit' || review.providerHttpStatus === 402) {
-    return 'Insufficient provider credit'
+    return terminal ? 'Code review failed · insufficient provider credit' : 'Insufficient provider credit'
   }
+  if (terminal) return null
   if (review.retryable === true) return 'Code review unavailable · retrying'
   if (review.status === 'error' || review.errorCode) return 'Code review unavailable'
   return null

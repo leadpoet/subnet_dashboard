@@ -913,8 +913,8 @@ try {
     competitionSubmissionEvaluationNotice(reviewRejected, pendingRound),
     'Code review rejected. This submission was not evaluated.',
   )
-  const normalizePendingReview = (codeReview) => normalizeCompetitionSubmissions({ submissions: [{
-    submission_id: 'pending-review', miner_hotkey: '5Pending', status: 'queued',
+  const normalizePendingReview = (codeReview, status = 'queued') => normalizeCompetitionSubmissions({ submissions: [{
+    submission_id: 'pending-review', miner_hotkey: '5Pending', status,
     is_baseline: false, stage1_score: null, final_score: null, is_champion: false,
     code: { available: false, available_at: null, url: null }, code_review: codeReview,
   }] })[0]
@@ -932,6 +932,35 @@ try {
   assert.equal(competitionSubmissionStatusLabel(reviewingWithStaleError, pendingRound), 'Code review in progress')
   assert.equal(competitionSubmissionStatusLabel(passedWithStaleError, pendingRound), 'Queued for validation')
   assert.equal(competitionSubmissionEvaluationNotice(passedWithStaleError, pendingRound), null, 'a passed review must ignore an old error document')
+
+  const terminalReviewCases = [
+    [{ status: 'error', error_code: 'code_review_provider_credit', provider_http_status: 402, retryable: true }, 'Code review failed · insufficient provider credit'],
+    [{ status: 'error', error_code: 'code_review_provider_authentication', provider_http_status: 403, retryable: true }, 'Code review failed · provider access denied'],
+    [{ status: 'error', error_code: 'code_review_provider_credit' }, 'Code review failed · insufficient provider credit'],
+    [{ status: 'error', error_code: 'code_review_provider_authentication' }, 'Code review failed · provider access denied'],
+    [{ status: 'error', provider_http_status: 402 }, 'Code review failed · insufficient provider credit'],
+    [{ status: 'error', provider_http_status: 403 }, 'Code review failed · provider access denied'],
+    [{ status: 'error', provider_http_status: 401 }, 'Code review failed · provider access denied'],
+    [{ status: 'error', error_code: 'code_review_provider_unavailable', provider_http_status: 503, retryable: true }, 'Code review could not complete'],
+    [{ status: 'error', error_code: 'unknown_failure' }, 'Code review could not complete'],
+    [{ status: 'passed', error_code: 'code_review_provider_credit', provider_http_status: 402 }, 'Code review could not complete'],
+    [{ status: 'reviewing', error_code: 'code_review_provider_credit', provider_http_status: 402 }, 'Code review could not complete'],
+    [{}, 'Code review could not complete'],
+  ]
+  for (const [codeReview, label] of terminalReviewCases) {
+    const submission = normalizePendingReview(codeReview, 'review_failed')
+    assert.equal(competitionSubmissionStatusLabel(submission, pendingRound), label)
+    assert.equal(competitionSubmissionEvaluationNotice(submission, pendingRound), `${label}. This submission was not evaluated.`)
+    const terminalRowsMarkup = renderToStaticMarkup(React.createElement(renderedModule.exports.SubmissionTable, {
+      submissions: [submission], round: pendingRound, selectedId: submission.submissionId, onSelect() {},
+    }))
+    const terminalResultsMarkup = renderToStaticMarkup(React.createElement(renderedModule.exports.PublishedResults, {
+      submission, round: pendingRound, benchmark, benchmarkState: 'available', results: null, resultsState: 'idle',
+    }))
+    assert.ok(terminalRowsMarkup.includes(label), 'the terminal cause must appear in the submissions table')
+    assert.ok(terminalResultsMarkup.includes(`${label}. This submission was not evaluated.`), 'the terminal cause must appear in submission details')
+    assert.doesNotMatch(terminalRowsMarkup + terminalResultsMarkup, /retrying|>0\.00</i, 'terminal failures must not imply a retry or a score')
+  }
 
   const reviewRowsMarkup = renderToStaticMarkup(React.createElement(renderedModule.exports.SubmissionTable, {
     submissions: [madaraReviewFailure, reviewRejected, authPending, creditPending, retryingPending, legacyPending],
