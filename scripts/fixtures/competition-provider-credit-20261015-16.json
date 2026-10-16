@@ -1,0 +1,169 @@
+{
+  "captured_at": "2026-10-16T03:44:32.161522+00:00",
+  "source": "https://gateway.subnet71.com/arena/v1/rounds/{round_id}/submissions",
+  "groups": [
+    {
+      "round_id": "arena-2026-10-15",
+      "submissions": [
+        {
+          "submission_id": "sub-d85459ed504e64ebbccaaab782c837d0",
+          "status": "scoring_failed",
+          "evaluation": {
+            "state": "failed",
+            "validators": [],
+            "active_count": 0,
+            "counts": {
+              "queued": 0,
+              "active": 0,
+              "completed": 7,
+              "failed": 8,
+              "retrying": 0
+            },
+            "failure_reasons": [
+              "provider_credit_exhausted",
+              "scoring_window"
+            ]
+          }
+        },
+        {
+          "submission_id": "sub-8f83da83b9db806521fd30ea95361f86",
+          "status": "scoring_failed",
+          "evaluation": {
+            "state": "failed",
+            "validators": [],
+            "active_count": 0,
+            "counts": {
+              "queued": 0,
+              "active": 0,
+              "completed": 0,
+              "failed": 10,
+              "retrying": 0
+            },
+            "failure_reasons": [
+              "provider_credit_exhausted"
+            ]
+          }
+        },
+        {
+          "submission_id": "sub-7e2996b2205842947c9135ee7ee3e4f7",
+          "status": "scoring_failed",
+          "evaluation": {
+            "state": "failed",
+            "validators": [],
+            "active_count": 0,
+            "counts": {
+              "queued": 0,
+              "active": 0,
+              "completed": 0,
+              "failed": 10,
+              "retrying": 0
+            },
+            "failure_reasons": [
+              "provider_credit_exhausted"
+            ]
+          }
+        },
+        {
+          "submission_id": "sub-2d67258dcd26a445dd9cb83ef3f1f919",
+          "status": "scoring_failed",
+          "evaluation": {
+            "state": "failed",
+            "validators": [],
+            "active_count": 0,
+            "counts": {
+              "queued": 0,
+              "active": 0,
+              "completed": 0,
+              "failed": 10,
+              "retrying": 0
+            },
+            "failure_reasons": [
+              "provider_credit_exhausted"
+            ]
+          }
+        },
+        {
+          "submission_id": "sub-e3353eff68eaa6269813432a553f59b7",
+          "status": "scoring_failed",
+          "evaluation": {
+            "state": "failed",
+            "validators": [],
+            "active_count": 0,
+            "counts": {
+              "queued": 0,
+              "active": 0,
+              "completed": 0,
+              "failed": 10,
+              "retrying": 0
+            },
+            "failure_reasons": [
+              "provider_credit_exhausted"
+            ]
+          }
+        },
+        {
+          "submission_id": "sub-1af3bffd34f9193e7338f88931d2f8d5",
+          "status": "scoring_failed",
+          "evaluation": {
+            "state": "failed",
+            "validators": [],
+            "active_count": 0,
+            "counts": {
+              "queued": 0,
+              "active": 0,
+              "completed": 0,
+              "failed": 10,
+              "retrying": 0
+            },
+            "failure_reasons": [
+              "provider_credit_exhausted"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "round_id": "arena-2026-10-16",
+      "submissions": [
+        {
+          "submission_id": "sub-f3873940f0d25db830c4eb31580d6649",
+          "status": "scoring",
+          "evaluation": {
+            "state": "failed",
+            "validators": [],
+            "active_count": 0,
+            "counts": {
+              "queued": 0,
+              "active": 0,
+              "completed": 0,
+              "failed": 10,
+              "retrying": 0
+            },
+            "failure_reasons": [
+              "provider_credit_exhausted"
+            ]
+          }
+        },
+        {
+          "submission_id": "sub-a171673db5b7dcd4ce8a26b5d03acd58",
+          "status": "scoring",
+          "evaluation": {
+            "state": "failed",
+            "validators": [],
+            "active_count": 0,
+            "counts": {
+              "queued": 0,
+              "active": 0,
+              "completed": 0,
+              "failed": 10,
+              "retrying": 0
+            },
+            "failure_reasons": [
+              "provider_credit_exhausted"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

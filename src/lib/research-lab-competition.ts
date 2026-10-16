@@ -540,18 +540,27 @@ export function competitionChampionHistory(snapshot: CompetitionSnapshot): Compe
   return points
 }
 
-function evaluationFailureLabel(submission: Pick<CompetitionSubmission, 'failureReason' | 'evaluation'>): string {
-  const reasons = submission.evaluation?.failureReasons
-  if (reasons && reasons.length > 1) return 'Evaluation incomplete · multiple causes'
-  switch (reasons?.[0]) {
+function evaluationFailureReasonLabel(reason: EvaluationFailureReason): string {
+  switch (reason) {
     case 'execution_window': return 'Evaluation incomplete · execution window ended'
     case 'scoring_window': return 'Evaluation incomplete · scoring window ended'
     case 'review': return 'Evaluation incomplete · review did not finish'
     case 'provider_credentials': return 'Provider access failed'
-    case 'provider_credit_exhausted': return 'Provider credits exhausted'
+    case 'provider_credit_exhausted': return 'Out of credit / insufficient provider funding'
     case 'provider': return 'Provider request failed'
     case 'execution': return 'Model execution failed'
+    default: return 'Evaluation failed'
   }
+}
+
+export function competitionEvaluationFailureCauses(submission: Pick<CompetitionSubmission, 'evaluation'>): string[] {
+  return submission.evaluation?.failureReasons?.map(evaluationFailureReasonLabel) ?? []
+}
+
+function evaluationFailureLabel(submission: Pick<CompetitionSubmission, 'failureReason' | 'evaluation'>): string {
+  const reasons = submission.evaluation?.failureReasons
+  if (reasons && reasons.length > 1) return 'Evaluation incomplete · multiple causes'
+  if (reasons?.[0] && reasons[0] !== 'unknown') return evaluationFailureReasonLabel(reasons[0])
   return submission.failureReason === 'credential_error' ? 'Provider access failed' : 'Evaluation failed'
 }
 

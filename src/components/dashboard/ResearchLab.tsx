@@ -9,6 +9,7 @@ import {
   COMPANY_CHECK_LABELS,
   COMPANY_CHECK_STATUS_LABELS,
   type CompetitionCompanyDiagnostic,
+  competitionEvaluationFailureCauses,
   competitionSubmissionEvaluationNotice,
   competitionSubmissionStatusLabel,
   competitionRoundOptions,
@@ -570,9 +571,10 @@ function PublishedResults({ benchmark, benchmarkState, results, resultsState, ro
   if (benchmarkState === 'gated') return <ResultFrame>{attributionSummary}<InlineNotice>All {round.benchmarkIcpCount} ICPs become public{round.publicAt ? ` at ${formatUtc(round.publicAt)}` : ' at the scheduled release'}. Each model’s score appears when its evaluation is complete.</InlineNotice></ResultFrame>
   if (!benchmark || benchmarkState === 'error') return <ResultFrame>{attributionSummary}<InlineNotice>Published public-ICP details are temporarily unavailable.</InlineNotice></ResultFrame>
   if (evaluationNotice) return <PendingIcpResults benchmark={benchmark}>{evaluationNotice}</PendingIcpResults>
-  if (submission.status === 'scoring_failed') {
+  if (submission.status === 'scoring_failed' || (submission.status === 'scoring' && submission.evaluation?.state === 'failed')) {
     const scores = round.status === 'published' && resultsState === 'available' && results?.publicIcpStatus === 'ready' && results.finalScore === null ? results.publicScores : undefined
-    return <PendingIcpResults benchmark={benchmark} scores={scores}>{competitionSubmissionStatusLabel(submission, round)}. No complete evaluation score is available.</PendingIcpResults>
+    const causes = competitionEvaluationFailureCauses(submission)
+    return <PendingIcpResults benchmark={benchmark} scores={scores}>{competitionSubmissionStatusLabel(submission, round)}. No complete evaluation score is available.{causes.length > 1 ? <> Recorded causes: {causes.join('; ')}.</> : null}</PendingIcpResults>
   }
   if ((!submission.isBaseline || round.status !== 'published') && resultsState === 'error') return <PendingIcpResults benchmark={benchmark}>The ICPs are public. Published scores are temporarily unavailable.</PendingIcpResults>
   if ((!submission.isBaseline || round.status !== 'published') && (resultsState === 'loading' || resultsState === 'gated' || !results || results.publicIcpStatus !== 'ready')) return <PendingIcpResults benchmark={benchmark}>This model’s score and diagnostics appear when its evaluation and cost checks are complete.</PendingIcpResults>
