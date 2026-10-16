@@ -400,7 +400,7 @@ try {
     scoring_window: 'Evaluation incomplete · scoring window ended',
     review: 'Evaluation incomplete · review did not finish',
     provider_credentials: 'Provider access failed',
-    provider_credit_exhausted: 'Provider credits exhausted',
+    provider_credit_exhausted: 'Out of credit / insufficient provider funding',
     provider: 'Provider request failed',
     execution: 'Model execution failed',
     unknown: 'Evaluation failed',
@@ -411,6 +411,37 @@ try {
       assert.deepEqual(row.evaluation.failureReasons, [reason])
       assert.equal(competitionSubmissionStatusLabel(row, pendingRound), label)
     }
+  }
+  const creditFixture = JSON.parse(await readFile(resolve('scripts/fixtures/competition-provider-credit-20261015-16.json'), 'utf8'))
+  assert.deepEqual(creditFixture.groups.map((group) => group.submissions.length), [6, 2])
+  for (const group of creditFixture.groups) {
+    for (const recorded of group.submissions) {
+      const submission = { ...evaluationRow(recorded.evaluation, recorded.status), submissionId: recorded.submission_id }
+      const label = recorded.submission_id === 'sub-d85459ed504e64ebbccaaab782c837d0'
+        ? 'Evaluation incomplete · multiple causes'
+        : 'Out of credit / insufficient provider funding'
+      assert.equal(competitionSubmissionStatusLabel(submission, pendingRound), label, `${group.round_id} ${recorded.submission_id}`)
+      const markup = renderToStaticMarkup(React.createElement(renderedModule.exports.SubmissionTable, {
+        submissions: [submission], round: pendingRound, selectedId: submission.submissionId, onSelect() {},
+      }))
+      assert.ok(markup.includes(label), 'the table must show the recorded funding cause or retain all mixed causes')
+      const details = renderToStaticMarkup(React.createElement(renderedModule.exports.PublishedResults, {
+        submission, round: pendingRound, benchmark, benchmarkState: 'available', results: null, resultsState: 'error',
+      }))
+      assert.ok(details.includes(`${label}. No complete evaluation score is available.`), details)
+      assert.ok(details.includes('Out of credit / insufficient provider funding'), 'the detail must retain the funding cause even alongside another cause')
+      if (recorded.submission_id === 'sub-d85459ed504e64ebbccaaab782c837d0') {
+        assert.match(details, /Recorded causes:.*scoring window ended/)
+      }
+      assert.equal(submission.finalScore, null, 'failure labels must not create an evaluation score')
+    }
+  }
+  for (const reason of ['provider_credentials', 'provider', 'execution', 'unknown']) {
+    const submission = evaluationRow({
+      state: 'failed', validators: [], failure_reasons: [reason],
+      provider_http_status: 402, terminal_status: 'budget_exhausted',
+    }, 'scoring_failed')
+    assert.equal(competitionSubmissionStatusLabel(submission, pendingRound), failureLabels[reason], 'HTTP 402 or a model budget must not override the recorded failure reason')
   }
   for (const status of ['scoring', 'scoring_failed']) {
     assert.equal(competitionSubmissionStatusLabel(evaluationRow({ state: 'failed', validators: [] }, status), pendingRound), 'Evaluation failed')
