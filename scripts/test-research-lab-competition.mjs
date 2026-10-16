@@ -146,7 +146,7 @@ try {
   assert.equal(submissions[0].stage1Score, 0)
   assert.equal(submissions[0].finalScore, null)
   assert.deepEqual(submissions[0].codeReview, {
-    status: null, errorCode: null, providerHttpStatus: null, retryable: null, attempts: null,
+    status: null, errorCode: null, failureReason: null, providerHttpStatus: null, retryable: null, attempts: null,
   })
   const pendingRound = { ...snapshot.latestCompletedRound, promotionStatus: 'pending' }
   assert.equal(
@@ -942,7 +942,7 @@ try {
   assert.equal(madaraReviewFailure.isChampion, false, 'review exclusion must never imply a winning outcome')
   assert.deepEqual(madaraReviewFailure.code, { available: false, availableAt: null, url: null })
   assert.deepEqual(madaraReviewFailure.codeReview, {
-    status: 'error', errorCode: 'code_review_provider_unavailable', providerHttpStatus: null,
+    status: 'error', errorCode: 'code_review_provider_unavailable', failureReason: null, providerHttpStatus: null,
     retryable: null, attempts: 3,
   })
   assert.equal('costStatus' in madaraReviewFailure.codeReview, false, 'internal review cost state must not enter the UI model')
@@ -966,6 +966,8 @@ try {
   }] })[0]
   const authPending = normalizePendingReview({ status: 'error', error_code: 'code_review_provider_authentication', provider_http_status: 401, attempts: 1 })
   const creditPending = normalizePendingReview({ status: 'error', error_code: 'code_review_provider_credit', provider_http_status: 402, attempts: 1 })
+  const exhaustedReview = { status: 'error', error_code: 'code_review_provider_credit', provider_http_status: 402, failure_reason: 'provider_credit_exhausted', attempts: 1 }
+  const exhaustedPending = normalizePendingReview(exhaustedReview)
   const retryingPending = normalizePendingReview({ status: 'error', error_code: 'code_review_provider_rate_limited', provider_http_status: 429, retryable: true, attempts: 2 })
   const legacyPending = normalizePendingReview({ status: 'error', error_code: 'code_review_provider_unavailable' })
   const reviewingWithStaleError = normalizePendingReview({ status: 'reviewing', error_code: 'code_review_provider_unavailable', provider_http_status: 503, retryable: true, attempts: 2 })
@@ -978,6 +980,21 @@ try {
     assert.equal(competitionSubmissionStatusLabel(normalizePendingReview(codeReview), pendingRound), 'Provider access denied')
   }
   assert.equal(competitionSubmissionStatusLabel(creditPending, pendingRound), 'Provider payment required')
+  assert.equal(competitionSubmissionStatusLabel(exhaustedPending, pendingRound), 'Out of credit / insufficient provider funding')
+  assert.equal(competitionSubmissionEvaluationNotice(exhaustedPending, pendingRound), 'Out of credit / insufficient provider funding. This submission has not been evaluated yet.')
+  for (const reason of [null, 'unknown', 'private provider prose', ['provider_credit_exhausted', 'unknown'], { reason: 'provider_credit_exhausted' }]) {
+    const submission = normalizePendingReview({ ...exhaustedReview, failure_reason: reason })
+    assert.equal(submission.codeReview.failureReason, null)
+    assert.equal(competitionSubmissionStatusLabel(submission, pendingRound), 'Provider payment required')
+  }
+  for (const [status, label] of [[401, 'Provider authentication failed'], [403, 'Provider access denied']]) {
+    const submission = normalizePendingReview({ ...exhaustedReview, error_code: 'code_review_provider_authentication', provider_http_status: status })
+    assert.equal(competitionSubmissionStatusLabel(submission, pendingRound), label, 'authentication/access precedence must survive stale funding metadata')
+  }
+  for (const [status, label] of [['passed', 'Queued for validation'], ['reviewing', 'Code review in progress']]) {
+    const submission = normalizePendingReview({ ...exhaustedReview, status })
+    assert.equal(competitionSubmissionStatusLabel(submission, pendingRound), label)
+  }
   assert.equal(competitionSubmissionStatusLabel(retryingPending, pendingRound), 'Code review unavailable · retrying')
   assert.equal(competitionSubmissionStatusLabel(legacyPending, pendingRound), 'Code review unavailable')
   assert.doesNotMatch(competitionSubmissionStatusLabel(legacyPending, pendingRound), /credential|retrying/i, 'legacy generic failures must not invent a cause or retry state')
@@ -986,6 +1003,7 @@ try {
   assert.equal(competitionSubmissionEvaluationNotice(passedWithStaleError, pendingRound), null, 'a passed review must ignore an old error document')
 
   const terminalReviewCases = [
+    [exhaustedReview, 'Code review failed · Out of credit / insufficient provider funding'],
     [{ status: 'error', error_code: 'code_review_provider_credit', provider_http_status: 402, retryable: true }, 'Code review failed · provider payment required'],
     [{ status: 'error', error_code: 'code_review_provider_authentication', provider_http_status: 403, retryable: true }, 'Code review failed · provider access denied'],
     [{ status: 'error', error_code: 'code_review_provider_credit' }, 'Code review failed · provider payment required'],
@@ -1015,13 +1033,14 @@ try {
   }
 
   const reviewRowsMarkup = renderToStaticMarkup(React.createElement(renderedModule.exports.SubmissionTable, {
-    submissions: [madaraReviewFailure, reviewRejected, authPending, creditPending, retryingPending, legacyPending],
+    submissions: [madaraReviewFailure, reviewRejected, authPending, creditPending, exhaustedPending, retryingPending, legacyPending],
     round: pendingRound, selectedId: madaraReviewFailure.submissionId, onSelect() {},
   }))
   assert.match(reviewRowsMarkup, /Code review could not complete/)
   assert.match(reviewRowsMarkup, /Code review rejected/)
   assert.match(reviewRowsMarkup, /Provider authentication failed/)
   assert.match(reviewRowsMarkup, /Provider payment required/)
+  assert.match(reviewRowsMarkup, /Out of credit \/ insufficient provider funding/)
   assert.match(reviewRowsMarkup, /Code review unavailable · retrying/)
   assert.doesNotMatch(reviewRowsMarkup, />0\.00</, 'review failures must not render a zero score')
   const reviewResultsMarkup = renderToStaticMarkup(React.createElement(renderedModule.exports.PublishedResults, {
