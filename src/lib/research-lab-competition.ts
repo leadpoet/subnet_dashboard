@@ -793,7 +793,7 @@ function codeReviewIssueLabel(review: CompetitionCodeReview, terminal = false): 
   if (
     review.errorCode === 'code_review_provider_authentication'
     || review.providerHttpStatus === 403
-  ) return terminal ? 'Code review failed · provider access denied' : 'Provider credential error'
+  ) return terminal ? 'Code review failed · provider access denied' : 'Provider access denied'
   if (review.errorCode === 'code_review_provider_credit' || review.providerHttpStatus === 402) {
     return terminal ? 'Code review failed · provider payment required' : 'Provider payment required'
   }

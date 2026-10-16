@@ -971,6 +971,12 @@ try {
   const reviewingWithStaleError = normalizePendingReview({ status: 'reviewing', error_code: 'code_review_provider_unavailable', provider_http_status: 503, retryable: true, attempts: 2 })
   const passedWithStaleError = normalizePendingReview({ status: 'passed', error_code: 'code_review_provider_authentication', provider_http_status: 401, retryable: true, attempts: 2 })
   assert.equal(competitionSubmissionStatusLabel(authPending, pendingRound), 'Provider authentication failed')
+  for (const codeReview of [
+    { status: 'error', provider_http_status: 403 },
+    { status: 'error', error_code: 'code_review_provider_authentication' },
+  ]) {
+    assert.equal(competitionSubmissionStatusLabel(normalizePendingReview(codeReview), pendingRound), 'Provider access denied')
+  }
   assert.equal(competitionSubmissionStatusLabel(creditPending, pendingRound), 'Provider payment required')
   assert.equal(competitionSubmissionStatusLabel(retryingPending, pendingRound), 'Code review unavailable · retrying')
   assert.equal(competitionSubmissionStatusLabel(legacyPending, pendingRound), 'Code review unavailable')
