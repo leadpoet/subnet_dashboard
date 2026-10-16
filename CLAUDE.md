@@ -1,3 +1,13 @@
+## Scoped production authorization: October 16 provider failure labels
+
+The user authorized specific, evidence-based provider failure labels, focused
+controls, safe merge, normal deployment, and live OnePatch/Sentry verification.
+Separate confirmed funding exhaustion from submitted-key authentication failures.
+Keep unknown causes generic. Preserve terminal classification, retries, costs,
+scores, promotion, weights, disclosure, and concurrent work. No new dependencies,
+secrets, retrospective result changes, or paid probes are needed. This authority
+ends after deployment and live verification. Keep this file and CLAUDE.md identical.
+
 ## Scoped production authorization: October 14 terminal review diagnostics
 
 The user authorized correction of confirmed Arena diagnostic regressions and

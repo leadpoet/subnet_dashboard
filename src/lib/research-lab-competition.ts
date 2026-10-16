@@ -55,7 +55,7 @@ export type CompetitionSubmission = {
   }
 }
 
-const EVALUATION_FAILURE_REASONS = ['provider_credentials', 'provider_credit_exhausted', 'execution_window', 'scoring_window', 'review', 'provider', 'execution', 'unknown'] as const
+const EVALUATION_FAILURE_REASONS = ['provider_credentials', 'provider_authentication_failed', 'provider_credit_exhausted', 'execution_window', 'scoring_window', 'review', 'provider', 'execution', 'unknown'] as const
 type EvaluationFailureReason = typeof EVALUATION_FAILURE_REASONS[number]
 
 export type CompetitionEvaluation = {
@@ -546,6 +546,7 @@ function evaluationFailureReasonLabel(reason: EvaluationFailureReason): string {
     case 'scoring_window': return 'Evaluation incomplete · scoring window ended'
     case 'review': return 'Evaluation incomplete · review did not finish'
     case 'provider_credentials': return 'Provider access failed'
+    case 'provider_authentication_failed': return 'Provider API key authentication failed'
     case 'provider_credit_exhausted': return 'Out of credit / insufficient provider funding'
     case 'provider': return 'Provider request failed'
     case 'execution': return 'Model execution failed'
@@ -786,13 +787,15 @@ function codeReviewIssueLabel(review: CompetitionCodeReview, terminal = false): 
   if (terminal && review.status !== 'error') return null
   if (review.status === 'reviewing') return 'Code review in progress'
   if (review.status !== 'error') return null
+  if (review.providerHttpStatus === 401) {
+    return terminal ? 'Code review failed · provider authentication failed' : 'Provider authentication failed'
+  }
   if (
     review.errorCode === 'code_review_provider_authentication'
-    || review.providerHttpStatus === 401
     || review.providerHttpStatus === 403
   ) return terminal ? 'Code review failed · provider access denied' : 'Provider credential error'
   if (review.errorCode === 'code_review_provider_credit' || review.providerHttpStatus === 402) {
-    return terminal ? 'Code review failed · insufficient provider credit' : 'Insufficient provider credit'
+    return terminal ? 'Code review failed · provider payment required' : 'Provider payment required'
   }
   if (terminal) return null
   if (review.retryable === true) return 'Code review unavailable · retrying'
