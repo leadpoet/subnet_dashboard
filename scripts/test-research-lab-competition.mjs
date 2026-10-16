@@ -400,6 +400,7 @@ try {
     scoring_window: 'Evaluation incomplete · scoring window ended',
     review: 'Evaluation incomplete · review did not finish',
     provider_credentials: 'Provider access failed',
+    provider_authentication_failed: 'Provider API key authentication failed',
     provider_credit_exhausted: 'Out of credit / insufficient provider funding',
     provider: 'Provider request failed',
     execution: 'Model execution failed',
@@ -436,13 +437,27 @@ try {
       assert.equal(submission.finalScore, null, 'failure labels must not create an evaluation score')
     }
   }
-  for (const reason of ['provider_credentials', 'provider', 'execution', 'unknown']) {
+  for (const reason of ['provider_credentials', 'provider_authentication_failed', 'provider', 'execution', 'unknown']) {
     const submission = evaluationRow({
       state: 'failed', validators: [], failure_reasons: [reason],
       provider_http_status: 402, terminal_status: 'budget_exhausted',
     }, 'scoring_failed')
     assert.equal(competitionSubmissionStatusLabel(submission, pendingRound), failureLabels[reason], 'HTTP 402 or a model budget must not override the recorded failure reason')
   }
+  const authenticationFailure = evaluationRow({
+    state: 'failed', validators: [], failure_reasons: ['provider_authentication_failed'],
+  }, 'scoring_failed')
+  const authenticationMarkup = renderToStaticMarkup(React.createElement(renderedModule.exports.SubmissionTable, {
+    submissions: [authenticationFailure], round: pendingRound, selectedId: authenticationFailure.submissionId, onSelect() {},
+  })) + renderToStaticMarkup(React.createElement(renderedModule.exports.PublishedResults, {
+    submission: authenticationFailure, round: pendingRound, benchmark, benchmarkState: 'available', results: null, resultsState: 'error',
+  }))
+  assert.match(authenticationMarkup, /Provider API key authentication failed/)
+  assert.doesNotMatch(authenticationMarkup, /Out of credit|expired|revoked|>0\.00</, 'authentication evidence must not invent a funding cause, exact key state, or score')
+  const unprovedAuthentication = evaluationRow({
+    state: 'failed', validators: [], failure_reasons: ['provider_credentials'], provider_http_status: 401,
+  }, 'scoring_failed')
+  assert.equal(competitionSubmissionStatusLabel(unprovedAuthentication, pendingRound), 'Provider access failed', 'a status field alone must not replace the gateway diagnostic')
   for (const status of ['scoring', 'scoring_failed']) {
     assert.equal(competitionSubmissionStatusLabel(evaluationRow({ state: 'failed', validators: [] }, status), pendingRound), 'Evaluation failed')
     assert.equal(competitionSubmissionStatusLabel(evaluationRow({ state: 'failed', validators: [], failure_reasons: ['review', 'execution_window'] }, status), pendingRound), 'Evaluation incomplete · multiple causes')
@@ -457,7 +472,7 @@ try {
   }))
   assert.ok(unclaimedRows.every((row) => competitionSubmissionStatusLabel(row, pendingRound) === failureLabels.execution_window))
   assert.ok(unclaimedRows.every((row) => row.evaluation.validators.length === 0 && row.evaluation.counts.failed === 10))
-  for (const reasons of ['review', [null], ['private-raw-error'], ['review', 'private-raw-error'], [{}], Array(9).fill('review')]) {
+  for (const reasons of ['review', [null], ['private-raw-error'], ['review', 'private-raw-error'], [{}], Array(10).fill('review')]) {
     const row = evaluationRow({ state: 'failed', validators: [], failure_reasons: reasons, terminal_doc: 'private-detail' })
     assert.equal(row.evaluation.failureReasons, undefined, 'invalid optional causes must not be accepted or replace progress')
     assert.equal(competitionSubmissionStatusLabel(row, pendingRound), 'Evaluation failed')
@@ -955,8 +970,8 @@ try {
   const legacyPending = normalizePendingReview({ status: 'error', error_code: 'code_review_provider_unavailable' })
   const reviewingWithStaleError = normalizePendingReview({ status: 'reviewing', error_code: 'code_review_provider_unavailable', provider_http_status: 503, retryable: true, attempts: 2 })
   const passedWithStaleError = normalizePendingReview({ status: 'passed', error_code: 'code_review_provider_authentication', provider_http_status: 401, retryable: true, attempts: 2 })
-  assert.equal(competitionSubmissionStatusLabel(authPending, pendingRound), 'Provider credential error')
-  assert.equal(competitionSubmissionStatusLabel(creditPending, pendingRound), 'Insufficient provider credit')
+  assert.equal(competitionSubmissionStatusLabel(authPending, pendingRound), 'Provider authentication failed')
+  assert.equal(competitionSubmissionStatusLabel(creditPending, pendingRound), 'Provider payment required')
   assert.equal(competitionSubmissionStatusLabel(retryingPending, pendingRound), 'Code review unavailable · retrying')
   assert.equal(competitionSubmissionStatusLabel(legacyPending, pendingRound), 'Code review unavailable')
   assert.doesNotMatch(competitionSubmissionStatusLabel(legacyPending, pendingRound), /credential|retrying/i, 'legacy generic failures must not invent a cause or retry state')
@@ -965,13 +980,13 @@ try {
   assert.equal(competitionSubmissionEvaluationNotice(passedWithStaleError, pendingRound), null, 'a passed review must ignore an old error document')
 
   const terminalReviewCases = [
-    [{ status: 'error', error_code: 'code_review_provider_credit', provider_http_status: 402, retryable: true }, 'Code review failed · insufficient provider credit'],
+    [{ status: 'error', error_code: 'code_review_provider_credit', provider_http_status: 402, retryable: true }, 'Code review failed · provider payment required'],
     [{ status: 'error', error_code: 'code_review_provider_authentication', provider_http_status: 403, retryable: true }, 'Code review failed · provider access denied'],
-    [{ status: 'error', error_code: 'code_review_provider_credit' }, 'Code review failed · insufficient provider credit'],
+    [{ status: 'error', error_code: 'code_review_provider_credit' }, 'Code review failed · provider payment required'],
     [{ status: 'error', error_code: 'code_review_provider_authentication' }, 'Code review failed · provider access denied'],
-    [{ status: 'error', provider_http_status: 402 }, 'Code review failed · insufficient provider credit'],
+    [{ status: 'error', provider_http_status: 402 }, 'Code review failed · provider payment required'],
     [{ status: 'error', provider_http_status: 403 }, 'Code review failed · provider access denied'],
-    [{ status: 'error', provider_http_status: 401 }, 'Code review failed · provider access denied'],
+    [{ status: 'error', provider_http_status: 401 }, 'Code review failed · provider authentication failed'],
     [{ status: 'error', error_code: 'code_review_provider_unavailable', provider_http_status: 503, retryable: true }, 'Code review could not complete'],
     [{ status: 'error', error_code: 'unknown_failure' }, 'Code review could not complete'],
     [{ status: 'passed', error_code: 'code_review_provider_credit', provider_http_status: 402 }, 'Code review could not complete'],
@@ -999,8 +1014,8 @@ try {
   }))
   assert.match(reviewRowsMarkup, /Code review could not complete/)
   assert.match(reviewRowsMarkup, /Code review rejected/)
-  assert.match(reviewRowsMarkup, /Provider credential error/)
-  assert.match(reviewRowsMarkup, /Insufficient provider credit/)
+  assert.match(reviewRowsMarkup, /Provider authentication failed/)
+  assert.match(reviewRowsMarkup, /Provider payment required/)
   assert.match(reviewRowsMarkup, /Code review unavailable · retrying/)
   assert.doesNotMatch(reviewRowsMarkup, />0\.00</, 'review failures must not render a zero score')
   const reviewResultsMarkup = renderToStaticMarkup(React.createElement(renderedModule.exports.PublishedResults, {
