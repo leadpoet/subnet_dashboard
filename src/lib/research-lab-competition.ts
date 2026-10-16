@@ -120,6 +120,7 @@ function validatorWorkingTree(value: unknown): 'clean' | 'dirty' | 'unknown' { r
 export type CompetitionCodeReview = {
   status: string | null
   errorCode: string | null
+  failureReason: 'provider_credit_exhausted' | null
   providerHttpStatus: number | null
   retryable: boolean | null
   attempts: number | null
@@ -321,6 +322,7 @@ export function normalizeCompetitionSubmissions(value: unknown): CompetitionSubm
       codeReview: {
         status: nullableText(codeReview?.status),
         errorCode: nullableText(codeReview?.error_code),
+        failureReason: codeReview?.failure_reason === 'provider_credit_exhausted' ? 'provider_credit_exhausted' as const : null,
         providerHttpStatus: httpStatus(codeReview?.provider_http_status),
         retryable: typeof codeReview?.retryable === 'boolean' ? codeReview.retryable : null,
         attempts: integer(codeReview?.attempts),
@@ -794,6 +796,10 @@ function codeReviewIssueLabel(review: CompetitionCodeReview, terminal = false): 
     review.errorCode === 'code_review_provider_authentication'
     || review.providerHttpStatus === 403
   ) return terminal ? 'Code review failed · provider access denied' : 'Provider access denied'
+  if (review.failureReason === 'provider_credit_exhausted') {
+    const label = evaluationFailureReasonLabel(review.failureReason)
+    return terminal ? `Code review failed · ${label}` : label
+  }
   if (review.errorCode === 'code_review_provider_credit' || review.providerHttpStatus === 402) {
     return terminal ? 'Code review failed · provider payment required' : 'Provider payment required'
   }
