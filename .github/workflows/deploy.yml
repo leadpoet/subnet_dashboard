@@ -130,6 +130,7 @@ jobs:
             PRE_DEPLOY_SHA="$(git -C "$APP_ROOT" rev-parse HEAD)"
             PREVIOUS_ECOSYSTEM="$APP_ROOT/.subnet-dashboard-rollback.config.cjs"
             ROLLBACK_SLOT_FILE="$APP_ROOT/.subnet-dashboard-rollback-slot"
+            ROLLBACK_DEPENDENCIES="$APP_ROOT/.subnet-dashboard-rollback-node-modules"
 
             ACTIVE_SLOT="$(cat "$ACTIVE_SLOT_FILE" 2>/dev/null || true)"
             if [ "$ACTIVE_SLOT" = ".next-blue" ]; then
@@ -166,6 +167,34 @@ jobs:
                 else
                   CANDIDATE_SLOT=".next-blue"
                 fi
+              fi
+            fi
+
+            # A previous switch may have stopped after the new worker started,
+            # before it saved PM2 or removed the old dependency tree. Keep that
+            # tree, its slot, and its process config together. In particular,
+            # do not delete the old slot or overwrite its snapshot on retry.
+            if [ -e "$ROLLBACK_DEPENDENCIES" ] || [ -e "$ROLLBACK_SLOT_FILE" ] || [ -e "$PREVIOUS_ECOSYSTEM" ]; then
+              saved_slot="$(cat "$ROLLBACK_SLOT_FILE" 2>/dev/null || true)"
+              if [ ! -f "$PREVIOUS_ECOSYSTEM" ] || [ -z "$RUNNING_SLOT" ] || [ "$saved_slot" != "$RUNNING_SLOT" ]; then
+                echo "Saved rollback slot does not own the running process; stopping before release cleanup"
+                exit 1
+              fi
+              if ! pm2 jlist | node -e '
+                let input = "";
+                process.stdin.setEncoding("utf8");
+                process.stdin.on("data", (chunk) => { input += chunk; });
+                process.stdin.on("end", () => {
+                  const live = JSON.parse(input).find((item) => item.name === "subnet-dashboard")?.pm2_env;
+                  const saved = require(process.argv[1]).apps.find((item) => item.name === "subnet-dashboard");
+                  if (!live || !saved || live.exec_mode !== `${saved.exec_mode}_mode` ||
+                      (saved.interpreter && live.exec_interpreter !== saved.interpreter)) {
+                    process.exitCode = 1;
+                  }
+                });
+              ' "$PREVIOUS_ECOSYSTEM"; then
+                echo "Saved rollback config does not own the running PM2 mode/interpreter"
+                exit 1
               fi
             fi
 
@@ -268,9 +297,20 @@ jobs:
             NODE_BIN="$(bash "$APP_ROOT/scripts/ensure-production-node.sh")"
             export PATH="$(dirname "$NODE_BIN"):$PATH"
             test "$(node --version)" = v22.23.4
+            source "$APP_ROOT/scripts/production-dependencies.sh"
+
+            # If an earlier SSH action ended during a switch, finish restoring
+            # the saved tree before checking active health or retrying.
+            if [ -e "$ROLLBACK_DEPENDENCIES" ]; then
+              if [ "$(cat "$ROLLBACK_SLOT_FILE" 2>/dev/null || true)" != "$ACTIVE_SLOT" ]; then
+                echo "Saved dependencies belong to another active slot; stopping safely"
+                exit 1
+              fi
+              production_deps_restore "$APP_ROOT" "$ROLLBACK_DEPENDENCIES"
+            fi
 
             # Keep the running worker unchanged until the candidate has booted
-            # under the verified runtime. The later PM2 reload applies the
+            # under the verified runtime. The later PM2 switch applies the
             # committed process policy when the candidate is ready.
 
             active_healthy=false
@@ -289,14 +329,32 @@ jobs:
               exit 1
             fi
 
-            # `npm ci` removes node_modules before reinstalling it. Do not do
-            # that beneath the live worker when this release did not change its
-            # dependency manifest and the installed production tree is valid.
+            DEPS_STAGE=""
+            dependency_switched=false
+            rollback_needed=false
+            promotion_exit() {
+              if [ "$rollback_needed" = true ]; then
+                restore_previous_worker || echo "Automatic rollback failed; saved config is $PREVIOUS_ECOSYSTEM"
+              elif [ "$dependency_switched" = true ]; then
+                production_deps_restore "$APP_ROOT" "$ROLLBACK_DEPENDENCIES" || \
+                  echo "Automatic dependency restore failed; saved tree is $ROLLBACK_DEPENDENCIES"
+              fi
+              if [ -n "$DEPS_STAGE" ]; then
+                rm -rf "$DEPS_STAGE"
+              fi
+            }
+            trap promotion_exit EXIT
+            trap 'exit 1' INT TERM
+
+            # A private npm ci leaves the live tree intact on install failure.
+            # Root install hooks are unchanged because the same package files
+            # and optional npm config are copied into the private install root.
             if git diff --quiet "$PRE_DEPLOY_SHA" "$DEPLOY_SHA" -- package.json package-lock.json && \
               npm ls --omit=dev --depth=0 >/dev/null 2>&1; then
               echo "Production dependencies are unchanged and valid; skipping npm ci"
             else
-              npm ci --omit=dev --no-audit --no-fund
+              DEPS_STAGE="$(mktemp -d "$APP_ROOT/.deploy-dependencies-$DEPLOY_SHA.XXXXXXXX")"
+              production_deps_stage "$APP_ROOT" "$DEPS_STAGE"
             fi
 
             rm -rf "$STAGED_BUILD"
@@ -310,12 +368,23 @@ jobs:
 
             mv "$STAGED_BUILD" "$APP_ROOT/$CANDIDATE_SLOT"
 
-            # Old and new workers overlap briefly during a rolling reload. Merge
-            # their hashed browser assets so either worker can satisfy requests
-            # for a page generated by the other version during that handoff.
+            # Merge hashed browser assets so either build can satisfy requests
+            # across the handoff and a rollback.
             if [ -d "$APP_ROOT/$ACTIVE_SLOT/static" ]; then
               cp -a "$APP_ROOT/$ACTIVE_SLOT/static/." "$APP_ROOT/$CANDIDATE_SLOT/static/"
               cp -a "$APP_ROOT/$CANDIDATE_SLOT/static/." "$APP_ROOT/$ACTIVE_SLOT/static/"
+            fi
+
+            if [ -n "$DEPS_STAGE" ]; then
+              # Keep the old tree until the promoted worker is healthy and PM2
+              # is saved. A failed candidate restores it without restarting the
+              # existing worker; a failed promotion restores it before rollback.
+              dependency_switched=true
+              production_deps_activate "$APP_ROOT" "$DEPS_STAGE" "$ROLLBACK_DEPENDENCIES"
+              if ! curl --fail --silent --show-error --max-time 10 http://127.0.0.1:3000/api/health/live > /dev/null; then
+                echo "Active worker stopped responding after the dependency switch"
+                exit 1
+              fi
             fi
 
             # Prove the new build can boot before changing the production worker.
@@ -337,7 +406,7 @@ jobs:
             done
 
             if [ "$candidate_healthy" != true ]; then
-              echo "Candidate failed to become healthy; production was not changed"
+              echo "Candidate failed to become healthy; restoring previous dependencies"
               pm2 logs subnet-dashboard-candidate --lines 100 --nostream
               pm2 delete subnet-dashboard-candidate >/dev/null 2>&1 || true
               exit 1
@@ -349,12 +418,17 @@ jobs:
               pm2 delete subnet-dashboard-candidate >/dev/null 2>&1 || true
               exit 1
             fi
+            if ! curl --fail --silent --show-error --max-time 10 http://127.0.0.1:3000/api/health/live > /dev/null; then
+              echo "Active worker stopped responding while the candidate booted"
+              pm2 delete subnet-dashboard-candidate >/dev/null 2>&1 || true
+              exit 1
+            fi
 
             pm2 delete subnet-dashboard-candidate >/dev/null 2>&1 || true
 
             # PM2 cluster mode always inherits the daemon's Node binary, even
             # when interpreter names another release. A fork worker honors the
-            # verified interpreter. The one-time mode switch has a brief gap on
+            # verified interpreter. Each fork-mode handoff has a brief gap on
             # port 3000 after the candidate has passed readiness on port 3001.
             previous_pid="$(pm2 pid subnet-dashboard)"
             previous_exe="$(readlink -f "/proc/$previous_pid/exe")"
@@ -397,6 +471,10 @@ jobs:
             restore_previous_worker() {
               echo "Restoring the saved $ACTIVE_SLOT process after failed promotion"
               pm2 delete subnet-dashboard >/dev/null 2>&1 || true
+              if [ "$dependency_switched" = true ]; then
+                production_deps_restore "$APP_ROOT" "$ROLLBACK_DEPENDENCIES" || return 1
+                dependency_switched=false
+              fi
               NEXT_DIST_DIR="$ACTIVE_SLOT" pm2 start "$PREVIOUS_ECOSYSTEM" --update-env || return 1
               local restored_pid restored_mode
               restored_pid="$(pm2 pid subnet-dashboard)"
@@ -428,13 +506,6 @@ jobs:
               return 1
             }
             rollback_needed=true
-            promotion_exit() {
-              if [ "$rollback_needed" = true ]; then
-                restore_previous_worker || echo "Automatic rollback failed; saved config is $PREVIOUS_ECOSYSTEM"
-              fi
-            }
-            trap promotion_exit EXIT
-            trap 'exit 1' INT TERM
 
             pm2 delete subnet-dashboard
             NEXT_DIST_DIR="$CANDIDATE_SLOT" pm2 start "$APP_ROOT/ecosystem.config.cjs" --update-env
@@ -445,7 +516,7 @@ jobs:
             fi
 
             production_healthy=false
-            # Arena and metagraph startup can hold the reloaded worker past the
+            # Arena and metagraph startup can hold the promoted worker past the
             # old 60s budget; give it 4 minutes before
             # declaring failure and rolling back.
             for attempt in $(seq 1 120); do
@@ -524,7 +595,12 @@ jobs:
 
             pm2 save
             rollback_needed=false
+            dependency_switched=false
             trap - EXIT INT TERM
+            rm -rf "$ROLLBACK_DEPENDENCIES"
+            if [ -n "$DEPS_STAGE" ]; then
+              rm -rf "$DEPS_STAGE"
+            fi
             rm -f "$PREVIOUS_ECOSYSTEM" "$ROLLBACK_SLOT_FILE"
             echo "Deploy complete: $(date)"
 
