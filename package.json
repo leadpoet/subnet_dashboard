@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "node scripts/test-retired-table-callers.mjs && node scripts/test-runtime-secret-loader.mjs && node scripts/test-admin-redirect-origin.mjs && node scripts/test-dashboard-tabs.mjs && node scripts/test-visible-polling.mjs && node scripts/test-arena-polling.mjs && node scripts/test-single-flight.mjs && node scripts/test-gateway-deployment.mjs && node scripts/test-subnet-epoch-state.mjs && node scripts/test-metagraph-weight-freshness.mjs && python3 scripts/test-weights-alert.py && node scripts/test-research-lab-arena.mjs && node scripts/test-research-lab-competition.mjs && node scripts/test-chain-summaries.mjs && node scripts/test-chain-rpcs-postgres.mjs"
+    "test": "node scripts/test-retired-table-callers.mjs && node scripts/test-runtime-secret-loader.mjs && node scripts/test-admin-redirect-origin.mjs && node scripts/test-dashboard-tabs.mjs && node scripts/test-visible-polling.mjs && node scripts/test-arena-polling.mjs && node scripts/test-single-flight.mjs && node scripts/test-gateway-deployment.mjs && node scripts/test-subnet-epoch-state.mjs && node scripts/test-metagraph-weight-freshness.mjs && python3 scripts/test-weights-alert.py && node scripts/test-research-lab-arena.mjs && node scripts/test-research-lab-competition.mjs && node scripts/test-chain-summaries.mjs && node scripts/test-chain-rpcs-postgres.mjs && node scripts/test-xlsx-export.mjs && node scripts/test-production-node-release.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-secrets-manager": "^3.1089.0",
@@ -26,13 +26,13 @@
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
     "lucide-react": "^0.562.0",
-    "next": "^15.5.16",
+    "next": "^15.5.28",
     "react": "^18",
     "react-dom": "^18",
     "recharts": "^3.6.0",
-    "sharp": "^0.34.5",
+    "sharp": "^0.35.5",
     "tailwind-merge": "^3.4.0",
-    "xlsx": "^0.18.5"
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
@@ -40,7 +40,7 @@
     "@types/react": "^18",
     "@types/react-dom": "^18",
     "eslint": "^9.39.4",
-    "eslint-config-next": "^15.5.16",
+    "eslint-config-next": "^15.5.28",
     "react-test-renderer": "18.3.1",
     "tailwindcss": "^4",
     "tw-animate-css": "^1.4.0",
@@ -48,6 +48,16 @@
   },
   "overrides": {
     "picomatch": "^4.0.4",
-    "postcss": "^8.5.14"
+    "minimatch@3": {
+      "brace-expansion": "^1.1.21"
+    },
+    "minimatch@10": {
+      "brace-expansion": "^5.0.12"
+    },
+    "js-yaml": "^4.3.2",
+    "postcss": "^8.5.23",
+    "nanoid": "^3.3.18",
+    "source-map-js": "^1.2.2",
+    "ws": "^8.21.0"
   }
 }

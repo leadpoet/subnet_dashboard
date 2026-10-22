@@ -68,8 +68,13 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22.23.4
           cache: npm
+
+      - name: Verify production Node archive and installer
+        run: |
+          node_bin="$(NODE_RUNTIME_ROOT="$RUNNER_TEMP/subnet-dashboard-node" bash scripts/ensure-production-node.sh)"
+          test "$("$node_bin" --version)" = v22.23.4
 
       - name: Install build dependencies
         run: npm ci --no-audit --no-fund
@@ -123,6 +128,8 @@ jobs:
             CLEANUP_LOG="$HOME/subnet-dashboard-disk-cleanup.log"
             REQUIRED_FREE_KB=1250000
             PRE_DEPLOY_SHA="$(git -C "$APP_ROOT" rev-parse HEAD)"
+            PREVIOUS_ECOSYSTEM="$APP_ROOT/.subnet-dashboard-rollback.config.cjs"
+            ROLLBACK_SLOT_FILE="$APP_ROOT/.subnet-dashboard-rollback-slot"
 
             ACTIVE_SLOT="$(cat "$ACTIVE_SLOT_FILE" 2>/dev/null || true)"
             if [ "$ACTIVE_SLOT" = ".next-blue" ]; then
@@ -239,6 +246,15 @@ jobs:
 
             df -h "$HOME"
             cd "$APP_ROOT"
+            # A failed promotion leaves the new commit checked out while the old
+            # PM2 worker serves the old slot. Reuse its saved config on retry;
+            # copying the current checkout then would save the wrong mode.
+            if [ ! -f "$PREVIOUS_ECOSYSTEM" ] || [ "$(cat "$ROLLBACK_SLOT_FILE" 2>/dev/null || true)" != "$ACTIVE_SLOT" ]; then
+              cp ecosystem.config.cjs "$PREVIOUS_ECOSYSTEM.next"
+              mv "$PREVIOUS_ECOSYSTEM.next" "$PREVIOUS_ECOSYSTEM"
+              printf '%s\n' "$ACTIVE_SLOT" > "$ROLLBACK_SLOT_FILE.next"
+              mv "$ROLLBACK_SLOT_FILE.next" "$ROLLBACK_SLOT_FILE"
+            fi
             git fetch origin main
             git checkout main
             git merge --ff-only origin/main
@@ -249,10 +265,13 @@ jobs:
               exit 1
             fi
 
-            # Apply the current process policy before switching releases. This
-            # also repairs a worker still cycling under an older, overly-low PM2
-            # memory threshold.
-            NEXT_DIST_DIR="$ACTIVE_SLOT" pm2 startOrReload "$APP_ROOT/ecosystem.config.cjs"
+            NODE_BIN="$(bash "$APP_ROOT/scripts/ensure-production-node.sh")"
+            export PATH="$(dirname "$NODE_BIN"):$PATH"
+            test "$(node --version)" = v22.23.4
+
+            # Keep the running worker unchanged until the candidate has booted
+            # under the verified runtime. The later PM2 reload applies the
+            # committed process policy when the candidate is ready.
 
             active_healthy=false
             for attempt in $(seq 1 15); do
@@ -304,7 +323,7 @@ jobs:
               pm2 start "$APP_ROOT/scripts/start-production.mjs" \
               --name subnet-dashboard-candidate \
               --cwd "$APP_ROOT" \
-              --interpreter node \
+              --interpreter "$NODE_BIN" \
               --no-autorestart \
               -- start -p 3001
 
@@ -324,12 +343,106 @@ jobs:
               exit 1
             fi
 
+            candidate_pid="$(pm2 pid subnet-dashboard-candidate)"
+            if [ -z "$candidate_pid" ] || [ "$(readlink -f "/proc/$candidate_pid/exe")" != "$(readlink -f "$NODE_BIN")" ]; then
+              echo "Candidate is healthy but is not running the verified Node runtime"
+              pm2 delete subnet-dashboard-candidate >/dev/null 2>&1 || true
+              exit 1
+            fi
+
             pm2 delete subnet-dashboard-candidate >/dev/null 2>&1 || true
 
-            # The process was migrated to this committed cluster definition by
-            # commit 7f468eb. A cluster reload starts the replacement worker before
-            # retiring the old worker, keeping port 3000 continuously available.
-            NEXT_DIST_DIR="$CANDIDATE_SLOT" pm2 startOrReload "$APP_ROOT/ecosystem.config.cjs" --update-env
+            # PM2 cluster mode always inherits the daemon's Node binary, even
+            # when interpreter names another release. A fork worker honors the
+            # verified interpreter. The one-time mode switch has a brief gap on
+            # port 3000 after the candidate has passed readiness on port 3001.
+            previous_pid="$(pm2 pid subnet-dashboard)"
+            previous_exe="$(readlink -f "/proc/$previous_pid/exe")"
+            previous_mode="$(pm2 jlist | node -e '
+              let input = "";
+              process.stdin.setEncoding("utf8");
+              process.stdin.on("data", (chunk) => { input += chunk; });
+              process.stdin.on("end", () => {
+                const app = JSON.parse(input).find((item) => item.name === "subnet-dashboard");
+                process.stdout.write(app?.pm2_env?.exec_mode ?? "");
+              });
+            ')"
+            previous_interpreter="$(pm2 jlist | node -e '
+              let input = "";
+              process.stdin.setEncoding("utf8");
+              process.stdin.on("data", (chunk) => { input += chunk; });
+              process.stdin.on("end", () => {
+                const app = JSON.parse(input).find((item) => item.name === "subnet-dashboard");
+                process.stdout.write(app?.pm2_env?.exec_interpreter ?? "");
+              });
+            ')"
+            if [ -z "$previous_pid" ] || [ -z "$previous_exe" ] || [ -z "$previous_mode" ]; then
+              echo "Cannot capture the running process for rollback"
+              exit 1
+            fi
+            expected_previous_mode="$(node -e '
+              const app = require(process.argv[1]).apps.find((item) => item.name === "subnet-dashboard");
+              process.stdout.write(`${app?.exec_mode ?? ""}_mode`);
+            ' "$PREVIOUS_ECOSYSTEM")"
+            expected_previous_interpreter="$(node -e '
+              const app = require(process.argv[1]).apps.find((item) => item.name === "subnet-dashboard");
+              process.stdout.write(app?.interpreter ?? "");
+            ' "$PREVIOUS_ECOSYSTEM")"
+            if [ "$previous_mode" != "$expected_previous_mode" ] || \
+               { [ -n "$expected_previous_interpreter" ] && [ "$previous_interpreter" != "$expected_previous_interpreter" ]; }; then
+              echo "Saved rollback config does not match the active PM2 mode/interpreter"
+              exit 1
+            fi
+
+            restore_previous_worker() {
+              echo "Restoring the saved $ACTIVE_SLOT process after failed promotion"
+              pm2 delete subnet-dashboard >/dev/null 2>&1 || true
+              NEXT_DIST_DIR="$ACTIVE_SLOT" pm2 start "$PREVIOUS_ECOSYSTEM" --update-env || return 1
+              local restored_pid restored_mode
+              restored_pid="$(pm2 pid subnet-dashboard)"
+              restored_mode="$(pm2 jlist | node -e '
+                let input = "";
+                process.stdin.setEncoding("utf8");
+                process.stdin.on("data", (chunk) => { input += chunk; });
+                process.stdin.on("end", () => {
+                  const app = JSON.parse(input).find((item) => item.name === "subnet-dashboard");
+                  process.stdout.write(app?.pm2_env?.exec_mode ?? "");
+                });
+              ')"
+              if [ -z "$restored_pid" ] || [ "$restored_mode" != "$previous_mode" ] || \
+                 [ "$(readlink -f "/proc/$restored_pid/exe")" != "$previous_exe" ]; then
+                echo "Rollback did not restore the previous PM2 mode and interpreter"
+                return 1
+              fi
+              for attempt in $(seq 1 30); do
+                if curl --fail --silent --show-error --max-time 10 http://127.0.0.1:3000/api/health/ready > /dev/null; then
+                  echo "Saved $ACTIVE_SLOT process is healthy after rollback"
+                  printf '%s\n' "$ACTIVE_SLOT" > "$ACTIVE_SLOT_FILE.tmp"
+                  mv "$ACTIVE_SLOT_FILE.tmp" "$ACTIVE_SLOT_FILE"
+                  pm2 save || echo "Could not persist the restored PM2 process list"
+                  return 0
+                fi
+                sleep 2
+              done
+              echo "Saved $ACTIVE_SLOT process did not recover readiness"
+              return 1
+            }
+            rollback_needed=true
+            promotion_exit() {
+              if [ "$rollback_needed" = true ]; then
+                restore_previous_worker || echo "Automatic rollback failed; saved config is $PREVIOUS_ECOSYSTEM"
+              fi
+            }
+            trap promotion_exit EXIT
+            trap 'exit 1' INT TERM
+
+            pm2 delete subnet-dashboard
+            NEXT_DIST_DIR="$CANDIDATE_SLOT" pm2 start "$APP_ROOT/ecosystem.config.cjs" --update-env
+            promoted_pid="$(pm2 pid subnet-dashboard)"
+            if [ -z "$promoted_pid" ] || [ "$(readlink -f "/proc/$promoted_pid/exe")" != "$(readlink -f "$NODE_BIN")" ]; then
+              echo "Promoted worker is not using the verified Node runtime"
+              exit 1
+            fi
 
             production_healthy=false
             # Arena and metagraph startup can hold the reloaded worker past the
@@ -344,10 +457,9 @@ jobs:
             done
 
             if [ "$production_healthy" != true ]; then
-              echo "Production health check failed after PM2 reload; restoring $ACTIVE_SLOT"
+              echo "Production health check failed after PM2 switch"
               pm2 status
               pm2 logs subnet-dashboard --lines 100 --nostream
-              NEXT_DIST_DIR="$ACTIVE_SLOT" pm2 startOrReload "$APP_ROOT/ecosystem.config.cjs" --update-env || true
               exit 1
             fi
 
@@ -389,7 +501,6 @@ jobs:
               echo "Production worker restarted or became unhealthy during the stability window"
               pm2 status
               pm2 logs subnet-dashboard --lines 100 --nostream
-              NEXT_DIST_DIR="$ACTIVE_SLOT" pm2 startOrReload "$APP_ROOT/ecosystem.config.cjs" --update-env || true
               exit 1
             fi
 
@@ -412,6 +523,9 @@ jobs:
             fi
 
             pm2 save
+            rollback_needed=false
+            trap - EXIT INT TERM
+            rm -f "$PREVIOUS_ECOSYSTEM" "$ROLLBACK_SLOT_FILE"
             echo "Deploy complete: $(date)"
 
       - name: Verify public production path
