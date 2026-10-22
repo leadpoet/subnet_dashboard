@@ -19,8 +19,12 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22.23.4
           cache: npm
+      - name: Verify production Node archive and installer
+        run: |
+          node_bin="$(NODE_RUNTIME_ROOT="$RUNNER_TEMP/subnet-dashboard-node" bash scripts/ensure-production-node.sh)"
+          test "$("$node_bin" --version)" = v22.23.4
       - name: Install dependencies
         run: npm ci
       - name: Ensure PostgreSQL server binaries (RPC fixture test)

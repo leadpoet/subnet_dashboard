@@ -1,7 +1,16 @@
 /* eslint-disable @typescript-eslint/no-require-imports */
 const path = require("node:path");
+const os = require("node:os");
 
 const nextDistDir = process.env.NEXT_DIST_DIR || ".next";
+const nodeInterpreter = path.join(
+  os.homedir(),
+  ".local",
+  "leadpoet-node",
+  `v22.23.4-linux-${process.arch}`,
+  "bin",
+  "node",
+);
 const runtimeSecretKeys = [
   "ADMIN_USER",
   "ADMIN_PASS",
@@ -25,8 +34,11 @@ module.exports = {
       name: "subnet-dashboard",
       cwd: __dirname,
       script: path.join(__dirname, "scripts/start-production.mjs"),
+      interpreter: nodeInterpreter,
       args: "start -p 3000",
-      exec_mode: "cluster",
+      // PM2 cluster workers inherit the daemon's Node binary and ignore this
+      // interpreter. Fork mode runs this worker with the verified release Node.
+      exec_mode: "fork",
       instances: 1,
       autorestart: true,
       // The Next.js worker normally holds roughly 1 GB RSS after startup.

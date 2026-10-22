@@ -18,7 +18,7 @@ export async function startProduction({
   )
 
   // Importing the CLI after installing the secret values keeps Next.js in this
-  // PM2-managed process. That preserves cluster reloads while ensuring every
+  // PM2-managed process. This keeps the verified worker runtime while ensuring every
   // restart and machine reboot retrieves the current secret through the EC2
   // instance role instead of relying on PM2's saved environment snapshot.
   await runNext()
