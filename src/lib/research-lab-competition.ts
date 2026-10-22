@@ -55,11 +55,11 @@ export type CompetitionSubmission = {
   }
 }
 
-const EVALUATION_FAILURE_REASONS = ['provider_credentials', 'provider_authentication_failed', 'provider_credit_exhausted', 'execution_window', 'scoring_window', 'review', 'provider', 'execution', 'unknown'] as const
+const EVALUATION_FAILURE_REASONS = ['provider_credentials', 'provider_authentication_failed', 'provider_credit_exhausted', 'openrouter_zdr_route_unavailable', 'execution_window', 'scoring_window', 'review', 'provider', 'execution', 'unknown'] as const
 type EvaluationFailureReason = typeof EVALUATION_FAILURE_REASONS[number]
 
 export type CompetitionEvaluation = {
-  state: 'queued' | 'evaluating' | 'retrying' | 'completed' | 'failed' | 'finalizing' | 'unavailable'
+  state: 'queued' | 'evaluating' | 'retrying' | 'completed' | 'failed' | 'finalizing' | 'unavailable' | 'provider_blocked' | 'evaluation_incomplete'
   validators: Array<{ hotkey: string; phase: 'executing' | 'scoring'; commit?: string | null; workingTree?: 'clean' | 'dirty' | 'unknown' }>
   counts?: { queued: number; active: number; completed: number; failed: number; retrying: number }
   failureReasons?: EvaluationFailureReason[]
@@ -78,7 +78,7 @@ export function normalizeValidatorNames(value: unknown): Record<string, string> 
 function normalizeEvaluation(value: unknown): CompetitionEvaluation | null {
   const source = record(value)
   const state = source?.state
-  if (!source || !['queued', 'evaluating', 'retrying', 'completed', 'failed', 'finalizing', 'unavailable'].includes(text(state)) || !Array.isArray(source.validators)) return null
+  if (!source || !['queued', 'evaluating', 'retrying', 'completed', 'failed', 'finalizing', 'unavailable', 'provider_blocked', 'evaluation_incomplete'].includes(text(state)) || !Array.isArray(source.validators)) return null
   const validators: CompetitionEvaluation['validators'] = []
   for (const value of source.validators) {
     const row = record(value)
@@ -550,6 +550,7 @@ function evaluationFailureReasonLabel(reason: EvaluationFailureReason): string {
     case 'provider_credentials': return 'Provider access failed'
     case 'provider_authentication_failed': return 'Provider API key authentication failed'
     case 'provider_credit_exhausted': return 'Out of credit / insufficient provider funding'
+    case 'openrouter_zdr_route_unavailable': return "OpenRouter model unavailable under Arena's ZDR policy"
     case 'provider': return 'Provider request failed'
     case 'execution': return 'Model execution failed'
     default: return 'Evaluation failed'
@@ -558,6 +559,12 @@ function evaluationFailureReasonLabel(reason: EvaluationFailureReason): string {
 
 export function competitionEvaluationFailureCauses(submission: Pick<CompetitionSubmission, 'evaluation'>): string[] {
   return submission.evaluation?.failureReasons?.map(evaluationFailureReasonLabel) ?? []
+}
+
+export function competitionEvaluationFailureGuidance(submission: Pick<CompetitionSubmission, 'evaluation'>): string | null {
+  return submission.evaluation?.failureReasons?.includes('openrouter_zdr_route_unavailable')
+    ? 'Choose a model with a ZDR-compatible endpoint.'
+    : null
 }
 
 function evaluationFailureLabel(submission: Pick<CompetitionSubmission, 'failureReason' | 'evaluation'>): string {
@@ -575,6 +582,13 @@ export function competitionSubmissionStatusLabel(
     return codeReviewIssueLabel(submission.codeReview, true) ?? 'Code review could not complete'
   }
   if (submission.status === 'review_rejected') return 'Code review rejected'
+  if (submission.status === 'provider_blocked' || submission.status === 'evaluation_incomplete') {
+    const reasons = submission.evaluation?.failureReasons
+    if (reasons?.includes('openrouter_zdr_route_unavailable')) {
+      return evaluationFailureReasonLabel('openrouter_zdr_route_unavailable')
+    }
+    return submission.status === 'provider_blocked' ? 'Provider blocked' : 'Evaluation incomplete'
+  }
   if (submission.isChampion || submission.status === 'champion') {
     if (round.promotionStatus === 'pending') return 'Champion · promotion pending'
     if (round.promotionStatus === 'promoted') return 'Champion · promoted'

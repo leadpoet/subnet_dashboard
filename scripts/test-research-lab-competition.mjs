@@ -402,6 +402,7 @@ try {
     provider_credentials: 'Provider access failed',
     provider_authentication_failed: 'Provider API key authentication failed',
     provider_credit_exhausted: 'Out of credit / insufficient provider funding',
+    openrouter_zdr_route_unavailable: "OpenRouter model unavailable under Arena's ZDR policy",
     provider: 'Provider request failed',
     execution: 'Model execution failed',
     unknown: 'Evaluation failed',
@@ -413,6 +414,52 @@ try {
       assert.equal(competitionSubmissionStatusLabel(row, pendingRound), label)
     }
   }
+  const zdrFailure = evaluationRow({ state: 'failed', validators: [], failure_reasons: ['openrouter_zdr_route_unavailable'] }, 'scoring_failed')
+  assert.deepEqual(zdrFailure.evaluation.failureReasons, ['openrouter_zdr_route_unavailable'])
+  assert.equal(competitionSubmissionStatusLabel(zdrFailure, pendingRound), failureLabels.openrouter_zdr_route_unavailable)
+  assert.equal(competitionSubmissionStatusLabel(evaluationRow({
+    state: 'failed', validators: [], failure_reasons: ['unknownproviderfailure'], model_name: 'some-model',
+  }, 'scoring_failed'), pendingRound), 'Evaluation failed', 'unknown provider errors and model names must not imply a ZDR route failure')
+  const zdrMarkup = renderToStaticMarkup(React.createElement(renderedModule.exports.SubmissionTable, {
+    submissions: [zdrFailure], round: pendingRound, selectedId: zdrFailure.submissionId, onSelect() {},
+  })) + renderToStaticMarkup(React.createElement(renderedModule.exports.PublishedResults, {
+    submission: zdrFailure, round: pendingRound, benchmark, benchmarkState: 'available', results: null, resultsState: 'error',
+  }))
+  assert.match(zdrMarkup, /OpenRouter model unavailable under Arena&#x27;s ZDR policy|OpenRouter model unavailable under Arena's ZDR policy/)
+  assert.match(zdrMarkup, /Choose a model with a ZDR-compatible endpoint\./)
+  const publishedZdrRow = {
+    submission_id: 'miner-published-zdr', miner_hotkey: '5miner', is_baseline: false, status: 'provider_blocked',
+    submitted_at: '2026-10-21T10:00:00Z', stage1_score: null, final_score: null, is_champion: false,
+    evaluation: { state: 'provider_blocked', validators: [], failure_reasons: ['openrouter_zdr_route_unavailable'] },
+    code: { available: false, available_at: null, url: null },
+  }
+  const publishedZdr = normalizeCompetitionSubmissions({ submissions: [publishedZdrRow] })[0]
+  assert.equal(publishedZdr.status, 'provider_blocked', 'the published exclusion status remains unchanged')
+  assert.equal(publishedZdr.finalScore, null, 'a blocked published row does not gain a score')
+  assert.equal(publishedZdr.evaluation.state, 'provider_blocked')
+  assert.deepEqual(publishedZdr.evaluation.failureReasons, ['openrouter_zdr_route_unavailable'])
+  assert.equal(competitionSubmissionStatusLabel(publishedZdr, pendingRound), failureLabels.openrouter_zdr_route_unavailable)
+  const publishedZdrMarkup = renderToStaticMarkup(React.createElement(renderedModule.exports.SubmissionTable, {
+    submissions: [publishedZdr], round: pendingRound, selectedId: publishedZdr.submissionId, onSelect() {},
+  })) + renderToStaticMarkup(React.createElement(renderedModule.exports.PublishedResults, {
+    submission: publishedZdr, round: pendingRound, benchmark, benchmarkState: 'available', results: null, resultsState: 'error',
+  }))
+  assert.match(publishedZdrMarkup, /OpenRouter model unavailable under Arena&#x27;s ZDR policy|OpenRouter model unavailable under Arena's ZDR policy/)
+  assert.match(publishedZdrMarkup, /Choose a model with a ZDR-compatible endpoint\./)
+  const publishedZdrHistory = normalizeCompetitionHistory({
+    rounds: [published], submissions: [{ ...publishedZdrRow, round_id: published.round_id }], next_cursor: null,
+  })
+  assert.equal(publishedZdrHistory.entries[0].submission.status, 'provider_blocked', 'history preserves the immutable exclusion status')
+  assert.equal(competitionSubmissionStatusLabel(publishedZdrHistory.entries[0].submission, publishedZdrHistory.entries[0].round), failureLabels.openrouter_zdr_route_unavailable)
+  const unprovedBlocked = normalizeCompetitionSubmissions({ submissions: [{
+    ...publishedZdrRow, submission_id: 'miner-unproved-blocked',
+    evaluation: { state: 'provider_blocked', validators: [] },
+  }] })[0]
+  assert.equal(competitionSubmissionStatusLabel(unprovedBlocked, pendingRound), 'Provider blocked', 'provider_blocked status without the exact allowlisted reason stays generic')
+  const unprovedBlockedMarkup = renderToStaticMarkup(React.createElement(renderedModule.exports.SubmissionTable, {
+    submissions: [unprovedBlocked], round: pendingRound, selectedId: unprovedBlocked.submissionId, onSelect() {},
+  }))
+  assert.doesNotMatch(unprovedBlockedMarkup, /OpenRouter model unavailable|ZDR-compatible endpoint/, 'status or an unrecognized reason cannot imply ZDR incompatibility')
   const creditFixture = JSON.parse(await readFile(resolve('scripts/fixtures/competition-provider-credit-20261015-16.json'), 'utf8'))
   assert.deepEqual(creditFixture.groups.map((group) => group.submissions.length), [6, 2])
   for (const group of creditFixture.groups) {
@@ -472,7 +519,7 @@ try {
   }))
   assert.ok(unclaimedRows.every((row) => competitionSubmissionStatusLabel(row, pendingRound) === failureLabels.execution_window))
   assert.ok(unclaimedRows.every((row) => row.evaluation.validators.length === 0 && row.evaluation.counts.failed === 10))
-  for (const reasons of ['review', [null], ['private-raw-error'], ['review', 'private-raw-error'], [{}], Array(10).fill('review')]) {
+  for (const reasons of ['review', [null], ['private-raw-error'], ['review', 'private-raw-error'], [{}], Array(11).fill('review')]) {
     const row = evaluationRow({ state: 'failed', validators: [], failure_reasons: reasons, terminal_doc: 'private-detail' })
     assert.equal(row.evaluation.failureReasons, undefined, 'invalid optional causes must not be accepted or replace progress')
     assert.equal(competitionSubmissionStatusLabel(row, pendingRound), 'Evaluation failed')
