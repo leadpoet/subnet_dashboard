@@ -495,6 +495,7 @@ export type CompetitionScoreHistoryPoint = {
   evaluationDate: string
   timestamp: number
   score: number | null
+  baselineScore: number | null
   roundId: string | null
   promotionStatus: string | null
 }
@@ -537,7 +538,7 @@ export function competitionChampionHistory(snapshot: CompetitionSnapshot): Compe
   for (let timestamp = start; timestamp <= end; timestamp += dayMs) {
     const evaluationDate = new Date(timestamp).toISOString().slice(0, 10)
     const round = byDate.get(evaluationDate)
-    points.push({ evaluationDate, timestamp, score: score(round?.champion?.finalScore), roundId: round?.roundId ?? null, promotionStatus: round?.promotionStatus ?? null })
+    points.push({ evaluationDate, timestamp, score: score(round?.champion?.finalScore), baselineScore: score(round?.baseline?.finalScore), roundId: round?.roundId ?? null, promotionStatus: round?.promotionStatus ?? null })
   }
   return points
 }
