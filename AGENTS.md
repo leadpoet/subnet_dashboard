@@ -1,3 +1,12 @@
+## Scoped production authorization: October 23 baseline chart tooltip
+
+On 2026-10-23 the user authorized adding the same-day baseline score to each
+champion history chart tooltip, with focused regression tests, safe push/merge,
+normal dashboard deployment and rendered verification. Preserve scores, dates,
+release selection, null values, API contracts and concurrent work. The parent
+task owns production actions. Authority ends after visible verification.
+Keep AGENTS.md and CLAUDE.md byte-identical.
+
 ## Scoped production authorization: October 22 ZDR failure message
 
 On 2026-10-22 the user authorized a narrow, rigorously tested dashboard fix
