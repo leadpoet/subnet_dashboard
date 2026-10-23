@@ -88,9 +88,9 @@ try {
   })
   const historySnapshot = (rounds, refs = {}) => ({ ...snapshot, rounds, latestRound: null, latestCompletedRound: null, openRound: null, ...refs })
   assert.deepEqual(competitionChampionHistory(historySnapshot([])), [])
-  const canonical = historyRound('2026-09-05', 0)
+  const canonical = historyRound('2026-09-05', 0, { baseline: { submissionId: 'baseline', minerHotkey: '5baseline', finalScore: 0 } })
   const history = competitionChampionHistory(historySnapshot([
-    historyRound('2026-09-10', 4.633), historyRound('2026-09-06', null), canonical,
+    historyRound('2026-09-10', 4.633, { baseline: { submissionId: 'baseline', minerHotkey: '5baseline', finalScore: null } }), historyRound('2026-09-06', null), canonical,
     historyRound('2026-09-07', 80, { status: 'cancelled' }),
     historyRound('2026-09-08', 70, { status: 'stage2' }),
     historyRound('2026-09-09', 60, { status: 'scoring_failed' }),
@@ -98,12 +98,15 @@ try {
   ], { latestCompletedRound: { ...canonical, champion: { ...canonical.champion, finalScore: 99 } } }))
   assert.deepEqual(history.map((point) => point.evaluationDate), ['2026-09-05', '2026-09-06', '2026-09-07', '2026-09-08', '2026-09-09', '2026-09-10'], 'history sorts valid UTC evaluation dates and fills calendar gaps')
   assert.deepEqual(history.map((point) => point.score), [0, null, null, null, null, 4.633], 'true zero is retained; pending, failed, cancelled and missing scores remain gaps')
+  assert.deepEqual(history.map((point) => point.baselineScore), [0, 99, null, null, null, null], 'baseline scores follow the same published evaluation day while gaps, missing values and zero stay distinct')
   assert.equal(history[0].timestamp, Date.parse('2026-09-05T00:00:00Z'))
   assert.equal(history[0].roundId, canonical.roundId, 'canonical history wins over stale round references')
   assert.equal(competitionChampionHistory(historySnapshot([canonical, canonical])).length, 1, 'duplicate references do not add chart points')
   assert.equal(competitionChampionHistory(historySnapshot([], { latestCompletedRound: canonical }))[0].score, 0, 'a published canonical reference outside the history list is included')
   const laterRelease = historyRound('2026-09-05', 2, { roundId: 'arena-rerun', publishedAt: '2026-09-05T20:00:00Z' })
   assert.equal(competitionChampionHistory(historySnapshot([laterRelease, canonical]))[0].score, 2, 'a repeated evaluation day uses the latest published release regardless of input order')
+  const baselineRerun = historyRound('2026-09-05', 2, { roundId: 'arena-rerun', publishedAt: '2026-09-05T20:00:00Z', baseline: { submissionId: 'baseline', minerHotkey: '5baseline', finalScore: 23 } })
+  assert.equal(competitionChampionHistory(historySnapshot([baselineRerun, canonical]))[0].baselineScore, 23, 'same-day baseline uses the same latest published release as its champion score')
   assert.equal(competitionChampionHistory(historySnapshot([
     laterRelease, historyRound('2026-09-05', 3, { roundId: 'offset-release', publishedAt: '2026-09-05T17:00:00-04:00' }),
   ]))[0].score, 3, 'release ordering compares UTC instants rather than timestamp strings')
@@ -623,6 +626,9 @@ try {
   const tooltipMarkup = renderToStaticMarkup(React.createElement(renderedModule.exports.ScoreHistoryTooltip, { active: true, payload: [{ payload: history[0] }] }))
   assert.match(tooltipMarkup, /Evaluation · Sep 5, 2026 · UTC/)
   assert.match(tooltipMarkup, /Champion 0\.00 \/100/)
+  assert.match(tooltipMarkup, /Baseline 0\.00 \/100/, 'tooltip includes that evaluation day baseline score')
+  const missingBaselineTooltipMarkup = renderToStaticMarkup(React.createElement(renderedModule.exports.ScoreHistoryTooltip, { active: true, payload: [{ payload: { ...history[0], baselineScore: null } }] }))
+  assert.match(missingBaselineTooltipMarkup, /Baseline Awaiting score/, 'tooltip preserves a missing baseline score instead of showing zero')
   assert.equal(renderToStaticMarkup(React.createElement(renderedModule.exports.ScoreHistoryTooltip, { active: true, payload: [{ payload: history[1] }] })), '', 'a missing point must not expose a zero tooltip')
   const finalMarkup = renderSummary(snapshot.latestCompletedRound)
   const datedRound = {
