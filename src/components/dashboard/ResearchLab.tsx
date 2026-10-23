@@ -215,7 +215,7 @@ function ChampionScoreHistory({ points }: { points: CompetitionScoreHistoryPoint
 function ScoreHistoryTooltip({ active, payload }: { active?: boolean; payload?: ReadonlyArray<{ payload?: CompetitionScoreHistoryPoint }> }) {
   const point = payload?.[0]?.payload
   if (!active || !point || point.score === null) return null
-  return <div className="rounded-md border border-[var(--line-3)] bg-[#101010] px-3 py-2 text-[11px] shadow-lg"><div className="text-[var(--muted)]">Evaluation · {formatUtcDate(point.evaluationDate)}</div><div className="mt-1 font-mono text-[var(--platinum)]">Champion {formatCompetitionScore(point.score)} /100</div><div className="mt-1 font-mono text-[var(--muted)]">Baseline {point.baselineScore === null ? 'Awaiting score' : `${formatCompetitionScore(point.baselineScore)} /100`}</div>{point.promotionStatus && point.promotionStatus !== 'promoted' ? <div className="mt-1 text-[var(--muted)]">{humanize(point.promotionStatus)}</div> : null}</div>
+  return <div className="rounded-md border border-[var(--line-3)] bg-[#101010] px-3 py-2 text-[11px] shadow-lg"><div className="text-[var(--muted)]">Evaluation · {formatUtcDate(point.evaluationDate)}</div><div className="mt-1 font-mono text-[var(--platinum)]">Champion {formatCompetitionScore(point.score)} /100</div><div className="mt-1 font-mono text-[var(--muted)]">Baseline {point.baselineScore === null ? 'Unavailable' : `${formatCompetitionScore(point.baselineScore)} /100`}</div>{point.promotionStatus && point.promotionStatus !== 'promoted' ? <div className="mt-1 text-[var(--muted)]">{humanize(point.promotionStatus)}</div> : null}</div>
 }
 
 function historyTicks(points: CompetitionScoreHistoryPoint[]): number[] {

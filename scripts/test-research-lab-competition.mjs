@@ -628,7 +628,7 @@ try {
   assert.match(tooltipMarkup, /Champion 0\.00 \/100/)
   assert.match(tooltipMarkup, /Baseline 0\.00 \/100/, 'tooltip includes that evaluation day baseline score')
   const missingBaselineTooltipMarkup = renderToStaticMarkup(React.createElement(renderedModule.exports.ScoreHistoryTooltip, { active: true, payload: [{ payload: { ...history[0], baselineScore: null } }] }))
-  assert.match(missingBaselineTooltipMarkup, /Baseline Awaiting score/, 'tooltip preserves a missing baseline score instead of showing zero')
+  assert.match(missingBaselineTooltipMarkup, /Baseline Unavailable/, 'tooltip preserves an unavailable historical baseline instead of showing zero')
   assert.equal(renderToStaticMarkup(React.createElement(renderedModule.exports.ScoreHistoryTooltip, { active: true, payload: [{ payload: history[1] }] })), '', 'a missing point must not expose a zero tooltip')
   const finalMarkup = renderSummary(snapshot.latestCompletedRound)
   const datedRound = {
