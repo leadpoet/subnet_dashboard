@@ -130,6 +130,65 @@ try {
   assert.equal(calls.length, 2, 'one interval refreshes only visible submissions')
   await unmount()
 
+  // A failed initial submissions request is not evidence of an empty round.
+  let submissionsStatus = 502
+  let submissionRows = [baseline, competitor]
+  respond = (url) => url.endsWith('/submissions')
+    ? Response.json(submissionsStatus === 200 ? { round_id: round.round_id, submissions: submissionRows } : { error: 'unavailable' }, { status: submissionsStatus })
+    : publicResponse(url)
+  await act(async () => { renderer = TestRenderer.create(React.createElement(RoundWorkspace, { round: normalizedRound, active: true }), rendererOptions) })
+  assert.match(markup(), /Submissions are temporarily unavailable/)
+  assert.match(markup(), /Retrying automatically/)
+  assert.doesNotMatch(markup(), /0.*total|No submissions are public|Last known submissions/)
+  await advance(60_000)
+  assert.doesNotMatch(markup(), /0.*total|No submissions are public|Last known submissions/, 'repeated failures cannot establish a saved snapshot')
+  submissionsStatus = 200
+  await advance(60_000)
+  assert.match(markup(), /5Competitor/)
+  assert.doesNotMatch(markup(), /temporarily unavailable|Retrying automatically|Latest submission refresh failed/)
+  submissionsStatus = 502
+  await advance(60_000)
+  assert.match(markup(), /5Competitor/, 'later failures preserve the successfully loaded rows')
+  assert.match(markup(), /Last known submissions are shown below/)
+  assert.doesNotMatch(markup(), /No submissions are public/)
+  submissionsStatus = 200
+  submissionRows = []
+  await advance(60_000)
+  assert.match(markup(), /0.*total/)
+  assert.match(markup(), /No submissions are public for this round/)
+  assert.doesNotMatch(markup(), /Latest submission refresh failed|Last known submissions|Retrying automatically/)
+  await unmount()
+
+  // A genuinely empty first response still shows the ordinary empty state.
+  await act(async () => { renderer = TestRenderer.create(React.createElement(RoundWorkspace, { round: normalizedRound, active: true }), rendererOptions) })
+  assert.match(markup(), /0.*total/)
+  assert.match(markup(), /No submissions are public for this round/)
+  assert.doesNotMatch(markup(), /temporarily unavailable|Retrying automatically|Last known submissions/)
+  await unmount()
+
+  respond = (url) => {
+    if (url.endsWith('/submissions')) throw new Error('network unavailable')
+    return publicResponse(url)
+  }
+  await act(async () => { renderer = TestRenderer.create(React.createElement(RoundWorkspace, { round: normalizedRound, active: true }), rendererOptions) })
+  assert.match(markup(), /Submissions are temporarily unavailable/)
+  assert.doesNotMatch(markup(), /0.*total|No submissions are public|Last known submissions/)
+  await unmount()
+  respond = (url) => url.endsWith('/submissions')
+    ? Response.json(submissionsStatus === 200 ? { round_id: round.round_id, submissions: submissionRows } : { error: 'unavailable' }, { status: submissionsStatus })
+    : publicResponse(url)
+
+  // No successful snapshot exists for a newly selected round, even if the old
+  // round loaded successfully. Gated responses are unavailable, not empty.
+  submissionRows = [baseline, competitor]
+  await act(async () => { renderer = TestRenderer.create(React.createElement(RoundWorkspace, { round: normalizedRound, active: true }), rendererOptions) })
+  submissionsStatus = 403
+  await act(async () => { renderer.update(React.createElement(RoundWorkspace, { round: { ...normalizedRound, roundId: 'arena-2026-09-23' }, active: true })) })
+  assert.match(markup(), /Submissions are temporarily unavailable/)
+  assert.doesNotMatch(markup(), /5Competitor|0.*total|No submissions are public|Last known submissions/)
+  await unmount()
+  respond = publicResponse
+
   // Exercise the actual parent/child refresh cascade and saved visible output.
   await act(async () => { renderer = TestRenderer.create(React.createElement(ResearchLab), rendererOptions) })
   assert.equal(calls.length, 3)
@@ -393,7 +452,7 @@ try {
   await advance(30_000)
   assert.doesNotMatch(markup(), /temporary failure/, 'the next poll recovers without a reload')
   await unmount()
-  console.log('arena-polling: stable refresh counts, selection, release gates, visibility, slow requests, round changes, and admin recovery passed')
+  console.log('arena-polling: stable refresh counts, honest submissions failures/empty results, selection, release gates, visibility, slow requests, round changes, and admin recovery passed')
 } finally {
   await act(async () => { renderer?.unmount() })
   globalThis.IS_REACT_ACT_ENVIRONMENT = previousActEnvironment
