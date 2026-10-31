@@ -1,3 +1,12 @@
+## Scoped authorization: October 31 submissions request failures
+
+The parent task authorized a narrow dashboard fix for false empty submissions
+shown after a failed request, focused regression tests and a review commit.
+Preserve successful empty results, saved rows, filters, paging, scores, polling
+and concurrent work. No new dependencies or production actions are authorized
+for this implementation task. The parent owns review, push and deployment.
+Keep AGENTS.md and CLAUDE.md byte-identical.
+
 ## Scoped production authorization: October 23 baseline chart tooltip
 
 On 2026-10-23 the user authorized adding the same-day baseline score to each

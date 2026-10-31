@@ -240,7 +240,9 @@ function RoundWorkspace({ round, active, initialSubmissionId = null, inspectionO
   // Summary polling returns a new object each time. Depend on the validation
   // fields so an unchanged round does not restart detail polling or results.
   const { roundId, icpSetDate, publicAt, benchmarkIcpCount } = round
-  const [submissions, setSubmissions] = useState<CompetitionSubmission[]>([])
+  // Null means no successful response for this round; [] is a real empty result.
+  const [submissionSnapshot, setSubmissions] = useState<CompetitionSubmission[] | null>(null)
+  const submissions = submissionSnapshot ?? []
   const [benchmark, setBenchmark] = useState<CompetitionBenchmark | null>(null)
   const [benchmarkState, setBenchmarkState] = useState<ReleaseState>('loading')
   const [query, setQuery] = useState('')
@@ -259,7 +261,6 @@ function RoundWorkspace({ round, active, initialSubmissionId = null, inspectionO
   const [roundRevision, setRoundRevision] = useState(0)
   const roundRequestRef = useRef(0)
   const benchmarkRequestRef = useRef(0)
-  const roundSnapshotRef = useRef(false)
   const benchmarkReleasedRef = useRef(false)
   const selectedSubmissionIdRef = useRef<string | null>(null)
   selectedSubmissionIdRef.current = selectedSubmissionId
@@ -270,15 +271,13 @@ function RoundWorkspace({ round, active, initialSubmissionId = null, inspectionO
 
   useEffect(() => {
     benchmarkReleasedRef.current = false
-    roundSnapshotRef.current = false
     setInspectionOpen(inspectionOnly)
     setPage(0)
-    setRoundLoading(true); setRoundError(null); setBenchmark(null); setBenchmarkState('loading'); setSubmissions([]); selectSubmission(initialSubmissionId)
+    setRoundLoading(true); setRoundError(null); setBenchmark(null); setBenchmarkState('loading'); setSubmissions(null); selectSubmission(initialSubmissionId)
     return () => { roundRequestRef.current += 1; benchmarkRequestRef.current += 1 }
   }, [roundId, selectSubmission, initialSubmissionId, inspectionOnly])
 
   const refreshRound = useCallback(async () => {
-    const initial = !roundSnapshotRef.current
     const request = ++roundRequestRef.current
     const [submissionRequest] = await Promise.allSettled([
       fetchReleasedJson(`/api/research-lab/rounds/${encodeURIComponent(roundId)}/submissions`),
@@ -292,15 +291,11 @@ function RoundWorkspace({ round, active, initialSubmissionId = null, inspectionO
         ? current
         : next.find((submission) => submission.isBaseline)?.submissionId ?? next.find((submission) => submission.isChampion)?.submissionId ?? next[0]?.submissionId ?? null)
       setRoundError(null)
-    } else if (initial) {
-      setSubmissions([])
-      if (submissionRequest.status === 'rejected') setRoundError(errorMessage(submissionRequest.reason, 'Submissions are temporarily unavailable.'))
     } else {
       setRoundError(submissionRequest.status === 'rejected'
         ? `Latest submission refresh failed: ${errorMessage(submissionRequest.reason, 'request failed')}`
         : 'Latest submission refresh did not return public data.')
     }
-    roundSnapshotRef.current = true
     setRoundLoading(false)
     setRoundRevision((current) => current + 1)
   }, [roundId, selectSubmission, inspectionOnly, initialSubmissionId])
@@ -389,14 +384,14 @@ function RoundWorkspace({ round, active, initialSubmissionId = null, inspectionO
   </div> : null
   if (inspectionOnly) return roundLoading ? <div className="p-5"><SubmissionRowsLoading /></div> : inspection ?? <InlineNotice>{roundError ?? 'Submission details are unavailable.'}</InlineNotice>
   return <section className="pt-6 md:pt-10" aria-label="Current submissions">
-    <div className="mb-5 flex items-end justify-between gap-4"><div><h3 className="font-display text-[22px] font-medium tracking-[-0.025em] text-[var(--platinum)]">Submissions</h3><p className="mt-1 text-[12px] text-[var(--muted-2)]">{formatDay(round.evaluationDate)}</p></div><span className="font-mono text-[12px] text-[var(--muted)]">{submissions.length} total</span></div>
+    <div className="mb-5 flex items-end justify-between gap-4"><div><h3 className="font-display text-[22px] font-medium tracking-[-0.025em] text-[var(--platinum)]">Submissions</h3><p className="mt-1 text-[12px] text-[var(--muted-2)]">{formatDay(round.evaluationDate)}</p></div><span className="font-mono text-[12px] text-[var(--muted)]">{submissionSnapshot === null ? roundLoading ? 'Loading…' : 'Unavailable' : `${submissions.length} total`}</span></div>
     <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-end">
       <label className="min-w-0 flex-1"><span className={filterLabelClass}>Find your miner</span><input ref={searchInputRef} type="search" value={query} onChange={(event) => { setQuery(event.target.value); setPage(0) }} placeholder="Miner hotkey or submission" className={filterClass} /></label>
       <div className="sm:w-48"><span className={filterLabelClass}>Submission status</span><CompetitionSelect label="Submission status" value={statusFilter} onChange={(value) => { setStatusFilter(value); setPage(0) }} options={submissionStatusOptions} /></div>
       {query || statusFilter !== 'all' ? <button type="button" onClick={() => { setQuery(''); setStatusFilter('all'); setPage(0); searchInputRef.current?.focus() }} className="h-11 shrink-0 self-end rounded-md px-3 text-[12px] text-[var(--muted)] transition-colors hover:bg-white/5 hover:text-[var(--white)]">Clear filters</button> : null}
     </div>
-    {roundError ? <div className="mb-3"><InlineNotice>{roundError} Last known submissions are shown below.</InlineNotice></div> : null}
-    {roundLoading ? <SubmissionRowsLoading /> : filtered.length ? <><SubmissionTable submissions={filtered.slice(currentPage * 15, (currentPage + 1) * 15)} round={round} selectedId={inspectionOpen ? selectedSubmissionId : null} expandedContent={inspectionOpen ? inspection : null} onSelect={(id) => { selectSubmission(id); setInspectionOpen(id !== selectedSubmissionId || !inspectionOpen) }} /><Pagination page={currentPage} hasNext={currentPage + 1 < pageCount} onPrevious={() => setPage(currentPage - 1)} onNext={() => setPage(currentPage + 1)} label={`${filtered.length} ${query || statusFilter !== 'all' ? filtered.length === 1 ? 'match' : 'matches' : filtered.length === 1 ? 'submission' : 'submissions'}`} /></> : <InlineNotice>{submissions.length ? 'No miners match these filters.' : 'No submissions are public for this round.'}</InlineNotice>}
+    {roundError ? <div className="mb-3"><InlineNotice>{submissionSnapshot === null ? 'Submissions are temporarily unavailable. Retrying automatically.' : `${roundError} Last known submissions are shown below.`}</InlineNotice></div> : null}
+    {roundLoading ? <SubmissionRowsLoading /> : submissionSnapshot === null ? null : filtered.length ? <><SubmissionTable submissions={filtered.slice(currentPage * 15, (currentPage + 1) * 15)} round={round} selectedId={inspectionOpen ? selectedSubmissionId : null} expandedContent={inspectionOpen ? inspection : null} onSelect={(id) => { selectSubmission(id); setInspectionOpen(id !== selectedSubmissionId || !inspectionOpen) }} /><Pagination page={currentPage} hasNext={currentPage + 1 < pageCount} onPrevious={() => setPage(currentPage - 1)} onNext={() => setPage(currentPage + 1)} label={`${filtered.length} ${query || statusFilter !== 'all' ? filtered.length === 1 ? 'match' : 'matches' : filtered.length === 1 ? 'submission' : 'submissions'}`} /></> : <InlineNotice>{submissions.length ? 'No miners match these filters.' : 'No submissions are public for this round.'}</InlineNotice>}
   </section>
 }
 
