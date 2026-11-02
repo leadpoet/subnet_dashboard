@@ -494,8 +494,15 @@ export function competitionRoundOptions(snapshot: CompetitionSnapshot): Competit
 export type CompetitionScoreHistoryPoint = {
   evaluationDate: string
   timestamp: number
+  /** The champion's score that day: a newly promoted winner's score, otherwise the defending champion's. */
   score: number | null
+  /** A challenger replaced the defending champion on this evaluation day. */
+  newChampion: boolean
+  championHotkey: string | null
+  /** The defending champion's score on the same day's ICPs. */
   baselineScore: number | null
+  /** A round winner that did not replace the champion (pending or superseded promotion). */
+  challengerScore: number | null
   roundId: string | null
   promotionStatus: string | null
 }
@@ -524,21 +531,30 @@ export function currentChampionRound(snapshot: CompetitionSnapshot): Competition
     .at(-1) ?? null
 }
 
-/** Historical round winners, including winners whose promotion was superseded.
- * A round without a winner is a gap; never substitute the baseline's score. */
+/** The champion's score on every published evaluation day, from the first
+ * published score. The daily baseline is the defending champion re-run on that
+ * day's ICPs, so it is the champion's score unless a winner was promoted that
+ * day. Pending and superseded winners never replace the champion. Days without
+ * a published score stay gaps and never become zero. */
 export function competitionChampionHistory(snapshot: CompetitionSnapshot): CompetitionScoreHistoryPoint[] {
   const published = publishedCompetitionRounds(snapshot)
-  if (!published.length) return []
   const dayMs = 86_400_000
-  const end = Date.parse(`${published[published.length - 1].evaluationDate}T00:00:00Z`)
-  const start = Math.max(Date.parse(`${published[0].evaluationDate}T00:00:00Z`), end - 13 * dayMs)
   // Multiple releases for one evaluation day use the latest published record.
   const byDate = new Map(published.map((round) => [round.evaluationDate, round]))
   const points: CompetitionScoreHistoryPoint[] = []
-  for (let timestamp = start; timestamp <= end; timestamp += dayMs) {
+  if (!published.length) return points
+  const end = Date.parse(`${published[published.length - 1].evaluationDate}T00:00:00Z`)
+  for (let timestamp = Date.parse(`${published[0].evaluationDate}T00:00:00Z`); timestamp <= end; timestamp += dayMs) {
     const evaluationDate = new Date(timestamp).toISOString().slice(0, 10)
     const round = byDate.get(evaluationDate)
-    points.push({ evaluationDate, timestamp, score: score(round?.champion?.finalScore), baselineScore: score(round?.baseline?.finalScore), roundId: round?.roundId ?? null, promotionStatus: round?.promotionStatus ?? null })
+    const winner = round?.champion ?? null
+    const newChampion = winner !== null && round?.promotionStatus === 'promoted'
+    const point = {
+      evaluationDate, timestamp, score: score(newChampion ? winner?.finalScore : round?.baseline?.finalScore),
+      newChampion, championHotkey: newChampion ? winner?.minerHotkey ?? null : null, baselineScore: score(round?.baseline?.finalScore),
+      challengerScore: newChampion ? null : score(winner?.finalScore), roundId: round?.roundId ?? null, promotionStatus: round?.promotionStatus ?? null,
+    }
+    if (points.length || point.score !== null) points.push(point)
   }
   return points
 }

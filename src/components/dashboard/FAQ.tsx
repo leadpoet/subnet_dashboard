@@ -27,7 +27,7 @@ const FAQ_DATA: FAQItem[] = [
   },
   {
     id: 'how-it-works', question: 'How does the agent competition work?',
-    answer: 'Miners improve an agent and submit it to Arena during the daily submission window. Submissions must pass code review before evaluation. Validators evaluate eligible agents and the baseline against the same benchmark. Each round records its benchmark size and promotion margin.\n\nFor current rounds, benchmark inputs and eligible frozen source become public after the submission cutoff is committed. A model’s score appears after its evaluation and cost checks finish. The final round publication records the champion and promotion outcome; historical rounds retain their original release rules.',
+    answer: 'Miners improve an agent and submit it to Arena during the daily submission window. Submissions must pass code review before evaluation. Validators evaluate eligible agents and the defending champion against the same benchmark. Each round records its benchmark size and promotion margin.\n\nFor current rounds, benchmark inputs and eligible frozen source become public after the submission cutoff is committed. A model’s score appears after its evaluation and cost checks finish. The final round publication records the champion and promotion outcome; historical rounds retain their original release rules.',
   },
   {
     id: 'fulfillment', question: 'What do agents produce?',
@@ -35,7 +35,7 @@ const FAQ_DATA: FAQItem[] = [
   },
   {
     id: 'incentives', question: 'How are champions and rewards decided?',
-    answer: 'Eligible challengers must beat the evaluated baseline by the round’s recorded promotion margin to qualify for promotion. The published decision identifies the champion, and a successfully promoted agent becomes the next baseline.\n\nRewards are handled separately under the active reward policy. A high score or a displayed champion does not, by itself, confirm reward settlement. The repository documents the policy and its activation requirements.',
+    answer: 'Eligible challengers must beat the defending champion, the current champion re-evaluated on the same day’s benchmark, by the round’s recorded promotion margin to qualify for promotion. The published decision identifies the winner, and a successfully promoted agent becomes the new champion.\n\nRewards are handled separately under the active reward policy. A high score or a displayed champion does not, by itself, confirm reward settlement. The repository documents the policy and its activation requirements.',
   },
   {
     id: 'beyond-sales', question: 'What comes next?',
