@@ -15,12 +15,53 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    permissions:
+      contents: read
+      id-token: write
     steps:
+      - name: Check out release source
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.23.4
+          cache: npm
+
+      - name: Verify production Node archive and installer
+        run: |
+          node_bin="$(NODE_RUNTIME_ROOT="$RUNNER_TEMP/subnet-dashboard-node" bash scripts/ensure-production-node.sh)"
+          test "$("$node_bin" --version)" = v22.23.4
+
+      - name: Install build dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Build production artifact
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
+        run: |
+          set -euo pipefail
+          BUILD_DIR=".deploy-build-${GITHUB_SHA}"
+          NEXT_DIST_DIR="$BUILD_DIR" BUILD_TIME="$GITHUB_SHA" npm run build
+          rm -rf "$BUILD_DIR/cache"
+          tar -czf "deploy-build-${GITHUB_SHA}.tgz" "$BUILD_DIR"
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5.1.1
+        with:
+          role-to-assume: arn:aws:iam::493765492819:role/leadpoet-subnet-dashboard-github-deploy
+          role-session-name: subnet-dashboard-deploy-${{ github.run_id }}
+          aws-region: us-east-1
+
+      - name: Open SSH tunnel to the dashboard host through Session Manager
+        run: bash scripts/ssm-ssh-tunnel.sh open i-0e428b150faa9d20f 2222
+
       - name: Stop abandoned legacy EC2 build
         uses: appleboy/ssh-action@v1.2.0
         timeout-minutes: 3
         with:
-          host: ${{ secrets.EC2_HOST }}
+          host: 127.0.0.1
+          port: 2222
           username: ec2-user
           key: ${{ secrets.EC2_SSH_KEY }}
           timeout: 45s
@@ -62,37 +103,11 @@ jobs:
               fi
             fi
 
-      - name: Check out release source
-        uses: actions/checkout@v4
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22.23.4
-          cache: npm
-
-      - name: Verify production Node archive and installer
-        run: |
-          node_bin="$(NODE_RUNTIME_ROOT="$RUNNER_TEMP/subnet-dashboard-node" bash scripts/ensure-production-node.sh)"
-          test "$("$node_bin" --version)" = v22.23.4
-
-      - name: Install build dependencies
-        run: npm ci --no-audit --no-fund
-
-      - name: Build production artifact
-        env:
-          NODE_OPTIONS: --max-old-space-size=4096
-        run: |
-          set -euo pipefail
-          BUILD_DIR=".deploy-build-${GITHUB_SHA}"
-          NEXT_DIST_DIR="$BUILD_DIR" BUILD_TIME="$GITHUB_SHA" npm run build
-          rm -rf "$BUILD_DIR/cache"
-          tar -czf "deploy-build-${GITHUB_SHA}.tgz" "$BUILD_DIR"
-
       - name: Copy production artifact to EC2
         uses: appleboy/scp-action@v1.0.0
         with:
-          host: ${{ secrets.EC2_HOST }}
+          host: 127.0.0.1
+          port: 2222
           username: ec2-user
           key: ${{ secrets.EC2_SSH_KEY }}
           timeout: 45s
@@ -109,7 +124,8 @@ jobs:
           AWS_DEFAULT_REGION: us-east-1
           SUBNET_DASHBOARD_SECRET_ID: leadpoet/prod/subnet-dashboard/env
         with:
-          host: ${{ secrets.EC2_HOST }}
+          host: 127.0.0.1
+          port: 2222
           username: ec2-user
           key: ${{ secrets.EC2_SSH_KEY }}
           timeout: 45s
@@ -604,6 +620,10 @@ jobs:
             rm -f "$PREVIOUS_ECOSYSTEM" "$ROLLBACK_SLOT_FILE"
             echo "Deploy complete: $(date)"
 
+      - name: Close SSH tunnel
+        if: always()
+        run: bash scripts/ssm-ssh-tunnel.sh close
+
       - name: Verify public production path
         run: |
           set -euo pipefail
@@ -617,10 +637,14 @@ jobs:
     name: Deploy weights alert to validator
     needs: deploy
     # The alert worker is an independent release artifact. A dashboard rollback
-    # must not suppress its deployment; the bastion remains usable in that case.
+    # must not suppress its deployment; it reaches the validator through its own
+    # Session Manager tunnel.
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - name: Check out release source
         uses: actions/checkout@v4
@@ -632,15 +656,23 @@ jobs:
             scripts/weights_alert.py \
             validator_registry.json
 
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5.1.1
+        with:
+          role-to-assume: arn:aws:iam::493765492819:role/leadpoet-subnet-dashboard-github-deploy
+          role-session-name: subnet-dashboard-deploy-${{ github.run_id }}
+          aws-region: us-east-1
+
+      - name: Open SSH tunnel to the validator through Session Manager
+        run: bash scripts/ssm-ssh-tunnel.sh open i-07ab2b90c537d0f28 2222
+
       - name: Copy weights alert release to validator
         uses: appleboy/scp-action@v1.0.0
         with:
-          host: 172.31.29.188
+          host: 127.0.0.1
+          port: 2222
           username: ec2-user
           key: ${{ secrets.EC2_SSH_KEY }}
-          proxy_host: ${{ secrets.EC2_HOST }}
-          proxy_username: ec2-user
-          proxy_key: ${{ secrets.EC2_SSH_KEY }}
           timeout: 45s
           command_timeout: 2m
           source: weights-alert-${{ github.sha }}.tgz
@@ -651,12 +683,10 @@ jobs:
         uses: appleboy/ssh-action@v1.2.0
         timeout-minutes: 3
         with:
-          host: 172.31.29.188
+          host: 127.0.0.1
+          port: 2222
           username: ec2-user
           key: ${{ secrets.EC2_SSH_KEY }}
-          proxy_host: ${{ secrets.EC2_HOST }}
-          proxy_username: ec2-user
-          proxy_key: ${{ secrets.EC2_SSH_KEY }}
           timeout: 45s
           command_timeout: 2m
           script: |
@@ -707,3 +737,7 @@ jobs:
             grep -Fq '__heartbeat__' "$ACTIVE_SCRIPT"
 
             echo "Validator weights alert deployed and verified at $DEPLOY_SHA"
+
+      - name: Close SSH tunnel
+        if: always()
+        run: bash scripts/ssm-ssh-tunnel.sh close
