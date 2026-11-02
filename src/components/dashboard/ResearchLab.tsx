@@ -90,7 +90,7 @@ function ResearchLabLoading() {
   return <div aria-busy="true" aria-label="Loading competition"><CompetitionHeader />
     <section aria-label="Current champion" className="grid min-w-0 gap-4 rounded-xl border border-[var(--line)] bg-[var(--surface)] p-4 md:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)] md:gap-12 md:p-8">
       <div className="flex flex-col justify-center"><h2 className="text-[13px] text-[var(--muted)]">Current champion</h2><div className="mt-4 h-[88px] w-48 shimmer rounded-md" /><div className="mt-5 h-4 w-56 shimmer rounded" /><div className="mt-2 h-3 w-36 shimmer rounded" /></div>
-      <div className="hidden md:block"><div className="text-[13px] text-[var(--platinum)]">Champion history <span className="text-[11px] text-[var(--muted-2)]">/100</span></div><div className="mt-3 h-[180px] shimmer rounded-md" /><div className="mt-2 h-3 w-36 shimmer rounded" /></div>
+      <div className="hidden md:block"><div className="text-[13px] text-[var(--platinum)]">Champion score by day <span className="text-[11px] text-[var(--muted-2)]">/100</span></div><div className="mt-3 h-[180px] shimmer rounded-md" /><div className="mt-2 h-3 w-36 shimmer rounded" /></div>
     </section>
     <section className="mt-8 border-y border-[var(--line)] py-5"><div className="grid gap-5 sm:grid-cols-[1fr_2fr]"><div className="h-12 w-32 shimmer rounded" /><div className="grid grid-cols-2 gap-5"><div className="h-12 shimmer rounded" /><div className="h-12 shimmer rounded" /></div></div><div className="mt-5 h-4 w-24 shimmer rounded" /></section>
     <section className="pt-10"><h3 className="font-display text-[22px] text-[var(--platinum)]">Submissions</h3><div className="my-5 h-10 shimmer rounded-md" /><SubmissionRowsLoading /></section>
@@ -137,7 +137,7 @@ function ChampionSummary({ round, history = [], active = true }: { round: Compet
           {formatCompetitionScore(champion?.finalScore ?? null)}<span className="ml-2 text-[18px] tracking-normal text-[var(--muted)] md:ml-3 md:text-[22px]">/100</span>
         </div>
         {round && champion ? <div className="col-span-2 space-y-1.5 text-[12px] text-[var(--muted)] md:mt-5">
-          <p>Published winning score · {formatUtcDate(round.evaluationDate)}</p>
+          <p>Winning score · crowned {formatUtcDate(round.evaluationDate)}</p>
           <p className="font-mono text-[12px]" title={champion.minerHotkey}>{shortHotkey(champion.minerHotkey)}</p>
           {champion.finalScore === null ? <p>Champion score unavailable.</p> : null}
         </div> : <p className="col-span-2 text-[12px] text-[var(--muted)] md:mt-5">No promoted champion in published history.</p>}
@@ -166,9 +166,9 @@ function RoundSummary({ round }: { round: CompetitionRoundSummary }) {
         <summary className="flex cursor-pointer list-none items-center justify-between py-3 text-[12px] text-[var(--muted)] transition-colors hover:text-[var(--white)] [&::-webkit-details-marker]:hidden">Round details<span aria-hidden className="text-[16px] transition-transform group-open:rotate-45">+</span></summary>
         <div className="grid gap-5 pb-5 text-[12px] leading-relaxed text-[var(--muted)] sm:grid-cols-2">
           <div className="space-y-2">
-            <p>Baseline score · <span className="font-mono text-[var(--platinum)]">{baselineScore === null ? 'Awaiting score' : formatCompetitionScore(baselineScore)}</span></p>
-            <p>{baselineScore === null ? 'Available after evaluation and cost checks.' : evaluationComplete ? `${round.publishedAt ? `Published ${formatUtc(round.publishedAt)}` : 'Published result'}` : round.status === 'scored' ? 'Final result pending.' : 'Baseline evaluated. Round still in progress.'}</p>
-            <p>Promotion margin · +{formatCompetitionScore(round.promotionMargin)} points above baseline</p>
+            <p>Defending champion score · <span className="font-mono text-[var(--platinum)]">{baselineScore === null ? 'Awaiting score' : formatCompetitionScore(baselineScore)}</span></p>
+            <p>{baselineScore === null ? 'Available after evaluation and cost checks.' : evaluationComplete ? `${round.publishedAt ? `Published ${formatUtc(round.publishedAt)}` : 'Published result'}` : round.status === 'scored' ? 'Final result pending.' : 'Defending champion evaluated. Round still in progress.'}</p>
+            <p>Promotion margin · +{formatCompetitionScore(round.promotionMargin)} points above the defending champion</p>
             {round.submissionCutoff ? <p>Submissions close · {formatUtc(round.submissionCutoff)}</p> : null}
             {round.publicAt ? <p>ICPs publish · {formatUtc(round.publicAt)}. Scores follow evaluation.</p> : null}
           </div>
@@ -190,10 +190,10 @@ function ChampionScoreHistory({ points }: { points: CompetitionScoreHistoryPoint
   const maxScore = Math.max(0, ...publishedScores.map((point) => point.score ?? 0))
   const upperBound = Math.max(5, Math.ceil((maxScore + Math.max(1, maxScore / 10)) / 5) * 5)
   const ticks = [0, upperBound / 2, upperBound]
-  return <div className="min-w-0" role="region" aria-label="Champion score history">
+  return <div className="min-w-0" role="region" aria-label="Champion score by day">
     <div className="flex flex-wrap items-baseline justify-between gap-2">
-      <h4 className="text-[13px] text-[var(--platinum)]">Champion history <span className="text-[11px] text-[var(--muted-2)]">/100</span></h4>
-      <span className="font-mono text-[9px] uppercase tracking-[0.1em] text-[var(--muted-2)]">Past competitions</span>
+      <h4 className="text-[13px] text-[var(--platinum)]">Champion score by day <span className="text-[11px] text-[var(--muted-2)]">/100</span></h4>
+      <span className="flex items-center gap-1.5 text-[10px] text-[var(--muted)]"><span aria-hidden className="h-2 w-2 rounded-full bg-[var(--brand)]" />New champion crowned</span>
     </div>
     {publishedScores.length ? <>
       <div className="mt-3 h-[180px] w-full min-w-0">
@@ -202,20 +202,29 @@ function ChampionScoreHistory({ points }: { points: CompetitionScoreHistoryPoint
             <CartesianGrid vertical={false} stroke="var(--line)" strokeDasharray="3 5" />
             <XAxis dataKey="timestamp" type="number" scale="time" domain={points.length === 1 ? [points[0].timestamp - 43_200_000, points[0].timestamp + 43_200_000] : ['dataMin', 'dataMax']} ticks={historyTicks(points)} tickFormatter={formatHistoryDate} stroke="var(--line)" tick={{ fill: 'var(--muted-2)', fontSize: 10 }} tickLine={false} axisLine={false} minTickGap={25} tickMargin={10} />
             <YAxis domain={[0, upperBound]} ticks={ticks} tick={{ fill: 'var(--muted-2)', fontSize: 10 }} tickLine={false} axisLine={false} width={30} tickMargin={8} />
-            <Tooltip content={<ScoreHistoryTooltip />} cursor={{ stroke: 'var(--line-3)', strokeDasharray: '3 3' }} />
-            <Line type="linear" dataKey="score" name="Champion score" stroke="var(--brand)" strokeWidth={2} connectNulls dot={{ r: 3, strokeWidth: 0, fill: 'var(--brand)' }} activeDot={{ r: 5, stroke: 'var(--surface)', strokeWidth: 2 }} isAnimationActive={false} />
+            <Tooltip content={<ScoreHistoryTooltip />} filterNull={false} cursor={{ stroke: 'var(--line-3)', strokeDasharray: '3 3' }} />
+            <Line type="linear" dataKey="score" name="Champion score" stroke="var(--brand)" strokeWidth={2} connectNulls dot={publishedScores.length === 1 ? { r: 3.5, fill: 'var(--brand)', stroke: 'none' } : <NewChampionDot />} activeDot={{ r: 5, stroke: 'var(--surface)', strokeWidth: 2 }} isAnimationActive={false} />
           </LineChart>
         </ResponsiveContainer>
       </div>
-      <p className="mt-2 text-[10px] text-[var(--muted-2)]">{publishedScores.length === 1 ? 'First published champion' : `${formatHistoryDate(points[0].timestamp)} – ${formatHistoryDate(points[points.length - 1].timestamp)} · UTC`}</p>
+      <p className="mt-2 text-[10px] text-[var(--muted-2)]">{publishedScores.length === 1 ? 'First published champion score' : `${formatHistoryDate(points[0].timestamp)} – ${formatHistoryDate(points[points.length - 1].timestamp)} · UTC`} · The champion’s score on each day’s ICPs.</p>
     </> : <div className="mt-3 flex h-[180px] items-center justify-center rounded-md border border-dashed border-[var(--line)] text-[12px] text-[var(--muted-2)]">No champion scores yet.</div>}
   </div>
 }
 
+function NewChampionDot({ cx, cy, payload }: { cx?: number; cy?: number; payload?: CompetitionScoreHistoryPoint }) {
+  return payload?.newChampion && payload.score !== null && Number.isFinite(cx) && Number.isFinite(cy)
+    ? <circle cx={cx} cy={cy} r={3.5} fill="var(--brand)" /> : null
+}
+
 function ScoreHistoryTooltip({ active, payload }: { active?: boolean; payload?: ReadonlyArray<{ payload?: CompetitionScoreHistoryPoint }> }) {
   const point = payload?.[0]?.payload
-  if (!active || !point || point.score === null) return null
-  return <div className="rounded-md border border-[var(--line-3)] bg-[#101010] px-3 py-2 text-[11px] shadow-lg"><div className="text-[var(--muted)]">Evaluation · {formatUtcDate(point.evaluationDate)}</div><div className="mt-1 font-mono text-[var(--platinum)]">Champion {formatCompetitionScore(point.score)} /100</div><div className="mt-1 font-mono text-[var(--muted)]">Baseline {point.baselineScore === null ? 'Unavailable' : `${formatCompetitionScore(point.baselineScore)} /100`}</div>{point.promotionStatus && point.promotionStatus !== 'promoted' ? <div className="mt-1 text-[var(--muted)]">{humanize(point.promotionStatus)}</div> : null}</div>
+  if (!active || !point) return null
+  const detail = point.score === null ? null
+    : point.newChampion ? <><div className="mt-1 font-mono text-[var(--muted)]" title={point.championHotkey ?? undefined}>{point.championHotkey ? shortHotkey(point.championHotkey) : 'Miner unavailable'}</div><div className="mt-1 font-mono text-[var(--muted)]">Defending champion {point.baselineScore === null ? 'Unavailable' : `${formatCompetitionScore(point.baselineScore)} /100`}</div></>
+      : point.challengerScore !== null ? <div className="mt-1 text-[var(--muted)]">Top challenger {formatCompetitionScore(point.challengerScore)} · {point.promotionStatus === 'pending' ? 'promotion pending' : 'not promoted'}</div>
+        : <div className="mt-1 text-[var(--muted)]">Champion held the title</div>
+  return <div className="rounded-md border border-[var(--line-3)] bg-[#101010] px-3 py-2 text-[11px] shadow-lg"><div className="text-[var(--muted)]">Evaluation · {formatUtcDate(point.evaluationDate)}</div><div className="mt-1 font-mono text-[var(--platinum)]">{point.score === null ? point.championNotRerun ? 'No champion score · new champion crowned after this round’s cutoff' : 'No published champion score' : `${point.newChampion ? 'New champion' : 'Champion'} ${formatCompetitionScore(point.score)} /100`}</div>{detail}</div>
 }
 
 function historyTicks(points: CompetitionScoreHistoryPoint[]): number[] {
@@ -502,7 +511,7 @@ function CompetitionHistory({ active }: { active: boolean }) {
     </form>
     {loading && !history ? <SubmissionRowsLoading /> : error ? <InlineNotice>{error} <button type="button" className="underline" onClick={() => void refresh()}>Retry</button></InlineNotice> : history?.entries.length ? <div className="overflow-x-auto rounded-lg border border-[var(--line)]"><table className="w-full table-fixed text-left"><thead className="bg-[var(--surface)] text-[11px] text-[var(--muted)]"><tr><th className="w-[45%] px-4 py-3 font-normal sm:w-1/2" scope="col">Miner</th><th className="px-3 py-3 font-normal" scope="col">Evaluation day</th><th className="w-[20%] px-4 py-3 text-right font-normal" scope="col">Score</th></tr></thead><tbody>{history.entries.map(({ round, submission }) => {
       const key = `${round.roundId}:${submission.submissionId}`
-      return <Fragment key={key}><tr className={`relative cursor-pointer border-t border-[var(--line)] transition-colors ${selected === key ? 'bg-white/[0.045]' : 'hover:bg-white/[0.025]'}`}><td className="px-4 py-3"><button type="button" aria-expanded={selected === key} aria-controls={`evaluation-${key}`} onClick={() => setSelected(selected === key ? null : key)} className={evaluationRowButtonClass} title={submission.minerHotkey}><span className="block break-words font-mono text-[11px] text-[var(--platinum)]">{shortHotkey(submission.minerHotkey)}</span><span className="mt-1 block text-[10px] text-[var(--muted)]">{submission.isBaseline ? 'Baseline · ' : submission.isChampion ? 'Champion · ' : ''}{selected === key ? 'Close evaluation −' : 'View evaluation +'}</span></button></td><td className="px-3 py-3 text-[11px] text-[var(--muted)]">{formatDay(round.evaluationDate)}</td><td className="px-4 py-3 text-right font-mono text-[12px] text-[var(--platinum)]">{formatCompetitionScore(submission.finalScore)}</td></tr>{selected === key ? <tr id={`evaluation-${key}`}><td colSpan={3} className="border-t border-[var(--line)] bg-[var(--surface)]"><RoundWorkspace key={key} round={round} active={active} initialSubmissionId={submission.submissionId} inspectionOnly /></td></tr> : null}</Fragment>
+      return <Fragment key={key}><tr className={`relative cursor-pointer border-t border-[var(--line)] transition-colors ${selected === key ? 'bg-white/[0.045]' : 'hover:bg-white/[0.025]'}`}><td className="px-4 py-3"><button type="button" aria-expanded={selected === key} aria-controls={`evaluation-${key}`} onClick={() => setSelected(selected === key ? null : key)} className={evaluationRowButtonClass} title={submission.minerHotkey}><span className="block break-words font-mono text-[11px] text-[var(--platinum)]">{submission.isBaseline ? 'Defending champion' : shortHotkey(submission.minerHotkey)}</span><span className="mt-1 block text-[10px] text-[var(--muted)]">{submission.isBaseline ? 'Run by organizer · ' : submission.isChampion ? 'Champion · ' : ''}{selected === key ? 'Close evaluation −' : 'View evaluation +'}</span></button></td><td className="px-3 py-3 text-[11px] text-[var(--muted)]">{formatDay(round.evaluationDate)}</td><td className="px-4 py-3 text-right font-mono text-[12px] text-[var(--platinum)]">{formatCompetitionScore(submission.finalScore)}</td></tr>{selected === key ? <tr id={`evaluation-${key}`}><td colSpan={3} className="border-t border-[var(--line)] bg-[var(--surface)]"><RoundWorkspace key={key} round={round} active={active} initialSubmissionId={submission.submissionId} inspectionOnly /></td></tr> : null}</Fragment>
     })}</tbody></table></div> : <InlineNotice>{history?.nextCursor ? 'No matches on this page. Continue to earlier rounds or filter by day.' : 'No published submissions match these filters.'}</InlineNotice>}
     <Pagination page={page} hasNext={Boolean(history?.nextCursor)} loading={loading} onPrevious={() => setPage((page) => Math.max(0, page - 1))} onNext={() => { if (history?.nextCursor) { setCursors((items) => [...items.slice(0, page + 1), history.nextCursor]); setPage(page + 1) } }} />
   </section>
@@ -521,13 +530,13 @@ function SubmissionTable({ submissions, round, selectedId, onSelect, expandedCon
           return <Fragment key={submission.submissionId}><tr className={`relative cursor-pointer border-t border-[var(--line)] transition-colors ${selected ? 'bg-white/[0.045]' : 'hover:bg-white/[0.02]'}`}>
             <td className="p-0">
               <button id={`evaluation-toggle-${submission.submissionId}`} type="button" onClick={() => onSelect(submission.submissionId)} className={`w-full px-4 py-4 ${evaluationRowButtonClass}`} aria-expanded={selected} aria-controls={`submission-${submission.submissionId}`} title={submission.submissionId}>
-                <span className="flex flex-wrap items-center gap-x-2 gap-y-1"><span className="font-mono text-[12px] text-[var(--platinum)]">{shortId(submission.submissionId)}</span>{submission.isBaseline ? <span className="text-[12px] text-[var(--muted)]">Baseline</span> : null}</span>
-                <span className="mt-1 block font-mono text-[12px] text-[var(--muted)] sm:hidden" title={submission.minerHotkey}>{shortHotkey(submission.minerHotkey)}</span>
+                <span className="flex flex-wrap items-center gap-x-2 gap-y-1"><span className="font-mono text-[12px] text-[var(--platinum)]">{shortId(submission.submissionId)}</span>{submission.isBaseline ? <span className="text-[12px] text-[var(--muted)]">Defending champion</span> : null}</span>
+                <span className="mt-1 block font-mono text-[12px] text-[var(--muted)] sm:hidden" title={submission.minerHotkey}>{submission.isBaseline ? 'Run by organizer' : shortHotkey(submission.minerHotkey)}</span>
                 <span className="mt-2 flex items-center gap-1 text-[12px] text-[var(--platinum)]">{selected ? 'Close evaluation' : 'View evaluation'}<ChevronRight aria-hidden className={`h-3.5 w-3.5 transition-transform ${selected ? 'rotate-90' : ''}`} /></span>
               </button>
               <div className="px-4 pb-4 text-[13px] leading-relaxed text-[var(--muted)] sm:hidden"><SubmissionStatus submission={submission} round={round} /></div>
             </td>
-            <td className="hidden break-words px-4 py-4 font-mono text-[12px] text-[var(--muted)] sm:table-cell" title={submission.minerHotkey}>{shortHotkey(submission.minerHotkey)}</td>
+            <td className="hidden break-words px-4 py-4 font-mono text-[12px] text-[var(--muted)] sm:table-cell" title={submission.minerHotkey}>{submission.isBaseline ? 'Run by organizer' : shortHotkey(submission.minerHotkey)}</td>
             <td className="hidden px-3 py-4 text-[13px] leading-relaxed text-[var(--muted)] sm:table-cell"><SubmissionStatus submission={submission} round={round} /></td>
             <td className="px-4 py-4 text-right align-top font-mono text-[14px] text-[var(--platinum)] sm:align-middle">{formatCompetitionScore(submission.finalScore)}</td>
           </tr>{selected && expandedContent ? <tr id={`submission-${submission.submissionId}`}><td colSpan={4} className="border-t border-[var(--line)] bg-[var(--surface)]">{expandedContent}</td></tr> : null}</Fragment>
@@ -580,7 +589,7 @@ function PublishedResults({ benchmark, benchmarkState, results, resultsState, ro
   const scores = submission.isBaseline && round.status === 'published'
     ? new Map(benchmark.icps.flatMap((icp) => icp.baselineScore === null ? [] : [[icp.position, icp.baselineScore] as const]))
     : results?.publicScores ?? new Map<number, number>()
-  return <ResultFrame><div className="mb-5 flex flex-wrap gap-5 font-mono text-[13px] text-[var(--platinum)]"><span>{round.status === 'published' ? 'Final score' : 'Provisional score'} {formatCompetitionScore(results?.finalScore ?? submission.finalScore)}</span><span>{submission.isBaseline ? 'Public baseline' : shortHotkey(submission.minerHotkey)}</span></div><ScoringAttributionSummary attribution={results?.scoringAttribution ?? null} /><IcpList title={`Public ICPs (${benchmark.benchmarkIcpCount})`} icpSetDate={benchmark.icpSetDate} icps={benchmark.icps} scores={scores} scoringAttribution={results?.scoringAttribution ?? null} companyDiagnostics={results?.companyDiagnostics ?? null} /></ResultFrame>
+  return <ResultFrame><div className="mb-5 flex flex-wrap gap-5 font-mono text-[13px] text-[var(--platinum)]"><span>{round.status === 'published' ? 'Final score' : 'Provisional score'} {formatCompetitionScore(results?.finalScore ?? submission.finalScore)}</span><span>{submission.isBaseline ? 'Defending champion' : shortHotkey(submission.minerHotkey)}</span></div><ScoringAttributionSummary attribution={results?.scoringAttribution ?? null} /><IcpList title={`Public ICPs (${benchmark.benchmarkIcpCount})`} icpSetDate={benchmark.icpSetDate} icps={benchmark.icps} scores={scores} scoringAttribution={results?.scoringAttribution ?? null} companyDiagnostics={results?.companyDiagnostics ?? null} /></ResultFrame>
 }
 
 function ResultFrame({ children }: { children: ReactNode }) { return <div><h3 className="font-display text-[19px] font-medium text-[var(--platinum)]">Evaluation results</h3><div className="mt-4">{children}</div></div> }
@@ -656,7 +665,7 @@ function formatIcpCount(count: number): string {
 async function fetchJson(url: string): Promise<unknown> { const response = await fetch(url, { cache: 'no-store', headers: { Accept: 'application/json' } }); if (!response.ok) throw new Error(`Request failed (${response.status})`); return response.json() }
 async function fetchReleasedJson(url: string): Promise<{ state: 'available'; body: unknown } | { state: 'gated'; body: null }> { const response = await fetch(url, { cache: 'no-store', headers: { Accept: 'application/json' } }); if (response.status === 403) return { state: 'gated', body: null }; if (!response.ok) throw new Error(`Request failed (${response.status})`); return { state: 'available', body: await response.json() } }
 function championMetricDetail(round: CompetitionRoundSummary, championScore: number | null): string {
-  if (round.promotionStatus === 'promoted') return `Becomes next baseline · ${formatCompetitionScore(championScore)}`
+  if (round.promotionStatus === 'promoted') return `Promoted to champion · ${formatCompetitionScore(championScore)}`
   if (round.promotionStatus === 'pending') return `Promotion pending · ${formatCompetitionScore(championScore)}`
   if (round.promotionStatus === 'superseded') return `Superseded · ${formatCompetitionScore(championScore)}`
   return `${humanize(round.champion?.outcome ?? 'champion')} · ${formatCompetitionScore(championScore)}`
