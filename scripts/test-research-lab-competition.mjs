@@ -28,6 +28,8 @@ try {
     competitionChampionHistory,
     formatCompetitionScore,
     currentChampionRound,
+    latestChampionScore,
+    competitionSubmissionMiner,
     normalizeCompetitionBenchmark,
     normalizeCompetitionCode,
     normalizeCompetitionResults,
@@ -96,11 +98,11 @@ try {
     historyRound('2026-09-09', 60, { status: 'scoring_failed' }),
     historyRound(null, 90), historyRound('2026-02-30', 90),
   ], { latestCompletedRound: { ...canonical, champion: { ...canonical.champion, finalScore: 99 } } }))
-  assert.deepEqual(history.map((point) => point.evaluationDate), ['2026-09-05', '2026-09-06', '2026-09-07', '2026-09-08', '2026-09-09', '2026-09-10'], 'history sorts valid UTC evaluation dates and fills calendar gaps')
-  assert.deepEqual(history.map((point) => point.score), [0, null, null, null, null, 4.633], 'true zero is retained; pending, failed, cancelled and missing scores remain gaps')
-  assert.deepEqual(history.map((point) => point.baselineScore), [0, 99, null, null, null, null], 'baseline scores follow the same published evaluation day while gaps, missing values and zero stay distinct')
-  assert.deepEqual(history.map((point) => point.newChampion), [true, true, false, false, false, true], 'only promoted winners mark a new champion')
-  assert.equal(history[1].score, null, 'a promoted winner with a missing score never falls back to the defending champion score')
+  assert.deepEqual(history.map((point) => point.evaluationDate), ['2026-09-05', '2026-09-10'], 'history sorts valid UTC evaluation dates and plots only days with a published score')
+  assert.deepEqual(history.map((point) => point.score), [0, 4.633], 'true zero is retained; pending, failed, cancelled and missing scores are not plotted')
+  assert.deepEqual(history.map((point) => point.baselineScore), [0, null], 'baseline scores follow the same published evaluation day while missing values and zero stay distinct')
+  assert.deepEqual(history.map((point) => point.newChampion), [true, true], 'only promoted winners mark a new champion')
+  assert.ok(!history.some((point) => point.evaluationDate === '2026-09-06'), 'a promoted winner with a missing score never falls back to the defending champion score')
   assert.equal(history[0].timestamp, Date.parse('2026-09-05T00:00:00Z'))
   assert.equal(history[0].roundId, canonical.roundId, 'canonical history wins over stale round references')
   assert.equal(competitionChampionHistory(historySnapshot([canonical, canonical])).length, 1, 'duplicate references do not add chart points')
@@ -112,10 +114,11 @@ try {
   assert.equal(competitionChampionHistory(historySnapshot([
     laterRelease, historyRound('2026-09-05', 3, { roundId: 'offset-release', publishedAt: '2026-09-05T17:00:00-04:00' }),
   ]))[0].score, 3, 'release ordering compares UTC instants rather than timestamp strings')
-  const fullHistory = competitionChampionHistory(historySnapshot([canonical, historyRound('2026-09-30', 5)]))
-  assert.equal(fullHistory.length, 26, 'chart covers every evaluation day from the first published score, not a recent window')
+  const month = Array.from({ length: 26 }, (_, day) => historyRound(`2026-09-${String(day + 5).padStart(2, '0')}`, day))
+  const fullHistory = competitionChampionHistory(historySnapshot(month))
+  assert.equal(fullHistory.length, 26, 'chart covers every published day from the first published score, not a recent window')
   assert.equal(fullHistory[0].evaluationDate, '2026-09-05')
-  assert.equal(fullHistory.at(-1).score, 5)
+  assert.equal(fullHistory.at(-1).score, 25)
   const unscoredStart = historyRound('2026-09-01', null, { champion: null, promotionStatus: 'not_required', baseline: { submissionId: 'baseline', minerHotkey: '5baseline', finalScore: null } })
   assert.equal(competitionChampionHistory(historySnapshot([unscoredStart, canonical]))[0].evaluationDate, '2026-09-05', 'chart starts at the first published score')
   assert.deepEqual(competitionChampionHistory(historySnapshot([unscoredStart])), [], 'published rounds without any score leave the chart empty')
@@ -124,20 +127,30 @@ try {
     latePromotion, historyRound('2026-10-02', 30, { champion: null, promotionStatus: 'not_required' }),
     historyRound('2026-10-03', 30, { champion: null, promotionStatus: 'not_required' }),
   ]))
-  assert.deepEqual(lateHistory.map((point) => point.score), [40, null, 99], 'a baseline frozen before the latest promotion was published is not the champion score')
-  assert.deepEqual(lateHistory.map((point) => point.championNotRerun), [false, true, false])
-  assert.equal(lateHistory[1].baselineScore, 99, 'the older champion score stays available, not presented as the champion')
+  assert.deepEqual(lateHistory.map((point) => point.score), [40, 99, 99], 'every published day plots the score its defending champion actually earned')
+  assert.deepEqual(lateHistory.map((point) => point.championNotRerun), [false, false, false], 'publication times never imply which champion defended')
+  assert.deepEqual(lateHistory.map((point) => point.championHotkey), ['5winner', null, null], 'a held day the gateway does not name stays unnamed')
+  const namedDefender = { submissionId: 'winner-2026-09-28', minerHotkey: '5older' }
+  const gatewayHistory = competitionChampionHistory(historySnapshot([
+    historyRound('2026-10-01', 40),
+    historyRound('2026-10-02', 30, { champion: null, promotionStatus: 'not_required', defendingChampion: namedDefender }),
+    historyRound('2026-10-03', 30, { champion: null, promotionStatus: 'not_required', defendingChampion: { submissionId: 'winner-2026-10-01', minerHotkey: '5winner' } }),
+  ]))
+  assert.deepEqual(gatewayHistory.map((point) => point.championNotRerun), [false, true, false], 'a named defender older than the latest promotion is a previous champion')
+  assert.deepEqual(gatewayHistory.map((point) => point.championHotkey), ['5winner', '5older', '5winner'], 'each day names the champion that actually ran')
   const lateCrowning = competitionChampionHistory(historySnapshot([latePromotion, historyRound('2026-10-02', 50)]))
   assert.deepEqual(lateCrowning.map((point) => point.score), [40, 50], 'a crowning day after a late promotion shows its winner')
   assert.equal(lateCrowning[1].championNotRerun, false)
   const rolloverHistory = competitionChampionHistory(historySnapshot([historyRound('2026-12-31', 1), historyRound('2027-01-02', 2)]))
-  assert.deepEqual(rolloverHistory.map((point) => point.evaluationDate), ['2026-12-31', '2027-01-01', '2027-01-02'], 'history crosses UTC year boundaries without a local-time shift')
+  assert.deepEqual(rolloverHistory.map((point) => point.evaluationDate), ['2026-12-31', '2027-01-02'], 'history crosses UTC year boundaries without a local-time shift')
+  assert.deepEqual(rolloverHistory.map((point) => point.timestamp), [Date.parse('2026-12-31T00:00:00Z'), Date.parse('2027-01-02T00:00:00Z')])
 
   const promoted = historyRound('2026-10-07', 5.75)
   const inProgress = historyRound('2026-10-08', 88, { status: 'stage2' })
-  const pending = historyRound('2026-10-09', 90, { promotionStatus: 'pending' })
-  const superseded = historyRound('2026-10-10', 95, { promotionStatus: 'superseded' })
-  const held = historyRound('2026-10-11', null, { champion: null, promotionStatus: 'not_required' })
+  const defendedBy = { defendingChampion: { submissionId: promoted.champion.submissionId, minerHotkey: '5winner' } }
+  const pending = historyRound('2026-10-09', 90, { promotionStatus: 'pending', ...defendedBy })
+  const superseded = historyRound('2026-10-10', 95, { promotionStatus: 'superseded', ...defendedBy })
+  const held = historyRound('2026-10-11', null, { champion: null, promotionStatus: 'not_required', ...defendedBy })
   const championSnapshot = historySnapshot([held, superseded, pending, inProgress, promoted], { latestRound: inProgress, latestCompletedRound: held })
   assert.equal(currentChampionRound(championSnapshot)?.roundId, promoted.roundId, 'active, pending, superseded and no-winner rounds cannot replace the reigning champion')
   assert.equal(currentChampionRound(championSnapshot)?.champion.finalScore, 5.75, 'headline uses winning score instead of a subsequent baseline evaluation')
@@ -148,10 +161,17 @@ try {
   assert.equal(currentChampionRound(historySnapshot([promoted, missingChampionScore]))?.champion.finalScore, null, 'a newer promoted champion with a missing score must not inherit the old champion score')
   assert.equal(currentChampionRound(historySnapshot([historyRound(null, 99)])), null, 'unknown evaluation dates must not displace the current champion')
   const championHistory = competitionChampionHistory(championSnapshot)
-  assert.deepEqual(championHistory.map((point) => point.score), [5.75, null, 99, 99, 99], 'each published day shows the champion score: the promoted winner on its day, otherwise the defending champion; unfinished rounds stay gaps')
-  assert.deepEqual(championHistory.map((point) => point.newChampion), [true, false, false, false, false], 'pending, superseded and no-winner days never crown a new champion')
-  assert.deepEqual(championHistory.map((point) => point.challengerScore), [null, null, 90, 95, null], 'unpromoted winners stay visible as challengers')
+  assert.deepEqual(championHistory.map((point) => point.score), [5.75, 99, 99, 99], 'each published day shows the champion score: the promoted winner on its day, otherwise the defending champion; unfinished rounds are not plotted')
+  assert.deepEqual(championHistory.map((point) => point.newChampion), [true, false, false, false], 'pending, superseded and no-winner days never crown a new champion')
+  assert.deepEqual(championHistory.map((point) => point.challengerScore), [null, 90, 95, null], 'unpromoted winners stay visible as challengers')
   assert.equal(championHistory[0].championHotkey, '5winner')
+  assert.deepEqual(championHistory.map((point) => point.championHotkey), ['5winner', '5winner', '5winner', '5winner'], 'held days name the champion the gateway reports')
+  const latest = latestChampionScore(currentChampionRound(championSnapshot), championHistory)
+  assert.deepEqual([latest.evaluationDate, latest.score, latest.newChampion], ['2026-10-11', 99, false], 'the headline uses the champion’s latest daily score')
+  assert.equal(latestChampionScore(promoted, competitionChampionHistory(historySnapshot([promoted]))).score, 5.75, 'a champion without a later day keeps its winning score')
+  const olderLatest = competitionChampionHistory(historySnapshot([promoted, { ...held, defendingChampion: namedDefender }]))
+  assert.equal(latestChampionScore(promoted, olderLatest).evaluationDate, '2026-10-07', 'a day run by an older champion is not the current champion’s score')
+  assert.equal(latestChampionScore(null, championHistory), null)
   assert.equal(championHistory.at(-2).promotionStatus, 'superseded', 'history preserves promotion outcome for tooltip context')
 
   const legacySnapshot = normalizeCompetitionSnapshot({
@@ -637,7 +657,7 @@ try {
   }
   const historyMarkup = renderToStaticMarkup(React.createElement(renderedModule.exports.ChampionScoreHistory, { points: history }))
   assert.match(historyMarkup, /Champion score by day/)
-  assert.match(historyMarkup, /New champion crowned/)
+  assert.doesNotMatch(historyMarkup, /New champion crowned/, 'every day uses the same marker, so no crowning legend')
   assert.match(historyMarkup, /UTC · The champion’s score on each day’s ICPs\./)
   assert.doesNotMatch(historyMarkup, /Past competitions|Baseline/)
   const emptyHistoryMarkup = renderToStaticMarkup(React.createElement(renderedModule.exports.ChampionScoreHistory, { points: [] }))
@@ -651,16 +671,16 @@ try {
   assert.match(tooltipMarkup, /5winner/, 'a crowning day names the new champion')
   assert.match(tooltipMarkup, /Defending champion 0\.00 \/100/, 'a crowning day shows the defending champion it beat')
   assert.match(renderTooltip({ ...history[0], baselineScore: null }), /Defending champion Unavailable/, 'tooltip preserves an unavailable defending champion score instead of showing zero')
-  assert.match(renderTooltip(lateHistory[1]), /No champion score · new champion crowned after this round’s cutoff/)
-  const missingTooltip = renderTooltip(history[1])
-  assert.match(missingTooltip, /No published champion score/, 'a gap day says it has no score')
-  assert.doesNotMatch(missingTooltip, /0\.00/, 'a missing point must not expose a zero score')
+  const lateTooltip = renderTooltip(lateHistory[1])
+  assert.match(lateTooltip, /Champion 99\.00 \/100[^]*Miner unavailable/, 'an unnamed held day says the miner is unavailable')
+  assert.doesNotMatch(lateTooltip, /Previous champion/)
+  assert.match(renderTooltip(gatewayHistory[1]), /Previous champion 99\.00 \/100[^]*5older/, 'the tooltip names the older champion that ran')
   const heldTooltip = renderTooltip(championHistory.at(-1))
-  assert.match(heldTooltip, /Champion 99\.00 \/100/)
+  assert.match(heldTooltip, /Champion 99\.00 \/100[^]*5winner/)
   assert.match(heldTooltip, /Champion held the title/)
   assert.doesNotMatch(heldTooltip, /New champion|Baseline/)
-  assert.match(renderTooltip(championHistory[2]), /Champion 99\.00 \/100[^]*Top challenger 90\.00 · promotion pending/, 'a pending winner is a challenger, not the champion')
-  assert.match(renderTooltip(championHistory[3]), /Top challenger 95\.00 · not promoted/)
+  assert.match(renderTooltip(championHistory[1]), /Champion 99\.00 \/100[^]*Top challenger 90\.00 · promotion pending/, 'a pending winner is a challenger, not the champion')
+  assert.match(renderTooltip(championHistory[2]), /Top challenger 95\.00 · not promoted/)
   const finalMarkup = renderSummary(snapshot.latestCompletedRound)
   const datedRound = {
     ...snapshot.latestCompletedRound, status: 'stage1', publishedAt: null,
@@ -708,6 +728,11 @@ try {
   assert.match(championMarkup, /5\.75/)
   assert.match(championMarkup, /Winning score · crowned Oct 7, 2026 · UTC/)
   assert.doesNotMatch(championMarkup, /99\.00|Defending champion score|Baseline/)
+  const latestMarkup = renderToStaticMarkup(React.createElement(renderedModule.exports.ChampionSummary, { round: currentChampionRound(championSnapshot), history: championHistory, active: false }))
+  assert.match(latestMarkup, />99\.00<span/, 'the headline shows the latest daily score')
+  assert.match(latestMarkup, /Latest score · Oct 11, 2026 · UTC/)
+  assert.match(latestMarkup, /Crowned Oct 7, 2026 · UTC · winning score 5\.75/)
+  assert.doesNotMatch(latestMarkup, /Winning score · crowned/)
   const renderScoreTable = (round, finalScore, selectedId = null) => renderToStaticMarkup(React.createElement(renderedModule.exports.SubmissionTable, {
     submissions: [{ ...submissions[0], submissionId: 'score-label-control', status: 'scored', finalScore }],
     round, selectedId, onSelect: () => {},
@@ -730,8 +755,18 @@ try {
   }))
   assert.match(defendingTable, />Defending champion</, 'the daily baseline row is labelled as the defending champion')
   assert.doesNotMatch(defendingTable, />Baseline</)
-  assert.match(defendingTable, /Run by organizer/, 'the organizer key is not presented as the champion key')
+  assert.match(defendingTable, /Run by organizer/, 'without a named champion the organizer key is not presented as the champion key')
   assert.doesNotMatch(defendingTable, new RegExp(`>${submissions[0].minerHotkey.slice(0, 9)}`), 'the organizer hotkey is not shown beside the defending champion label')
+  const defenderHotkey = '5HSutSjNeExampleDefenderHotkeySrXKu9'
+  const namedDefendingTable = renderToStaticMarkup(React.createElement(renderedModule.exports.SubmissionTable, {
+    submissions: [{ ...submissions[0], submissionId: 'baseline-2026-11-02', isBaseline: true, status: 'scored', finalScore: 7.225 }],
+    round: { ...activeRound, defendingChampion: { submissionId: 'sub-champion', minerHotkey: defenderHotkey } }, selectedId: null, onSelect: () => {},
+  }))
+  assert.match(namedDefendingTable, />Defending champion</)
+  assert.match(namedDefendingTable, new RegExp(`title="${defenderHotkey}">${defenderHotkey.slice(0, 8)}`), 'the defending row names the champion miner it ran')
+  assert.doesNotMatch(namedDefendingTable, /Run by organizer/)
+  assert.equal(competitionSubmissionMiner({ isBaseline: false, minerHotkey: '5miner' }, { defendingChampion: null }), '5miner')
+  assert.equal(competitionSubmissionMiner({ isBaseline: true, minerHotkey: '5organizer' }, { defendingChampion: null }), null)
   const noChampionMarkup = renderToStaticMarkup(React.createElement(renderedModule.exports.ChampionSummary, { round: null }))
   assert.match(noChampionMarkup, /No promoted champion in published history/)
   assert.doesNotMatch(noChampionMarkup, />0\.00</)
