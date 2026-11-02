@@ -217,7 +217,7 @@ function ScoreHistoryTooltip({ active, payload }: { active?: boolean; payload?: 
   if (!active || !point) return null
   const detail = point.newChampion ? <div className="mt-1 font-mono text-[var(--muted)]">Defending champion {point.baselineScore === null ? 'Unavailable' : `${formatCompetitionScore(point.baselineScore)} /100`}</div>
     : point.challengerScore !== null ? <div className="mt-1 text-[var(--muted)]">Top challenger {formatCompetitionScore(point.challengerScore)} · {point.promotionStatus === 'pending' ? 'promotion pending' : 'not promoted'}</div>
-      : point.championNotRerun ? <div className="mt-1 text-[var(--muted)]">New champion crowned after this round’s cutoff</div>
+      : point.championNotRerun ? <div className="mt-1 text-[var(--muted)]">A different defending champion ran this round</div>
         : <div className="mt-1 text-[var(--muted)]">Champion held the title</div>
   return <div className="rounded-md border border-[var(--line-3)] bg-[#101010] px-3 py-2 text-[11px] shadow-lg"><div className="text-[var(--muted)]">Evaluation · {formatUtcDate(point.evaluationDate)}</div><div className="mt-1 font-mono text-[var(--platinum)]">{point.newChampion ? 'New champion' : point.championNotRerun ? 'Previous champion' : 'Champion'} {formatCompetitionScore(point.score)} /100</div><div className="mt-1 font-mono text-[var(--muted)]" title={point.championHotkey ?? undefined}>{point.championHotkey ? shortHotkey(point.championHotkey) : 'Miner unavailable'}</div>{detail}</div>
 }
@@ -377,11 +377,12 @@ function RoundWorkspace({ round, active, initialSubmissionId = null, inspectionO
     } catch { if (selectedSubmissionIdRef.current === requestedSubmissionId) setCodeState('error') }
   }
 
-  const filtered = filterSubmissions(submissions, query, statusFilter)
+  const selectedMiner = selectedSubmission ? competitionSubmissionMiner(selectedSubmission, round) : null
+  const filtered = filterSubmissions(submissions, query, statusFilter, round)
   const pageCount = Math.max(1, Math.ceil(filtered.length / 15))
   const currentPage = Math.min(page, pageCount - 1)
   const inspection = selectedSubmission ? <div className="p-4 sm:p-6" aria-label="Submission evaluation">
-    <div className="mb-6 flex flex-wrap items-start justify-between gap-3"><div className="min-w-0"><h4 className="text-[14px] text-[var(--white)]">Agent evaluation</h4><p className="mt-1 text-[12px] text-[var(--muted)]">{formatDay(round.evaluationDate)}</p><p className="mt-2 break-all font-mono text-[10px] text-[var(--muted-2)]">Submission · {selectedSubmission.submissionId}</p><p className="mt-1 break-all font-mono text-[10px] text-[var(--muted-2)]">Miner hotkey · {selectedSubmission.minerHotkey}</p></div><button type="button" onClick={() => { setInspectionOpen(false); document.getElementById(`evaluation-toggle-${selectedSubmission.submissionId}`)?.focus() }} className={`${inspectionOnly ? 'hidden' : ''} min-h-11 rounded border border-[var(--line-2)] px-3 py-1.5 text-[11px] text-[var(--muted)]`}>Close evaluation</button></div>
+    <div className="mb-6 flex flex-wrap items-start justify-between gap-3"><div className="min-w-0"><h4 className="text-[14px] text-[var(--white)]">Agent evaluation</h4><p className="mt-1 text-[12px] text-[var(--muted)]">{formatDay(round.evaluationDate)}</p><p className="mt-2 break-all font-mono text-[10px] text-[var(--muted-2)]">Submission · {selectedSubmission.submissionId}</p><p className="mt-1 break-all font-mono text-[10px] text-[var(--muted-2)]">{selectedMiner ? `Miner hotkey · ${selectedMiner}` : 'Run by organizer'}</p></div><button type="button" onClick={() => { setInspectionOpen(false); document.getElementById(`evaluation-toggle-${selectedSubmission.submissionId}`)?.focus() }} className={`${inspectionOnly ? 'hidden' : ''} min-h-11 rounded border border-[var(--line-2)] px-3 py-1.5 text-[11px] text-[var(--muted)]`}>Close evaluation</button></div>
     <div className="mb-4 text-[11px] text-[var(--muted)]"><SubmissionStatus submission={selectedSubmission} round={round} /></div>
     <EvaluationRunSummary submission={selectedSubmission} />
     <div className="grid min-w-0 grid-cols-1 gap-8 xl:grid-cols-[minmax(0,1.5fr)_minmax(260px,0.5fr)]"><PublishedResults benchmark={benchmark} benchmarkState={benchmarkState} results={results} resultsState={resultsState} round={round} submission={selectedSubmission} /><SourcePanel submission={selectedSubmission} cancelled={round.status === 'cancelled'} code={code} codeState={codeState} selectedFile={selectedCodeFile} onSelectFile={setSelectedFile} onRequest={() => void requestCode()} /></div>
@@ -430,10 +431,11 @@ function CompetitionSelect({ label, value, options, onChange, mono = false }: { 
   </Select.Root>
 }
 
-function filterSubmissions(submissions: CompetitionSubmission[], query: string, status: string) {
+function filterSubmissions(submissions: CompetitionSubmission[], query: string, status: string, round: Pick<CompetitionRoundSummary, 'defendingChampion'> = { defendingChampion: null }) {
   const needle = query.trim().toLowerCase()
   return submissions.filter((submission) => {
-    if (needle && !`${submission.minerHotkey} ${submission.submissionId}`.toLowerCase().includes(needle)) return false
+    const miner = competitionSubmissionMiner(submission, round) ?? submission.minerHotkey
+    if (needle && !`${miner} ${submission.submissionId}`.toLowerCase().includes(needle)) return false
     if (status === 'evaluating') return submission.evaluation?.state === 'evaluating'
     if (status === 'queued') return submission.evaluation?.state === 'queued' || ['accepted', 'queued'].includes(submission.status)
     if (status === 'retrying') return isSubmissionRetrying(submission)

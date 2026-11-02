@@ -507,7 +507,7 @@ export type CompetitionScoreHistoryPoint = {
   baselineScore: number | null
   /** A round winner that did not replace the champion (pending or superseded promotion). */
   challengerScore: number | null
-  /** The gateway named an older defending champion: the latest promotion reached this round after its cutoff. */
+  /** The gateway named a defender other than the latest published promotion. */
   championNotRerun: boolean
   roundId: string
   promotionStatus: string | null

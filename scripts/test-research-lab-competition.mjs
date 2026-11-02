@@ -635,6 +635,9 @@ try {
   assert.deepEqual(renderedModule.exports.filterSubmissions(rowsWithBaselineLast, '', 'failed'),
     renderedModule.exports.filterSubmissions(filterRows, '', 'failed'), 'the baseline must still match the selected filter')
   assert.deepEqual(renderedModule.exports.filterSubmissions(rowsWithBaselineLast, 'baseline-round', 'all'), [baselineRow])
+  const searchDefenderRound = { defendingChampion: { submissionId: 'winning-submission', minerHotkey: '5VerifiedDefender' } }
+  assert.deepEqual(renderedModule.exports.filterSubmissions(rowsWithBaselineLast, '5VerifiedDefender', 'all', searchDefenderRound), [baselineRow], 'the defending row is searchable by its displayed miner')
+  assert.deepEqual(renderedModule.exports.filterSubmissions([baselineRow], baselineRow.minerHotkey, 'all', searchDefenderRound), [], 'the organizer key must not match the defending miner filter')
   const namedAttribution = renderToStaticMarkup(withNames(React.createElement(renderedModule.exports.ScoringAttributionSummary, { attribution: attributedResults.scoringAttribution })))
   assert.match(namedAttribution, /Leadpoet \(5FNVgRnrx…xEBLo9\), Yuma \(5Chnr6Y72…LmU4BW\)/)
   assert.match(namedAttribution, new RegExp(primaryHotkey), 'full hotkeys remain available in expanded attribution')
@@ -675,6 +678,7 @@ try {
   assert.match(lateTooltip, /Champion 99\.00 \/100[^]*Miner unavailable/, 'an unnamed held day says the miner is unavailable')
   assert.doesNotMatch(lateTooltip, /Previous champion/)
   assert.match(renderTooltip(gatewayHistory[1]), /Previous champion 99\.00 \/100[^]*5older/, 'the tooltip names the older champion that ran')
+  assert.doesNotMatch(renderTooltip(gatewayHistory[1]), /after this round’s cutoff/, 'a different defender alone does not prove when promotion occurred')
   const heldTooltip = renderTooltip(championHistory.at(-1))
   assert.match(heldTooltip, /Champion 99\.00 \/100[^]*5winner/)
   assert.match(heldTooltip, /Champion held the title/)

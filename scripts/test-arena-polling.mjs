@@ -130,6 +130,24 @@ try {
   assert.equal(calls.length, 2, 'one interval refreshes only visible submissions')
   await unmount()
 
+  // The organizer owns the baseline submission but is not the defending miner.
+  for (const defender of [null, { submissionId: 'winner', minerHotkey: '5Defender' }]) {
+    const defenderRound = { ...normalizedRound, defendingChampion: defender }
+    await act(async () => { renderer = TestRenderer.create(React.createElement(RoundWorkspace, {
+      round: defenderRound, active: true, initialSubmissionId: baseline.submission_id, inspectionOnly: true,
+    }), rendererOptions) })
+    const detail = () => renderer.root.findByProps({ 'aria-label': 'Submission evaluation' })
+      .findAllByType('p').map((node) => node.children.filter((child) => typeof child === 'string').join('')).join('\n')
+    assert.match(detail(), defender ? /Miner hotkey · 5Defender/ : /Run by organizer/)
+    assert.doesNotMatch(detail(), /Miner hotkey · 5Baseline/, 'the submission organizer must not be named as the defending miner')
+    await unmount()
+  }
+  await act(async () => { renderer = TestRenderer.create(React.createElement(RoundWorkspace, {
+    round: normalizedRound, active: true, initialSubmissionId: competitor.submission_id, inspectionOnly: true,
+  }), rendererOptions) })
+  assert.match(markup(), /Miner hotkey · [^]*5Competitor/, 'ordinary submissions keep their own miner identity')
+  await unmount()
+
   // A failed initial submissions request is not evidence of an empty round.
   let submissionsStatus = 502
   let submissionRows = [baseline, competitor]
