@@ -82,7 +82,7 @@ try {
   assert.equal(currentChampionRound(snapshot), null, 'a baseline must never masquerade as a champion')
   const historyRound = (date, finalScore, overrides = {}) => ({
     ...snapshot.latestCompletedRound, roundId: `arena-${date}`, evaluationDate: date,
-    publishedAt: `${date}T18:00:00Z`, baseline: { submissionId: 'baseline', minerHotkey: '5baseline', finalScore: 99 },
+    publishedAt: `${date}T18:00:00Z`, submissionCutoff: `${date}T00:00:00Z`, baseline: { submissionId: 'baseline', minerHotkey: '5baseline', finalScore: 99 },
     champion: { submissionId: `winner-${date}`, minerHotkey: '5winner', finalScore, outcome: 'new_king' }, promotionStatus: 'promoted',
     ...overrides,
   })
@@ -119,6 +119,17 @@ try {
   const unscoredStart = historyRound('2026-09-01', null, { champion: null, promotionStatus: 'not_required', baseline: { submissionId: 'baseline', minerHotkey: '5baseline', finalScore: null } })
   assert.equal(competitionChampionHistory(historySnapshot([unscoredStart, canonical]))[0].evaluationDate, '2026-09-05', 'chart starts at the first published score')
   assert.deepEqual(competitionChampionHistory(historySnapshot([unscoredStart])), [], 'published rounds without any score leave the chart empty')
+  const latePromotion = historyRound('2026-10-01', 40, { publishedAt: '2026-10-02T07:55:00Z' })
+  const lateHistory = competitionChampionHistory(historySnapshot([
+    latePromotion, historyRound('2026-10-02', 30, { champion: null, promotionStatus: 'not_required' }),
+    historyRound('2026-10-03', 30, { champion: null, promotionStatus: 'not_required' }),
+  ]))
+  assert.deepEqual(lateHistory.map((point) => point.score), [40, null, 99], 'a baseline frozen before the latest promotion was published is not the champion score')
+  assert.deepEqual(lateHistory.map((point) => point.championNotRerun), [false, true, false])
+  assert.equal(lateHistory[1].baselineScore, 99, 'the older champion score stays available, not presented as the champion')
+  const lateCrowning = competitionChampionHistory(historySnapshot([latePromotion, historyRound('2026-10-02', 50)]))
+  assert.deepEqual(lateCrowning.map((point) => point.score), [40, 50], 'a crowning day after a late promotion shows its winner')
+  assert.equal(lateCrowning[1].championNotRerun, false)
   const rolloverHistory = competitionChampionHistory(historySnapshot([historyRound('2026-12-31', 1), historyRound('2027-01-02', 2)]))
   assert.deepEqual(rolloverHistory.map((point) => point.evaluationDate), ['2026-12-31', '2027-01-01', '2027-01-02'], 'history crosses UTC year boundaries without a local-time shift')
 
@@ -640,6 +651,7 @@ try {
   assert.match(tooltipMarkup, /5winner/, 'a crowning day names the new champion')
   assert.match(tooltipMarkup, /Defending champion 0\.00 \/100/, 'a crowning day shows the defending champion it beat')
   assert.match(renderTooltip({ ...history[0], baselineScore: null }), /Defending champion Unavailable/, 'tooltip preserves an unavailable defending champion score instead of showing zero')
+  assert.match(renderTooltip(lateHistory[1]), /No champion score · new champion crowned after this round’s cutoff/)
   const missingTooltip = renderTooltip(history[1])
   assert.match(missingTooltip, /No published champion score/, 'a gap day says it has no score')
   assert.doesNotMatch(missingTooltip, /0\.00/, 'a missing point must not expose a zero score')
@@ -718,6 +730,8 @@ try {
   }))
   assert.match(defendingTable, />Defending champion</, 'the daily baseline row is labelled as the defending champion')
   assert.doesNotMatch(defendingTable, />Baseline</)
+  assert.match(defendingTable, /Run by organizer/, 'the organizer key is not presented as the champion key')
+  assert.doesNotMatch(defendingTable, new RegExp(`>${submissions[0].minerHotkey.slice(0, 9)}`), 'the organizer hotkey is not shown beside the defending champion label')
   const noChampionMarkup = renderToStaticMarkup(React.createElement(renderedModule.exports.ChampionSummary, { round: null }))
   assert.match(noChampionMarkup, /No promoted champion in published history/)
   assert.doesNotMatch(noChampionMarkup, />0\.00</)

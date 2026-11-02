@@ -503,6 +503,8 @@ export type CompetitionScoreHistoryPoint = {
   baselineScore: number | null
   /** A round winner that did not replace the champion (pending or superseded promotion). */
   challengerScore: number | null
+  /** The latest promotion was published after this round's cutoff, so its baseline is an older champion. */
+  championNotRerun: boolean
   roundId: string | null
   promotionStatus: string | null
 }
@@ -535,7 +537,8 @@ export function currentChampionRound(snapshot: CompetitionSnapshot): Competition
  * published score. The daily baseline is the defending champion re-run on that
  * day's ICPs, so it is the champion's score unless a winner was promoted that
  * day. Pending and superseded winners never replace the champion. Days without
- * a published score stay gaps and never become zero. */
+ * a published score, or whose baseline froze before the latest promotion was
+ * published, stay gaps and never become zero. */
 export function competitionChampionHistory(snapshot: CompetitionSnapshot): CompetitionScoreHistoryPoint[] {
   const published = publishedCompetitionRounds(snapshot)
   const dayMs = 86_400_000
@@ -544,16 +547,21 @@ export function competitionChampionHistory(snapshot: CompetitionSnapshot): Compe
   const points: CompetitionScoreHistoryPoint[] = []
   if (!published.length) return points
   const end = Date.parse(`${published[published.length - 1].evaluationDate}T00:00:00Z`)
+  let lastPromotion: CompetitionRoundSummary | null = null
   for (let timestamp = Date.parse(`${published[0].evaluationDate}T00:00:00Z`); timestamp <= end; timestamp += dayMs) {
     const evaluationDate = new Date(timestamp).toISOString().slice(0, 10)
     const round = byDate.get(evaluationDate)
     const winner = round?.champion ?? null
     const newChampion = winner !== null && round?.promotionStatus === 'promoted'
+    // The baseline freezes at cutoff; a promotion published later reaches the next day's baseline.
+    const championNotRerun = !newChampion && round !== undefined && lastPromotion !== null
+      && Date.parse(lastPromotion.publishedAt ?? '') > Date.parse(round.submissionCutoff ?? '')
     const point = {
-      evaluationDate, timestamp, score: score(newChampion ? winner?.finalScore : round?.baseline?.finalScore),
+      evaluationDate, timestamp, score: score(newChampion ? winner?.finalScore : championNotRerun ? null : round?.baseline?.finalScore),
       newChampion, championHotkey: newChampion ? winner?.minerHotkey ?? null : null, baselineScore: score(round?.baseline?.finalScore),
-      challengerScore: newChampion ? null : score(winner?.finalScore), roundId: round?.roundId ?? null, promotionStatus: round?.promotionStatus ?? null,
+      challengerScore: newChampion ? null : score(winner?.finalScore), championNotRerun, roundId: round?.roundId ?? null, promotionStatus: round?.promotionStatus ?? null,
     }
+    if (newChampion) lastPromotion = round
     if (points.length || point.score !== null) points.push(point)
   }
   return points
