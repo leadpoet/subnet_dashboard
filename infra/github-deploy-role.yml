@@ -1,0 +1,59 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  GitHub Actions role for subnet_dashboard deploys. Main-branch workflows may
+  open Session Manager port forwards to the dashboard host and the validator,
+  and use or end only their own sessions. No shell sessions; sshd still needs
+  the deploy key. Hosts keep no inbound port 22.
+
+Resources:
+  GitHubDeployRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: leadpoet-subnet-dashboard-github-deploy
+      MaxSessionDuration: 3600
+      Tags:
+        - Key: app
+          Value: subnet-dashboard
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !Sub arn:aws:iam::${AWS::AccountId}:oidc-provider/token.actions.githubusercontent.com
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+                token.actions.githubusercontent.com:sub:
+                  - repo:leadpoet/subnet_dashboard:ref:refs/heads/main
+                  - repo:leadpoet@237783076/subnet_dashboard@1123583904:ref:refs/heads/main
+      Policies:
+        - PolicyName: ssh-through-session-manager
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: ForwardSshToDeployHosts
+                Effect: Allow
+                Action: ssm:StartSession
+                Resource:
+                  - !Sub arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:instance/i-0e428b150faa9d20f
+                  - !Sub arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:instance/i-07ab2b90c537d0f28
+                  - !Sub arn:aws:ssm:${AWS::Region}::document/AWS-StartPortForwardingSession
+                Condition:
+                  BoolIfExists:
+                    ssm:SessionDocumentAccessCheck: 'true'
+              # Session IDs start with the role session name; AWS samples
+              # scope the client data channel by caller user ID.
+              - Sid: UseOwnSessions
+                Effect: Allow
+                Action:
+                  - ssm:ResumeSession
+                  - ssm:TerminateSession
+                  - ssmmessages:OpenDataChannel
+                Resource:
+                  - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:session/subnet-dashboard-deploy-*
+                  - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:session/${!aws:userid}-*
+
+Outputs:
+  RoleArn:
+    Value: !GetAtt GitHubDeployRole.Arn

@@ -570,14 +570,17 @@ class Subtensor:
     /if: \$\{\{ !cancelled\(\) \}\}/,
     'dashboard rollback should not suppress deployment of the independent alert worker',
   )
-  assert.match(validatorWeightsDeploy, /host: 172\.31\.29\.188/)
+  assert.match(
+    validatorWeightsDeploy,
+    /bash scripts\/ssm-ssh-tunnel\.sh open i-07ab2b90c537d0f28 2222/,
+    'the validator has no inbound SSH, so the alert deploy tunnels through Session Manager',
+  )
   assert.equal(
     (validatorWeightsDeploy.match(/key: \$\{\{ secrets\.EC2_SSH_KEY \}\}/g) ?? []).length,
-    4,
-    'validator target and dashboard proxy should reuse the existing rotated SSH key',
+    2,
+    'validator copy and install steps should reuse the existing rotated SSH key',
   )
-  assert.match(validatorWeightsDeploy, /proxy_host: \$\{\{ secrets\.EC2_HOST \}\}/)
-  assert.match(validatorWeightsDeploy, /proxy_key: \$\{\{ secrets\.EC2_SSH_KEY \}\}/)
+  assert.doesNotMatch(validatorWeightsDeploy, /proxy_host|proxy_key|secrets\.EC2_HOST/)
   assert.match(
     validatorWeightsDeploy,
     /mv "\$ACTIVE_REGISTRY\.\$DEPLOY_SHA\.next" "\$ACTIVE_REGISTRY"\s+mv "\$ACTIVE_SCRIPT\.\$DEPLOY_SHA\.next" "\$ACTIVE_SCRIPT"/,
