@@ -20,6 +20,8 @@ export type CompetitionRoundSummary = {
   cancelReason: string | null
   baseline: CompetitionParticipant | null
   champion: (CompetitionParticipant & { outcome: string | null }) | null
+  /** The promoted miner whose model the defending entry ran, frozen at cutoff. */
+  defendingChampion: { submissionId: string; minerHotkey: string } | null
   promotionStatus: string | null
   benchmarkIcpCount: number
   promotionMargin: number
@@ -495,17 +497,19 @@ export type CompetitionScoreHistoryPoint = {
   evaluationDate: string
   timestamp: number
   /** The champion's score that day: a newly promoted winner's score, otherwise the defending champion's. */
-  score: number | null
+  score: number
   /** A challenger replaced the defending champion on this evaluation day. */
   newChampion: boolean
+  /** Whose score this is: the new champion, otherwise the defending champion when known. */
+  championSubmissionId: string | null
   championHotkey: string | null
   /** The defending champion's score on the same day's ICPs. */
   baselineScore: number | null
   /** A round winner that did not replace the champion (pending or superseded promotion). */
   challengerScore: number | null
-  /** The latest promotion was published after this round's cutoff, so its baseline is an older champion. */
+  /** The gateway named a defender other than the latest published promotion. */
   championNotRerun: boolean
-  roundId: string | null
+  roundId: string
   promotionStatus: string | null
 }
 
@@ -533,38 +537,46 @@ export function currentChampionRound(snapshot: CompetitionSnapshot): Competition
     .at(-1) ?? null
 }
 
-/** The champion's score on every published evaluation day, from the first
- * published score. The daily baseline is the defending champion re-run on that
- * day's ICPs, so it is the champion's score unless a winner was promoted that
- * day. Pending and superseded winners never replace the champion. Days without
- * a published score, or whose baseline froze before the latest promotion was
- * published, stay gaps and never become zero. */
+/** The champion's actual score on each published evaluation day. The daily
+ * baseline is the defending champion run on that day's ICPs, so it is the
+ * champion's score unless a winner was promoted that day. Pending and
+ * superseded winners never replace the champion. Days without a published
+ * score are left out and never become zero. A held day names its miner only
+ * when the gateway names the defending champion; it is never guessed. */
 export function competitionChampionHistory(snapshot: CompetitionSnapshot): CompetitionScoreHistoryPoint[] {
-  const published = publishedCompetitionRounds(snapshot)
-  const dayMs = 86_400_000
   // Multiple releases for one evaluation day use the latest published record.
-  const byDate = new Map(published.map((round) => [round.evaluationDate, round]))
+  const byDate = new Map(publishedCompetitionRounds(snapshot).map((round) => [round.evaluationDate as string, round]))
   const points: CompetitionScoreHistoryPoint[] = []
-  if (!published.length) return points
-  const end = Date.parse(`${published[published.length - 1].evaluationDate}T00:00:00Z`)
-  let lastPromotion: CompetitionRoundSummary | null = null
-  for (let timestamp = Date.parse(`${published[0].evaluationDate}T00:00:00Z`); timestamp <= end; timestamp += dayMs) {
-    const evaluationDate = new Date(timestamp).toISOString().slice(0, 10)
-    const round = byDate.get(evaluationDate)
-    const winner = round?.champion ?? null
-    const newChampion = winner !== null && round?.promotionStatus === 'promoted'
-    // The baseline freezes at cutoff; a promotion published later reaches the next day's baseline.
-    const championNotRerun = !newChampion && round !== undefined && lastPromotion !== null
-      && Date.parse(lastPromotion.publishedAt ?? '') > Date.parse(round.submissionCutoff ?? '')
-    const point = {
-      evaluationDate, timestamp, score: score(newChampion ? winner?.finalScore : championNotRerun ? null : round?.baseline?.finalScore),
-      newChampion, championHotkey: newChampion ? winner?.minerHotkey ?? null : null, baselineScore: score(round?.baseline?.finalScore),
-      challengerScore: newChampion ? null : score(winner?.finalScore), championNotRerun, roundId: round?.roundId ?? null, promotionStatus: round?.promotionStatus ?? null,
-    }
-    if (newChampion) lastPromotion = round
-    if (points.length || point.score !== null) points.push(point)
+  let lastPromotion: CompetitionParticipant | null = null
+  for (const [evaluationDate, round] of byDate) {
+    const winner = round.champion
+    const newChampion = winner !== null && round.promotionStatus === 'promoted'
+    const defender = round.defendingChampion
+    const championNotRerun = !newChampion && defender !== null && lastPromotion !== null
+      && defender.submissionId !== lastPromotion.submissionId
+    const owner = newChampion ? winner : defender
+    const value = score(newChampion ? winner.finalScore : round.baseline?.finalScore)
+    if (newChampion) lastPromotion = winner
+    if (value === null) continue
+    points.push({
+      evaluationDate, timestamp: Date.parse(`${evaluationDate}T00:00:00Z`), score: value, newChampion,
+      championSubmissionId: owner?.submissionId ?? null, championHotkey: owner?.minerHotkey ?? null,
+      baselineScore: score(round.baseline?.finalScore), challengerScore: newChampion ? null : score(winner?.finalScore),
+      championNotRerun, roundId: round.roundId, promotionStatus: round.promotionStatus,
+    })
   }
   return points
+}
+
+/** The current champion's most recent score: its winning score until it defends on a later day. */
+export function latestChampionScore(round: CompetitionRoundSummary | null, history: CompetitionScoreHistoryPoint[]): CompetitionScoreHistoryPoint | null {
+  const submissionId = round?.champion?.submissionId
+  return submissionId ? history.filter((point) => point.championSubmissionId === submissionId).at(-1) ?? null : null
+}
+
+/** The miner behind a submission row; the defending entry runs the champion it names. */
+export function competitionSubmissionMiner(submission: Pick<CompetitionSubmission, 'isBaseline' | 'minerHotkey'>, round: Pick<CompetitionRoundSummary, 'defendingChampion'>): string | null {
+  return submission.isBaseline ? round.defendingChampion?.minerHotkey ?? null : submission.minerHotkey
 }
 
 function evaluationFailureReasonLabel(reason: EvaluationFailureReason): string {
@@ -676,6 +688,9 @@ function normalizeRound(source: JsonRecord | null): CompetitionRoundSummary | nu
   const baseline = normalizeParticipant(record(source.baseline))
   const championSource = record(source.champion)
   const champion = normalizeParticipant(championSource)
+  const defenderSource = record(source.defending_champion)
+  const defenderId = text(defenderSource?.submission_id)
+  const defenderHotkey = text(defenderSource?.miner_hotkey)
   const icpSetDate = optionalCalendarDate(source.icp_set_date)
   const evaluationDate = optionalCalendarDate(source.evaluation_date)
   const publicAt = optionalUtcTimestamp(source.public_at)
@@ -701,6 +716,7 @@ function normalizeRound(source: JsonRecord | null): CompetitionRoundSummary | nu
     cancelReason: nullableText(source.cancel_reason),
     baseline,
     champion: champion ? { ...champion, outcome: nullableText(championSource?.outcome) } : null,
+    defendingChampion: defenderId && defenderHotkey ? { submissionId: defenderId, minerHotkey: defenderHotkey } : null,
     promotionStatus: nullableText(source.promotion_status),
     benchmarkIcpCount,
     promotionMargin,
