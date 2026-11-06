@@ -1,0 +1,193 @@
+{
+  "round_id": "arena-2026-11-06",
+  "submissions": [
+    {
+      "submission_id": "nov6-public-excluded-1",
+      "miner_hotkey": "5PublicFixtureMiner1",
+      "is_baseline": false,
+      "status": "review_rejected",
+      "stage1_score": null,
+      "final_score": null,
+      "is_champion": false,
+      "code": {
+        "available": false,
+        "available_at": null,
+        "url": null
+      },
+      "code_review": {
+        "status": "rejected",
+        "categories": [
+          "fabricated_evidence"
+        ],
+        "error_code": null
+      }
+    },
+    {
+      "submission_id": "nov6-public-excluded-2",
+      "miner_hotkey": "5PublicFixtureMiner2",
+      "is_baseline": false,
+      "status": "review_rejected",
+      "stage1_score": null,
+      "final_score": null,
+      "is_champion": false,
+      "code": {
+        "available": false,
+        "available_at": null,
+        "url": null
+      },
+      "code_review": {
+        "status": "rejected",
+        "categories": [
+          "fabricated_evidence"
+        ],
+        "error_code": null
+      }
+    },
+    {
+      "submission_id": "nov6-public-excluded-3",
+      "miner_hotkey": "5PublicFixtureMiner3",
+      "is_baseline": false,
+      "status": "review_rejected",
+      "stage1_score": null,
+      "final_score": null,
+      "is_champion": false,
+      "code": {
+        "available": false,
+        "available_at": null,
+        "url": null
+      },
+      "code_review": {
+        "status": "rejected",
+        "categories": [
+          "fabricated_evidence"
+        ],
+        "error_code": null
+      }
+    },
+    {
+      "submission_id": "nov6-public-excluded-4",
+      "miner_hotkey": "5PublicFixtureMiner4",
+      "is_baseline": false,
+      "status": "review_rejected",
+      "stage1_score": null,
+      "final_score": null,
+      "is_champion": false,
+      "code": {
+        "available": false,
+        "available_at": null,
+        "url": null
+      },
+      "code_review": {
+        "status": "rejected",
+        "categories": [
+          "fabricated_evidence"
+        ],
+        "error_code": null
+      }
+    },
+    {
+      "submission_id": "nov6-public-excluded-5",
+      "miner_hotkey": "5PublicFixtureMiner5",
+      "is_baseline": false,
+      "status": "review_rejected",
+      "stage1_score": null,
+      "final_score": null,
+      "is_champion": false,
+      "code": {
+        "available": false,
+        "available_at": null,
+        "url": null
+      },
+      "code_review": {
+        "status": "rejected",
+        "categories": [
+          "fabricated_evidence"
+        ],
+        "error_code": null
+      }
+    },
+    {
+      "submission_id": "nov6-public-excluded-6",
+      "miner_hotkey": "5PublicFixtureMiner6",
+      "is_baseline": false,
+      "status": "review_rejected",
+      "stage1_score": null,
+      "final_score": null,
+      "is_champion": false,
+      "code": {
+        "available": false,
+        "available_at": null,
+        "url": null
+      },
+      "code_review": {
+        "status": "rejected",
+        "categories": [
+          "fabricated_evidence"
+        ],
+        "error_code": null
+      }
+    },
+    {
+      "submission_id": "nov6-public-excluded-7",
+      "miner_hotkey": "5PublicFixtureMiner7",
+      "is_baseline": false,
+      "status": "review_rejected",
+      "stage1_score": null,
+      "final_score": null,
+      "is_champion": false,
+      "code": {
+        "available": false,
+        "available_at": null,
+        "url": null
+      },
+      "code_review": {
+        "status": "rejected",
+        "categories": [
+          "fabricated_evidence"
+        ],
+        "error_code": null
+      }
+    },
+    {
+      "submission_id": "nov6-public-excluded-8",
+      "miner_hotkey": "5PublicFixtureMiner8",
+      "is_baseline": false,
+      "status": "review_rejected",
+      "stage1_score": null,
+      "final_score": null,
+      "is_champion": false,
+      "code": {
+        "available": false,
+        "available_at": null,
+        "url": null
+      },
+      "code_review": {
+        "status": "rejected",
+        "categories": [
+          "fabricated_evidence"
+        ],
+        "error_code": null
+      }
+    },
+    {
+      "submission_id": "nov6-public-excluded-9",
+      "miner_hotkey": "5PublicFixtureMiner9",
+      "is_baseline": false,
+      "status": "review_failed",
+      "stage1_score": null,
+      "final_score": null,
+      "is_champion": false,
+      "code": {
+        "available": false,
+        "available_at": null,
+        "url": null
+      },
+      "code_review": {
+        "status": "error",
+        "categories": [],
+        "error_code": "review_response_invalid",
+        "retryable": false
+      }
+    }
+  ]
+}

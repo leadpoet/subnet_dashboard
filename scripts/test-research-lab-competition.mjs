@@ -189,7 +189,7 @@ try {
   assert.equal(submissions[0].stage1Score, 0)
   assert.equal(submissions[0].finalScore, null)
   assert.deepEqual(submissions[0].codeReview, {
-    status: null, errorCode: null, failureReason: null, providerHttpStatus: null, retryable: null, attempts: null,
+    status: null, errorCode: null, failureReason: null, providerHttpStatus: null, retryable: null, attempts: null, admissionReason: null, categories: [],
   })
   const pendingRound = { ...snapshot.latestCompletedRound, promotionStatus: 'pending' }
   assert.equal(
@@ -1076,14 +1076,14 @@ try {
   assert.deepEqual(madaraReviewFailure.code, { available: false, availableAt: null, url: null })
   assert.deepEqual(madaraReviewFailure.codeReview, {
     status: 'error', errorCode: 'code_review_provider_unavailable', failureReason: null, providerHttpStatus: null,
-    retryable: null, attempts: 3,
+    retryable: null, attempts: 3, admissionReason: null, categories: [],
   })
   assert.equal('costStatus' in madaraReviewFailure.codeReview, false, 'internal review cost state must not enter the UI model')
   assert.equal(isCompetitionReviewExcluded(madaraReviewFailure), true)
-  assert.equal(competitionSubmissionStatusLabel(madaraReviewFailure, pendingRound), 'Code review could not complete')
+  assert.equal(competitionSubmissionStatusLabel(madaraReviewFailure, pendingRound), 'Code review failed · service unavailable')
   assert.equal(
     competitionSubmissionEvaluationNotice(madaraReviewFailure, pendingRound),
-    'Code review could not complete. This submission was not evaluated.',
+    'The review service or provider was unavailable. The review did not complete; no code violation was confirmed. Keep the submission ID when reporting this review failure. This submission was not evaluated.',
   )
 
   const reviewRejected = { ...madaraReviewFailure, status: 'review_rejected' }
@@ -1097,7 +1097,121 @@ try {
     is_baseline: false, stage1_score: null, final_score: null, is_champion: false,
     code: { available: false, available_at: null, url: null }, code_review: codeReview,
   }] })[0]
+  const rejectionCases = [
+    ['hardcoded_prepared_answers', 'prepared answers', 'Remove stored answers'],
+    ['fabricated_evidence', 'fabricated evidence', 'Do not substitute ICP requirements for company facts. Preserve uncertainty and return only source-supported claims.'],
+    ['malicious_behavior', 'disallowed code behavior', 'Remove the disallowed behavior'],
+    ['reviewer_manipulation', 'review interference', 'Remove instructions or code'],
+    ['duplicate_submission', 'duplicate submission', 'Make a meaningful behavior improvement before submitting again; cosmetic edits alone do not qualify.'],
+  ]
+  for (const [category, label, action] of rejectionCases) {
+    for (const admission_reason of [undefined, 'source_policy_violation']) {
+      const submission = normalizePendingReview({ status: 'rejected', categories: [category], admission_reason,
+        findings: [{ file: 'private-file', explanation: 'private-review-prose' }] }, 'review_rejected')
+      assert.equal(competitionSubmissionStatusLabel(submission, pendingRound), `Rejected: ${label}`)
+      const table = renderToStaticMarkup(React.createElement(renderedModule.exports.SubmissionTable, {
+        submissions: [submission], round: pendingRound, selectedId: submission.submissionId, onSelect() {},
+      }))
+      assert.equal(table.split(`Rejected: ${label}`).length - 1, 2, 'the same specific cause appears in desktop and mobile status cells')
+      const details = renderToStaticMarkup(React.createElement(renderedModule.exports.PublishedResults, {
+        submission, round: pendingRound, benchmark: null, benchmarkState: 'gated', results: null, resultsState: 'idle',
+      }))
+      assert.ok(details.includes(action), `recorded ${category} needs a fixed action before ICP disclosure`)
+      assert.doesNotMatch(details, /Use an original implementation|Do not reuse another competition entry/, 'guidance must permit meaningful improvements to shared code')
+      assert.doesNotMatch(table + details, /private-file|private-review-prose|retrying|>0\.00</)
+      assert.equal(submission.finalScore, null)
+      assert.equal(submission.code.available, false)
+    }
+  }
+  const reasonCases = [
+    ['model_directed_research_required', 'review_rejected', 'Not qualified: model-directed research required', 'model decisions select research actions'],
+    ['source_review_unverified', 'review_failed', 'Source review could not be verified', 'version covered by the review'],
+    ['review_evidence_invalid', 'review_failed', 'Review evidence could not be verified', 'does not identify a code change'],
+    ['review_response_incomplete', 'review_failed', 'Review response incomplete', 'does not identify a code change'],
+    ['review_error', 'review_failed', 'Code review could not complete', 'does not identify a code change'],
+    ['review_incomplete', 'review_failed', 'Code review could not complete', 'does not identify a code change'],
+  ]
+  for (const [admission_reason, status, label, action] of reasonCases) {
+    const submission = normalizePendingReview({ status: admission_reason === 'source_review_unverified' ? 'passed' : 'error', admission_reason }, status)
+    assert.equal(competitionSubmissionStatusLabel(submission, pendingRound), label)
+    const notice = competitionSubmissionEvaluationNotice(submission, pendingRound)
+    assert.ok(notice.includes(action))
+    assert.ok(notice.includes('This submission was not evaluated.'))
+    if (status === 'review_failed') assert.match(notice, /[Nn]o code violation was confirmed/)
+    assert.doesNotMatch(notice, /retrying|resubmit|innocent/)
+  }
+  for (const admission_reason of ['private-secret', [], {}, 42]) {
+    const submission = normalizePendingReview({ status: 'rejected', admission_reason, categories: ['fabricated_evidence', 'private-secret'] }, 'review_rejected')
+    assert.equal(submission.codeReview.admissionReason, null)
+    assert.deepEqual(submission.codeReview.categories, [])
+    assert.equal(competitionSubmissionStatusLabel(submission, pendingRound), 'Code review rejected')
+    assert.doesNotMatch(competitionSubmissionEvaluationNotice(submission, pendingRound), /private-secret/)
+  }
+  for (const categories of ['fabricated_evidence', [{}], [null], ['toString'], ['__proto__'], Array(6).fill('fabricated_evidence')]) {
+    assert.deepEqual(normalizePendingReview({ status: 'rejected', categories }, 'review_rejected').codeReview.categories, [])
+  }
+  assert.deepEqual(normalizePendingReview({ status: 'rejected', categories: ['fabricated_evidence', 'fabricated_evidence'] }, 'review_rejected').codeReview.categories, ['fabricated_evidence'])
+  const invalidNov6Review = normalizePendingReview({ status: 'error', error_code: 'review_response_invalid', admission_reason: 'review_evidence_invalid', retryable: false }, 'review_failed')
+  assert.equal(competitionSubmissionStatusLabel(invalidNov6Review, pendingRound), 'Review evidence could not be verified')
+  assert.match(competitionSubmissionEvaluationNotice(invalidNov6Review, pendingRound), /reviewer response.*no code violation was confirmed/)
+  // Reduced public Nov6 API snapshot: eight recorded fabrication rejections and
+  // one invalid review. Synthetic identities replace the public miner IDs.
+  // The newer reason is added below to verify both pre-release and new APIs.
+  const nov6PublicFixture = JSON.parse(await readFile(resolve('scripts/fixtures/competition-nov6-public-review-exclusions.json'), 'utf8'))
+  for (const hostReasonsAvailable of [false, true]) {
+    const fixture = structuredClone(nov6PublicFixture)
+    if (hostReasonsAvailable) fixture.submissions.forEach((row, index) => { row.code_review.admission_reason = index < 8 ? 'source_policy_violation' : 'review_evidence_invalid' })
+    const normalized = normalizeCompetitionSubmissions(fixture)
+    assert.equal(normalized.length, 9)
+    const table = renderToStaticMarkup(React.createElement(renderedModule.exports.SubmissionTable, {
+      submissions: normalized, round: pendingRound, selectedId: null, onSelect() {},
+    }))
+    assert.equal(table.split('Rejected: fabricated evidence').length - 1, 16, 'all eight recorded reasons must render in desktop and mobile cells')
+    assert.equal(table.split(hostReasonsAvailable ? 'Review evidence could not be verified' : 'Code review failed · invalid reviewer response').length - 1, 2, 'the ninth incomplete review must have a different desktop and mobile label')
+    for (const [index, submission] of normalized.entries()) {
+      assert.equal(submission.finalScore, null)
+      assert.equal(submission.stage1Score, null)
+      assert.equal(submission.isChampion, false)
+      const details = renderToStaticMarkup(React.createElement(renderedModule.exports.PublishedResults, {
+        submission, round: pendingRound, benchmark, benchmarkState: 'available', results: null, resultsState: 'idle',
+      }))
+      const source = renderToStaticMarkup(React.createElement(renderedModule.exports.SourcePanel, {
+        submission, cancelled: false, code: null, codeState: 'idle', selectedFile: null, onSelectFile() {}, onRequest() {},
+      }))
+      assert.ok(details.includes(index < 8 ? 'Do not substitute ICP requirements for company facts' : 'no code violation was confirmed'))
+      assert.ok(source.includes('Source was not published because this submission was not evaluated'))
+      assert.doesNotMatch(table + details + source, /View source|Source locked|retrying|>0\.00</)
+    }
+  }
+  for (const [error_code, label, action] of [
+    ['code_review_provider_rate_limited', 'provider rate limit', 'provider request limits'],
+    ['code_review_provider_timeout', 'provider timeout', 'submission ID'],
+    ['code_review_provider_refused', 'provider declined request', 'submission ID'],
+    ['review_response_invalid', 'invalid reviewer response', 'does not identify a code change'],
+    ['code_review_research_unverified', 'research qualification unverified', 'model decisions'],
+    ['code_review_round_closed', 'review window closed', 'published deadlines'],
+    ['source_license_invalid', 'invalid source license', 'required license'],
+    ['harness_file_missing', 'invalid harness', 'complete harness'],
+    ['source_contains_credentials', 'credentials in source', 'Remove embedded credentials'],
+    ['code_review_source_digest_mismatch', 'source could not be verified', 'upload checksums'],
+    ['source_archive_invalid', 'source validation failed', 'archive format'],
+  ]) {
+    const submission = normalizePendingReview({ status: 'error', error_code, retryable: true }, 'review_failed')
+    assert.ok(competitionSubmissionStatusLabel(submission, pendingRound).includes(label))
+    assert.ok(competitionSubmissionEvaluationNotice(submission, pendingRound).includes(action))
+    assert.doesNotMatch(competitionSubmissionEvaluationNotice(submission, pendingRound), /retrying|resubmit/)
+  }
   const authPending = normalizePendingReview({ status: 'error', error_code: 'code_review_provider_authentication', provider_http_status: 401, attempts: 1 })
+  for (const [error_code, declined] of [['code_review_provider_refused', true], ['code_review_provider_authentication', false], [undefined, false]]) {
+    for (const status of ['queued', 'review_failed']) {
+      const submission = normalizePendingReview({ status: 'error', error_code, provider_http_status: 403, retryable: true }, status)
+      const label = competitionSubmissionStatusLabel(submission, pendingRound)
+      const notice = competitionSubmissionEvaluationNotice(submission, pendingRound)
+      assert.ok(label.includes(declined ? 'provider declined request' : 'access denied'))
+      if (declined) assert.doesNotMatch(label + notice, /authentication|access denied|provider key/i, 'a typed provider refusal must not become key advice because its raw HTTP status is 403')
+      if (status === 'review_failed') assert.doesNotMatch(label + notice, /retrying/)
+    }
+  }
   const creditPending = normalizePendingReview({ status: 'error', error_code: 'code_review_provider_credit', provider_http_status: 402, attempts: 1 })
   const exhaustedReview = { status: 'error', error_code: 'code_review_provider_credit', provider_http_status: 402, failure_reason: 'provider_credit_exhausted', attempts: 1 }
   const exhaustedPending = normalizePendingReview(exhaustedReview)
@@ -1144,7 +1258,7 @@ try {
     [{ status: 'error', provider_http_status: 402 }, 'Code review failed · provider payment required'],
     [{ status: 'error', provider_http_status: 403 }, 'Code review failed · provider access denied'],
     [{ status: 'error', provider_http_status: 401 }, 'Code review failed · provider authentication failed'],
-    [{ status: 'error', error_code: 'code_review_provider_unavailable', provider_http_status: 503, retryable: true }, 'Code review could not complete'],
+    [{ status: 'error', error_code: 'code_review_provider_unavailable', provider_http_status: 503, retryable: true }, 'Code review failed · service unavailable'],
     [{ status: 'error', error_code: 'unknown_failure' }, 'Code review could not complete'],
     [{ status: 'passed', error_code: 'code_review_provider_credit', provider_http_status: 402 }, 'Code review could not complete'],
     [{ status: 'reviewing', error_code: 'code_review_provider_credit', provider_http_status: 402 }, 'Code review could not complete'],
@@ -1153,7 +1267,7 @@ try {
   for (const [codeReview, label] of terminalReviewCases) {
     const submission = normalizePendingReview(codeReview, 'review_failed')
     assert.equal(competitionSubmissionStatusLabel(submission, pendingRound), label)
-    assert.equal(competitionSubmissionEvaluationNotice(submission, pendingRound), `${label}. This submission was not evaluated.`)
+    assert.match(competitionSubmissionEvaluationNotice(submission, pendingRound), /no code violation was confirmed.*This submission was not evaluated\./)
     const terminalRowsMarkup = renderToStaticMarkup(React.createElement(renderedModule.exports.SubmissionTable, {
       submissions: [submission], round: pendingRound, selectedId: submission.submissionId, onSelect() {},
     }))
@@ -1161,7 +1275,7 @@ try {
       submission, round: pendingRound, benchmark, benchmarkState: 'available', results: null, resultsState: 'idle',
     }))
     assert.ok(terminalRowsMarkup.includes(label), 'the terminal cause must appear in the submissions table')
-    assert.ok(terminalResultsMarkup.includes(`${label}. This submission was not evaluated.`), 'the terminal cause must appear in submission details')
+    assert.ok(terminalResultsMarkup.includes('no code violation was confirmed'), 'incomplete review must not become a source violation')
     assert.doesNotMatch(terminalRowsMarkup + terminalResultsMarkup, /retrying|>0\.00</i, 'terminal failures must not imply a retry or a score')
   }
 
@@ -1169,7 +1283,7 @@ try {
     submissions: [madaraReviewFailure, reviewRejected, authPending, creditPending, exhaustedPending, retryingPending, legacyPending],
     round: pendingRound, selectedId: madaraReviewFailure.submissionId, onSelect() {},
   }))
-  assert.match(reviewRowsMarkup, /Code review could not complete/)
+  assert.match(reviewRowsMarkup, /Code review failed · service unavailable/)
   assert.match(reviewRowsMarkup, /Code review rejected/)
   assert.match(reviewRowsMarkup, /Provider authentication failed/)
   assert.match(reviewRowsMarkup, /Provider payment required/)
