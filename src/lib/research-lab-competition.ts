@@ -126,7 +126,18 @@ export type CompetitionCodeReview = {
   providerHttpStatus: number | null
   retryable: boolean | null
   attempts: number | null
+  admissionReason: typeof REVIEW_ADMISSION_REASONS[number] | null
+  categories: Array<keyof typeof REVIEW_CATEGORY_GUIDANCE>
 }
+
+const REVIEW_ADMISSION_REASONS = ['source_policy_violation', 'model_directed_research_required', 'source_review_unverified', 'review_evidence_invalid', 'review_response_incomplete', 'review_error', 'review_incomplete'] as const
+const REVIEW_CATEGORY_GUIDANCE = {
+  hardcoded_prepared_answers: { label: 'prepared answers', explanation: 'The code review recorded prepared answers.', action: 'Generate answers from the current inputs and source evidence. Remove stored answers for benchmark tasks.' },
+  fabricated_evidence: { label: 'fabricated evidence', explanation: 'The code review recorded unsupported or fabricated factual evidence.', action: 'Remove invented facts and citations. Return only claims supported by the required source checks.' },
+  malicious_behavior: { label: 'disallowed code behavior', explanation: 'The code review recorded code behavior that breaks the source rules.', action: 'Remove the disallowed behavior and check the published source rules before a future submission.' },
+  reviewer_manipulation: { label: 'review interference', explanation: 'The code review recorded an attempt to interfere with the review.', action: 'Remove instructions or code that try to change the review decision.' },
+  duplicate_submission: { label: 'duplicate submission', explanation: 'The code review recorded a duplicate submission.', action: 'Use an original implementation. Do not reuse another competition entry.' },
+} as const
 
 export type CompetitionBenchmark = {
   roundId: string
@@ -328,6 +339,12 @@ export function normalizeCompetitionSubmissions(value: unknown): CompetitionSubm
         providerHttpStatus: httpStatus(codeReview?.provider_http_status),
         retryable: typeof codeReview?.retryable === 'boolean' ? codeReview.retryable : null,
         attempts: integer(codeReview?.attempts),
+        admissionReason: REVIEW_ADMISSION_REASONS.includes(codeReview?.admission_reason as typeof REVIEW_ADMISSION_REASONS[number])
+          ? codeReview!.admission_reason as typeof REVIEW_ADMISSION_REASONS[number] : null,
+        categories: Array.isArray(codeReview?.categories)
+          && codeReview.categories.length <= Object.keys(REVIEW_CATEGORY_GUIDANCE).length
+          && codeReview.categories.every((category) => typeof category === 'string' && Object.hasOwn(REVIEW_CATEGORY_GUIDANCE, category))
+          ? [...new Set(codeReview.categories)] as Array<keyof typeof REVIEW_CATEGORY_GUIDANCE> : [],
       },
       code: {
         available: reviewExcluded ? false : code?.available === true,
@@ -616,9 +633,11 @@ export function competitionSubmissionStatusLabel(
   round: Pick<CompetitionRoundSummary, 'promotionStatus' | 'status'>,
 ): string {
   if (submission.status === 'review_failed') {
+    const explanation = competitionReviewExplanation(submission)
+    if (explanation) return explanation.label
     return codeReviewIssueLabel(submission.codeReview, true) ?? 'Code review could not complete'
   }
-  if (submission.status === 'review_rejected') return 'Code review rejected'
+  if (submission.status === 'review_rejected') return competitionReviewExplanation(submission)?.label ?? 'Code review rejected'
   if (submission.status === 'provider_blocked' || submission.status === 'evaluation_incomplete') {
     const reasons = submission.evaluation?.failureReasons
     if (reasons?.includes('openrouter_zdr_route_unavailable')) {
@@ -668,6 +687,8 @@ export function competitionSubmissionEvaluationNotice(
   round: Pick<CompetitionRoundSummary, 'promotionStatus' | 'status'>,
 ): string | null {
   if (isCompetitionReviewExcluded(submission)) {
+    const explanation = competitionReviewExplanation(submission)
+    if (explanation) return `${explanation.explanation} ${explanation.action} This submission was not evaluated.`
     return `${competitionSubmissionStatusLabel(submission, round)}. This submission was not evaluated.`
   }
   if (submission.status === 'queued' || submission.status === 'accepted') {
@@ -838,6 +859,105 @@ function humanizeStatus(value: string): string {
 
 function isReviewExcludedStatus(value: string): boolean {
   return value === 'review_failed' || value === 'review_rejected'
+}
+
+type ReviewExplanation = { label: string; explanation: string; action: string }
+
+function competitionReviewExplanation(submission: Pick<CompetitionSubmission, 'status' | 'codeReview'>): ReviewExplanation | null {
+  const review = submission.codeReview
+  const reason = review.admissionReason
+  if (!isReviewExcludedStatus(submission.status)) return null
+  if (submission.status === 'review_rejected') {
+    if (reason === 'model_directed_research_required') return {
+      label: 'Not qualified: model-directed research required',
+      explanation: 'The review classified this source as a fixed workflow instead of the required model-directed research.',
+      action: 'Add a reachable controller where model decisions select research actions, use observations, and decide when to continue or stop.',
+    }
+    if ((reason === null || reason === 'source_policy_violation') && review.status === 'rejected' && review.categories.length) {
+      const guidance = review.categories.map((category) => REVIEW_CATEGORY_GUIDANCE[category])
+      return {
+        label: `Rejected: ${guidance.map((item) => item.label).join('; ')}`,
+        explanation: guidance.map((item) => item.explanation).join(' '),
+        action: guidance.map((item) => item.action).join(' '),
+      }
+    }
+    return null
+  }
+  const incomplete = 'The review did not complete; no code violation was confirmed.'
+  if (reason === 'source_review_unverified') return {
+    label: 'Source review could not be verified',
+    explanation: 'The saved review could not establish this source’s eligibility for evaluation. No code violation was confirmed.',
+    action: 'Check that the complete uploaded archive is the version covered by the review. If it is, report this failure with the submission ID.',
+  }
+  if (reason === 'review_evidence_invalid') return {
+    label: 'Review evidence could not be verified',
+    explanation: `The reviewer response did not pass the source-evidence checks. ${incomplete}`,
+    action: 'Keep the submission ID when reporting this review failure. This result does not identify a code change to make.',
+  }
+  if (reason === 'review_response_incomplete') return {
+    label: 'Review response incomplete',
+    explanation: `The reviewer returned an unfinished or truncated response. ${incomplete}`,
+    action: 'Keep the submission ID when reporting this review failure. This result does not identify a code change to make.',
+  }
+  const generic = { label: 'Code review could not complete', explanation: incomplete, action: 'Keep the submission ID when reporting this review failure. This result does not identify a code change to make.' }
+  if (review.status !== 'error') return generic
+  const error = review.errorCode
+  let label = codeReviewIssueLabel(review, true)
+  let explanation: string | null = null
+  let action = 'Keep the submission ID when reporting this review failure.'
+  if (review.providerHttpStatus === 401 || review.providerHttpStatus === 403 || error === 'code_review_provider_authentication') {
+    explanation = 'The review provider did not accept the supplied credentials or access permissions.'
+    action = 'Check the provider key and its model access before a future submission.'
+  } else if (review.failureReason === 'provider_credit_exhausted' || error === 'code_review_provider_credit' || review.providerHttpStatus === 402) {
+    explanation = review.failureReason === 'provider_credit_exhausted' ? 'The review provider reported insufficient funding.' : 'The review provider required payment or additional budget.'
+    action = 'Check the provider balance and key spending limits before a future submission.'
+  } else if (error === 'code_review_provider_rate_limited') {
+    label = 'Code review failed · provider rate limit'
+    explanation = 'The review provider limited the request rate.'
+    action = 'Check provider request limits before a future submission.'
+  } else if (error === 'code_review_provider_timeout') {
+    label = 'Code review failed · provider timeout'
+    explanation = 'The review provider did not complete the request in time.'
+  } else if (['code_review_provider_unavailable', 'code_review_transport_error', 'code_review_preparation_unavailable'].includes(error ?? '')) {
+    label = 'Code review failed · service unavailable'
+    explanation = 'The review service or provider was unavailable.'
+  } else if (['code_review_provider_refused', 'code_review_provider_request_rejected'].includes(error ?? '')) {
+    label = 'Code review failed · provider declined request'
+    explanation = 'The provider declined the review request. This is not a code-review verdict.'
+  } else if (error === 'review_response_invalid') {
+    label = 'Code review failed · invalid reviewer response'
+    explanation = 'The reviewer response could not be validated.'
+    action += ' This result does not identify a code change to make.'
+  } else if (error === 'code_review_research_unverified') {
+    label = 'Code review failed · research qualification unverified'
+    explanation = 'The review could not confirm the required model-directed research behavior.'
+    action = 'Check that the complete source includes model decisions that control research actions and stopping.'
+  } else if (['code_review_deadline_exceeded', 'code_review_round_closed', 'code_review_submission_ineligible'].includes(error ?? '')) {
+    label = 'Code review failed · review window closed'
+    explanation = 'The review could not finish within the submission’s allowed review window.'
+    action = 'Check the published deadlines before a future submission.'
+  } else if (error === 'source_license_invalid') {
+    label = 'Code review failed · invalid source license'
+    explanation = 'The submitted source did not have the required valid license.'
+    action = 'Include the required license in the archive before a future submission.'
+  } else if (['harness_file_missing', 'harness_invalid', 'harness_too_large'].includes(error ?? '')) {
+    label = 'Code review failed · invalid harness'
+    explanation = 'The submitted harness was missing or did not meet the harness requirements.'
+    action = 'Include a complete harness that meets the published format and size limits before a future submission.'
+  } else if (['source_contains_credentials', 'source_credentials_invalid'].includes(error ?? '')) {
+    label = 'Code review failed · credentials in source'
+    explanation = 'The submitted archive did not pass the credential checks.'
+    action = 'Remove embedded credentials from the source and use the supported credential configuration before a future submission.'
+  } else if (['code_review_source_size_mismatch', 'code_review_source_digest_mismatch', 'review_source_incomplete'].includes(error ?? '')) {
+    label = 'Code review failed · source could not be verified'
+    explanation = 'The review could not verify the complete uploaded source.'
+    action = 'Check the archive and upload checksums before a future submission.'
+  } else if (['review_source_empty', 'review_source_exceeds_context', 'review_source_invalid', 'review_source_not_text', 'review_source_not_utf8', 'review_source_unreadable', 'source_archive_invalid', 'source_archive_failed', 'source_archive_too_large', 'source_archive_unsafe', 'source_directory_missing', 'source_empty', 'source_entry_type_invalid', 'source_file_count_exceeded', 'source_git_automation_forbidden', 'source_path_invalid', 'source_unpacked_too_large', 'source_unreadable'].includes(error ?? '')) {
+    label = 'Code review failed · source validation failed'
+    explanation = 'The submitted archive did not pass the source validation checks.'
+    action = 'Check the archive format, complete source, license, harness, and published source limits before a future submission.'
+  }
+  return explanation ? { label: label ?? 'Code review could not complete', explanation: `${explanation} ${incomplete}`, action } : generic
 }
 
 function codeReviewIssueLabel(review: CompetitionCodeReview, terminal = false): string | null {
