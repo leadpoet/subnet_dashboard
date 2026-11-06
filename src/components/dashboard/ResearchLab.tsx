@@ -47,6 +47,7 @@ export function ResearchLab({
   active = true,
 }: { onSync?: () => void; active?: boolean } = {}) {
   const [historyOpen, setHistoryOpen] = useState(false)
+  const [selectedRoundId, setSelectedRoundId] = useState<string | null>(null)
   const [competition, setCompetition] = useState<CompetitionSnapshot | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -63,6 +64,7 @@ export function ResearchLab({
       const normalized = normalizeCompetitionSnapshot(response)
       if (normalized) {
         setCompetition(normalized)
+        setSelectedRoundId((current) => current && competitionRoundOptions(normalized).some((round) => round.roundId === current) ? current : null)
         setError(null)
         onSync?.()
       } else setError('Competition data did not match the public contract.')
@@ -77,12 +79,12 @@ export function ResearchLab({
 
   if (loading && !competition) return <ResearchLabLoading />
   const roundOptions = competition ? competitionRoundOptions(competition) : []
-  const selectedRound = roundOptions[0] ?? null
+  const selectedRound = roundOptions.find((round) => round.roundId === selectedRoundId) ?? roundOptions[0] ?? null
   const championRound = competition ? currentChampionRound(competition) : null
   return (
     <ValidatorNamesContext.Provider value={validatorNames}><div className="w-full pb-12">
       <CompetitionHeader historyOpen={historyOpen} onHistory={() => setHistoryOpen((open) => !open)} />
-      {historyOpen ? <CompetitionHistory active={active} /> : !competition ? <Unavailable message="Competition data is temporarily unavailable. This page will retry automatically." /> : selectedRound ? <><ChampionSummary round={championRound} history={competitionChampionHistory(competition)} active={active} /><RoundSummary round={selectedRound} /><RoundWorkspace round={selectedRound} active={active} /></> : <p className="border-b border-[var(--line)] py-12 text-[14px] text-[var(--muted)]">No production competition round is available.</p>}
+      {historyOpen ? <CompetitionHistory active={active} /> : !competition ? <Unavailable message="Competition data is temporarily unavailable. This page will retry automatically." /> : selectedRound ? <><ChampionSummary round={championRound} history={competitionChampionHistory(competition)} active={active} /><div className="mt-6 max-w-sm"><span className={filterLabelClass}>Competition round</span><CompetitionSelect label="Competition round" value={selectedRound.roundId} options={roundOptions.map((round) => ({ value: round.roundId, label: `${round.evaluationDate ? formatDay(round.evaluationDate) : round.roundId} · ${humanize(round.status)}` }))} onChange={setSelectedRoundId} /></div><RoundSummary round={selectedRound} /><RoundWorkspace key={selectedRound.roundId} round={selectedRound} active={active} /></> : <p className="border-b border-[var(--line)] py-12 text-[14px] text-[var(--muted)]">No production competition round is available.</p>}
       {error && competition ? <p className="mt-5 text-[12px] text-[var(--muted-2)]">Latest refresh failed: {error}</p> : null}
     </div></ValidatorNamesContext.Provider>
   )
