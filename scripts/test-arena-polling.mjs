@@ -268,6 +268,59 @@ try {
   await act(async () => { pending.resolve() })
   await unmount()
 
+  // Recent rounds retain their review explanations after the latest day moves.
+  const reviewFixture = JSON.parse(readFileSync('scripts/fixtures/competition-nov6-public-review-exclusions.json', 'utf8'))
+  const recentRound = (date, status = 'stage1') => ({ ...round, round_id: `arena-${date}`, evaluation_date: date, icp_set_date: date, public_at: `${date}T00:00:00Z`, status })
+  const nov6 = recentRound('2026-11-06', 'published')
+  const nov7 = recentRound('2026-11-07')
+  const nov8 = recentRound('2026-11-08')
+  const reigning = { ...recentRound('2026-11-05', 'published'), promotion_status: 'promoted', champion: { submission_id: 'current-champion', miner_hotkey: '5CurrentChampion', final_score: 88 }, published_at: '2026-11-05T23:00:00Z' }
+  let recentSnapshot = { ...snapshot, latest_round: nov7, latest_completed_round: reigning, rounds: [nov7, nov6, reigning] }
+  respond = (url) => {
+    if (url.endsWith('/competition')) return Response.json(recentSnapshot)
+    if (url.includes(`/rounds/${nov6.round_id}/submissions`)) return Response.json(reviewFixture)
+    if (url.endsWith('/benchmark')) return Response.json({ error: 'not released' }, { status: 403 })
+    return publicResponse(url)
+  }
+  const roundSelect = () => renderer.root.findAllByType(CompetitionSelect).find((select) => select.props.label === 'Competition round')
+  await act(async () => { renderer = TestRenderer.create(React.createElement(ResearchLab), rendererOptions) })
+  assert.ok(roundSelect(), 'a recent-round selector must make older review exclusions reachable')
+  assert.equal(roundSelect().props.value, nov7.round_id, 'the initial view retains the latest round')
+  const renderedText = (node) => node.children.map((child) => typeof child === 'string' ? child : renderedText(child)).join('')
+  const championBeforeSelection = renderedText(renderer.root.findByProps({ 'aria-label': 'Current champion' }))
+  await act(async () => { roundSelect().props.onChange(nov6.round_id) })
+  assert.equal(roundSelect().props.value, nov6.round_id)
+  assert.ok(calls.some((url) => url.includes(`/rounds/${nov6.round_id}/submissions`)))
+  assert.equal(markup().split('Rejected: fabricated evidence').length - 1, 16, 'all eight recorded rejection labels remain visible in desktop and mobile cells')
+  assert.match(markup(), /Code review failed · invalid reviewer response/)
+  const scoreCells = renderer.root.findAllByType('td').filter((cell) => cell.props.className?.includes('text-right'))
+  assert.equal(scoreCells.length, 9)
+  assert.ok(scoreCells.every((cell) => renderedText(cell) === '—'), 'every excluded submission must retain its missing score')
+  for (const row of reviewFixture.submissions) {
+    await act(async () => { renderer.root.findAllByType('button').find((button) => button.props.title === row.submission_id).props.onClick() })
+    assert.match(markup(), row.status === 'review_rejected' ? /Do not substitute ICP requirements for company facts/ : /no code violation was confirmed/)
+    assert.match(markup(), /Source was not published because this submission was not evaluated/)
+    assert.doesNotMatch(markup(), /View source|0\.00/)
+  }
+  assert.equal(calls.some((url) => url.includes('/results/') || url.endsWith('/code')), false, 'review exclusions do not fetch result or source data')
+  assert.equal(renderedText(renderer.root.findByProps({ 'aria-label': 'Current champion' })), championBeforeSelection, 'choosing an evaluation day must not replace the current champion')
+  recentSnapshot = { ...recentSnapshot, latest_round: nov8, rounds: [nov8, nov7, nov6, reigning] }
+  await advance(60_000)
+  assert.equal(roundSelect().props.value, nov6.round_id, 'polling preserves a deliberate recent-round selection')
+  assert.match(markup(), /no code violation was confirmed/)
+  recentSnapshot = { ...recentSnapshot, rounds: [nov8, nov7, reigning] }
+  await advance(60_000)
+  assert.equal(roundSelect().props.value, nov8.round_id, 'a round removed from the public window falls back to the latest round')
+  assert.doesNotMatch(markup(), /no code violation was confirmed|nov6-public-excluded/)
+  assert.equal(calls.some((url) => url.includes('/history')), false, 'round selection must not change or load History membership')
+  await unmount()
+  recentSnapshot = { ...recentSnapshot, latest_round: nov7, rounds: [nov7, nov6, reigning] }
+  await act(async () => { renderer = TestRenderer.create(React.createElement(ResearchLab), rendererOptions) })
+  recentSnapshot = { ...recentSnapshot, latest_round: nov8, rounds: [nov8, nov7, nov6, reigning] }
+  await advance(60_000)
+  assert.equal(roundSelect().props.value, nov8.round_id, 'without a deliberate choice the default continues to follow the latest round')
+  await unmount()
+
   // Slow benchmarks must not hide ready submissions or block table updates.
   const slowBenchmark = deferred()
   respond = async (url) => {
