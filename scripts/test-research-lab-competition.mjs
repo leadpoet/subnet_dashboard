@@ -1099,10 +1099,10 @@ try {
   }] })[0]
   const rejectionCases = [
     ['hardcoded_prepared_answers', 'prepared answers', 'Remove stored answers'],
-    ['fabricated_evidence', 'fabricated evidence', 'Remove invented facts'],
+    ['fabricated_evidence', 'fabricated evidence', 'Do not substitute ICP requirements for company facts. Preserve uncertainty and return only source-supported claims.'],
     ['malicious_behavior', 'disallowed code behavior', 'Remove the disallowed behavior'],
     ['reviewer_manipulation', 'review interference', 'Remove instructions or code'],
-    ['duplicate_submission', 'duplicate submission', 'Use an original implementation'],
+    ['duplicate_submission', 'duplicate submission', 'Make a meaningful behavior improvement before submitting again; cosmetic edits alone do not qualify.'],
   ]
   for (const [category, label, action] of rejectionCases) {
     for (const admission_reason of [undefined, 'source_policy_violation']) {
@@ -1117,6 +1117,7 @@ try {
         submission, round: pendingRound, benchmark: null, benchmarkState: 'gated', results: null, resultsState: 'idle',
       }))
       assert.ok(details.includes(action), `recorded ${category} needs a fixed action before ICP disclosure`)
+      assert.doesNotMatch(details, /Use an original implementation|Do not reuse another competition entry/, 'guidance must permit meaningful improvements to shared code')
       assert.doesNotMatch(table + details, /private-file|private-review-prose|retrying|>0\.00</)
       assert.equal(submission.finalScore, null)
       assert.equal(submission.code.available, false)
@@ -1177,7 +1178,7 @@ try {
       const source = renderToStaticMarkup(React.createElement(renderedModule.exports.SourcePanel, {
         submission, cancelled: false, code: null, codeState: 'idle', selectedFile: null, onSelectFile() {}, onRequest() {},
       }))
-      assert.ok(details.includes(index < 8 ? 'Remove invented facts' : 'no code violation was confirmed'))
+      assert.ok(details.includes(index < 8 ? 'Do not substitute ICP requirements for company facts' : 'no code violation was confirmed'))
       assert.ok(source.includes('Source was not published because this submission was not evaluated'))
       assert.doesNotMatch(table + details + source, /View source|Source locked|retrying|>0\.00</)
     }

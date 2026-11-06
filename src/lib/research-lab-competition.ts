@@ -133,10 +133,10 @@ export type CompetitionCodeReview = {
 const REVIEW_ADMISSION_REASONS = ['source_policy_violation', 'model_directed_research_required', 'source_review_unverified', 'review_evidence_invalid', 'review_response_incomplete', 'review_error', 'review_incomplete'] as const
 const REVIEW_CATEGORY_GUIDANCE = {
   hardcoded_prepared_answers: { label: 'prepared answers', explanation: 'The code review recorded prepared answers.', action: 'Generate answers from the current inputs and source evidence. Remove stored answers for benchmark tasks.' },
-  fabricated_evidence: { label: 'fabricated evidence', explanation: 'The code review recorded unsupported or fabricated factual evidence.', action: 'Remove invented facts and citations. Return only claims supported by the required source checks.' },
+  fabricated_evidence: { label: 'fabricated evidence', explanation: 'The code review recorded unsupported or fabricated factual evidence.', action: 'Do not substitute ICP requirements for company facts. Preserve uncertainty and return only source-supported claims.' },
   malicious_behavior: { label: 'disallowed code behavior', explanation: 'The code review recorded code behavior that breaks the source rules.', action: 'Remove the disallowed behavior and check the published source rules before a future submission.' },
   reviewer_manipulation: { label: 'review interference', explanation: 'The code review recorded an attempt to interfere with the review.', action: 'Remove instructions or code that try to change the review decision.' },
-  duplicate_submission: { label: 'duplicate submission', explanation: 'The code review recorded a duplicate submission.', action: 'Use an original implementation. Do not reuse another competition entry.' },
+  duplicate_submission: { label: 'duplicate submission', explanation: 'The code review recorded a duplicate submission.', action: 'Make a meaningful behavior improvement before submitting again; cosmetic edits alone do not qualify.' },
 } as const
 
 export type CompetitionBenchmark = {
