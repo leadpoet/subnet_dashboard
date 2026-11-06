@@ -905,7 +905,10 @@ function competitionReviewExplanation(submission: Pick<CompetitionSubmission, 's
   let label = codeReviewIssueLabel(review, true)
   let explanation: string | null = null
   let action = 'Keep the submission ID when reporting this review failure.'
-  if (review.providerHttpStatus === 401 || review.providerHttpStatus === 403 || error === 'code_review_provider_authentication') {
+  if (error === 'code_review_provider_refused') {
+    label = 'Code review failed · provider declined request'
+    explanation = 'The provider declined the review request. This is not a code-review verdict.'
+  } else if (review.providerHttpStatus === 401 || review.providerHttpStatus === 403 || error === 'code_review_provider_authentication') {
     explanation = 'The review provider did not accept the supplied credentials or access permissions.'
     action = 'Check the provider key and its model access before a future submission.'
   } else if (review.failureReason === 'provider_credit_exhausted' || error === 'code_review_provider_credit' || review.providerHttpStatus === 402) {
@@ -921,7 +924,7 @@ function competitionReviewExplanation(submission: Pick<CompetitionSubmission, 's
   } else if (['code_review_provider_unavailable', 'code_review_transport_error', 'code_review_preparation_unavailable'].includes(error ?? '')) {
     label = 'Code review failed · service unavailable'
     explanation = 'The review service or provider was unavailable.'
-  } else if (['code_review_provider_refused', 'code_review_provider_request_rejected'].includes(error ?? '')) {
+  } else if (error === 'code_review_provider_request_rejected') {
     label = 'Code review failed · provider declined request'
     explanation = 'The provider declined the review request. This is not a code-review verdict.'
   } else if (error === 'review_response_invalid') {
@@ -964,6 +967,10 @@ function codeReviewIssueLabel(review: CompetitionCodeReview, terminal = false): 
   if (terminal && review.status !== 'error') return null
   if (review.status === 'reviewing') return 'Code review in progress'
   if (review.status !== 'error') return null
+  if (review.errorCode === 'code_review_provider_refused') {
+    if (terminal) return 'Code review failed · provider declined request'
+    return review.retryable === true ? 'Review provider declined request · retrying' : 'Review provider declined request'
+  }
   if (review.providerHttpStatus === 401) {
     return terminal ? 'Code review failed · provider authentication failed' : 'Provider authentication failed'
   }

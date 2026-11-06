@@ -1153,6 +1153,35 @@ try {
   const invalidNov6Review = normalizePendingReview({ status: 'error', error_code: 'review_response_invalid', admission_reason: 'review_evidence_invalid', retryable: false }, 'review_failed')
   assert.equal(competitionSubmissionStatusLabel(invalidNov6Review, pendingRound), 'Review evidence could not be verified')
   assert.match(competitionSubmissionEvaluationNotice(invalidNov6Review, pendingRound), /reviewer response.*no code violation was confirmed/)
+  // Reduced public Nov6 API snapshot: eight recorded fabrication rejections and
+  // one invalid review. Synthetic identities replace the public miner IDs.
+  // The newer reason is added below to verify both pre-release and new APIs.
+  const nov6PublicFixture = JSON.parse(await readFile(resolve('scripts/fixtures/competition-nov6-public-review-exclusions.json'), 'utf8'))
+  for (const hostReasonsAvailable of [false, true]) {
+    const fixture = structuredClone(nov6PublicFixture)
+    if (hostReasonsAvailable) fixture.submissions.forEach((row, index) => { row.code_review.admission_reason = index < 8 ? 'source_policy_violation' : 'review_evidence_invalid' })
+    const normalized = normalizeCompetitionSubmissions(fixture)
+    assert.equal(normalized.length, 9)
+    const table = renderToStaticMarkup(React.createElement(renderedModule.exports.SubmissionTable, {
+      submissions: normalized, round: pendingRound, selectedId: null, onSelect() {},
+    }))
+    assert.equal(table.split('Rejected: fabricated evidence').length - 1, 16, 'all eight recorded reasons must render in desktop and mobile cells')
+    assert.equal(table.split(hostReasonsAvailable ? 'Review evidence could not be verified' : 'Code review failed · invalid reviewer response').length - 1, 2, 'the ninth incomplete review must have a different desktop and mobile label')
+    for (const [index, submission] of normalized.entries()) {
+      assert.equal(submission.finalScore, null)
+      assert.equal(submission.stage1Score, null)
+      assert.equal(submission.isChampion, false)
+      const details = renderToStaticMarkup(React.createElement(renderedModule.exports.PublishedResults, {
+        submission, round: pendingRound, benchmark, benchmarkState: 'available', results: null, resultsState: 'idle',
+      }))
+      const source = renderToStaticMarkup(React.createElement(renderedModule.exports.SourcePanel, {
+        submission, cancelled: false, code: null, codeState: 'idle', selectedFile: null, onSelectFile() {}, onRequest() {},
+      }))
+      assert.ok(details.includes(index < 8 ? 'Remove invented facts' : 'no code violation was confirmed'))
+      assert.ok(source.includes('Source was not published because this submission was not evaluated'))
+      assert.doesNotMatch(table + details + source, /View source|Source locked|retrying|>0\.00</)
+    }
+  }
   for (const [error_code, label, action] of [
     ['code_review_provider_rate_limited', 'provider rate limit', 'provider request limits'],
     ['code_review_provider_timeout', 'provider timeout', 'submission ID'],
@@ -1172,6 +1201,16 @@ try {
     assert.doesNotMatch(competitionSubmissionEvaluationNotice(submission, pendingRound), /retrying|resubmit/)
   }
   const authPending = normalizePendingReview({ status: 'error', error_code: 'code_review_provider_authentication', provider_http_status: 401, attempts: 1 })
+  for (const [error_code, declined] of [['code_review_provider_refused', true], ['code_review_provider_authentication', false], [undefined, false]]) {
+    for (const status of ['queued', 'review_failed']) {
+      const submission = normalizePendingReview({ status: 'error', error_code, provider_http_status: 403, retryable: true }, status)
+      const label = competitionSubmissionStatusLabel(submission, pendingRound)
+      const notice = competitionSubmissionEvaluationNotice(submission, pendingRound)
+      assert.ok(label.includes(declined ? 'provider declined request' : 'access denied'))
+      if (declined) assert.doesNotMatch(label + notice, /authentication|access denied|provider key/i, 'a typed provider refusal must not become key advice because its raw HTTP status is 403')
+      if (status === 'review_failed') assert.doesNotMatch(label + notice, /retrying/)
+    }
+  }
   const creditPending = normalizePendingReview({ status: 'error', error_code: 'code_review_provider_credit', provider_http_status: 402, attempts: 1 })
   const exhaustedReview = { status: 'error', error_code: 'code_review_provider_credit', provider_http_status: 402, failure_reason: 'provider_credit_exhausted', attempts: 1 }
   const exhaustedPending = normalizePendingReview(exhaustedReview)
