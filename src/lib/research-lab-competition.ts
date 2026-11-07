@@ -210,6 +210,7 @@ export type CompetitionCompanyDiagnostic = {
   duplicateCompany: boolean
   missingContact: boolean | null
   checks: Record<CompanyOnlyCheckName, CompanyCheckStatus> & Partial<Record<ContactCheckName, CompanyCheckStatus>>
+  checkReasons: Partial<Record<CompanyOnlyCheckName | ContactCheckName, Array<{ code: string; message: string }>>>
   contactFailure: string | null
 }
 
@@ -251,8 +252,26 @@ function normalizeCompanyDiagnostics(value: unknown, benchmarkIcpCount: number):
       claim: 'Contact fields', identity: 'Contact identity', source: 'Contact source', company: 'Current employer',
       role: 'Role', location: 'Contact location', email_attribution: 'Email ownership', email_verification: 'Email verification',
     }
+    // Reasons are an additive public projection. Older servers omit them. A bad
+    // reason must not hide an otherwise valid, historical company result.
+    const checkReasons: CompetitionCompanyDiagnostic['checkReasons'] = {}
+    const rawReasons = record(row.check_reasons)
+    for (const name of [...COMPANY_ONLY_CHECK_NAMES, ...CONTACT_CHECK_NAMES]) {
+      const status = checks[name]
+      if (!status || status === 'passed' || status === 'not_required') continue
+      const values = rawReasons?.[name]
+      if (!Array.isArray(values) || values.length > 10) continue
+      const reasons = values.flatMap((value) => {
+        const reason = record(value)
+        const code = text(reason?.code)
+        const message = text(reason?.message)
+        return /^[a-z][a-z0-9_]{0,79}$/.test(code) && message.length > 0 && message.length <= 400
+          && !/[\u0000-\u001f\u007f]/.test(message) ? [{ code, message }] : []
+      })
+      if (reasons.length) checkReasons[name] = reasons
+    }
     return { icpPosition, companyIndex, companyName, qualified: row.qualified, duplicateCompany: row.duplicate_company,
-      missingContact, checks, contactFailure: hasContactDiagnostics ? failureLabels[text(row.contact_failure)] ?? null : null }
+      missingContact, checks, checkReasons, contactFailure: hasContactDiagnostics ? failureLabels[text(row.contact_failure)] ?? null : null }
   })
   return rows.every(isPresent) ? rows : null
 }

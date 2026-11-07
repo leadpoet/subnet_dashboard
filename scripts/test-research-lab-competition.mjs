@@ -927,7 +927,7 @@ try {
   assert.equal(diagnosticResults.companyDiagnostics.length, 4)
   assert.deepEqual(diagnosticResults.companyDiagnostics[0], {
     icpPosition: 0, companyIndex: 0, companyName: 'Zenskar', qualified: false, duplicateCompany: false,
-    missingContact: true, checks: { ...allPassedChecks, contact: 'failed', email: 'not_evaluated' }, contactFailure: null,
+    missingContact: true, checks: { ...allPassedChecks, contact: 'failed', email: 'not_evaluated' }, checkReasons: {}, contactFailure: null,
   })
   assert.equal(diagnosticResults.companyDiagnostics[1].contactFailure, 'Role')
   assert.equal(diagnosticResults.companyDiagnostics[2].checks.employee_size, 'failed')
@@ -947,7 +947,7 @@ try {
   })
   assert.deepEqual(companyOnlyResults.companyDiagnostics, [{
     icpPosition: 0, companyIndex: 0, companyName: 'Acme', qualified: true,
-    duplicateCompany: false, missingContact: null, checks: companyOnlyChecks, contactFailure: null,
+    duplicateCompany: false, missingContact: null, checks: companyOnlyChecks, checkReasons: {}, contactFailure: null,
   }])
   const renderedCompanyOnlyDiagnostics = renderToStaticMarkup(React.createElement(renderedModule.exports.CompanyDiagnostics, {
     rows: companyOnlyResults.companyDiagnostics,
@@ -987,6 +987,26 @@ try {
   const missingDiagnosticsResults = normalizeCompetitionResults(attributedResultsPayload)
   assert.deepEqual(emptyDiagnosticsResults.companyDiagnostics, [], 'an explicit empty diagnostics list is distinct from missing diagnostics')
   assert.equal(missingDiagnosticsResults.companyDiagnostics, null, 'missing diagnostics remain unavailable')
+  const reasonsPayload = { ...companyOnlyDiagnostic, qualified: false,
+    checks: { ...companyOnlyChecks, industry: 'unavailable', intent_details: 'failed' },
+    check_reasons: {
+      industry: [{ code: 'verification_unavailable', message: 'Supply clear industry evidence.' }],
+      intent_details: [{ code: 'paragraph_facts_unsupported', message: 'Correct the <unsupported> claim.' }],
+      identity: [{ code: 'ignored', message: 'passed-check-must-not-render' }],
+      private_extra: [{ code: 'ignored', message: 'private-extra-must-not-render' }],
+    },
+  }
+  const reasonsResult = normalizeCompetitionResults({ ...attributedResultsPayload, company_diagnostics: [reasonsPayload] })
+  assert.equal(reasonsResult.companyDiagnostics[0].checkReasons.industry[0].code, 'verification_unavailable')
+  const reasonsMarkup = renderToStaticMarkup(React.createElement(renderedModule.exports.CompanyDiagnostics, { rows: reasonsResult.companyDiagnostics }))
+  assert.match(reasonsMarkup, /Supply clear industry evidence\./)
+  assert.match(reasonsMarkup, /Correct the &lt;unsupported&gt; claim\./, 'reason text is escaped, never interpreted as HTML')
+  assert.doesNotMatch(reasonsMarkup, /passed-check-must-not-render|private-extra-must-not-render/)
+  for (const invalid of [null, 'bad', { code: 'invalid code', message: 'bad' }, { code: 'valid', message: 'x'.repeat(401) }, { code: 'valid', message: 'bad\ntext' }]) {
+    const result = normalizeCompetitionResults({ ...attributedResultsPayload, company_diagnostics: [{ ...reasonsPayload, check_reasons: { industry: [invalid] } }] })
+    assert.ok(result.companyDiagnostics, 'invalid optional reasons preserve recorded company checks')
+    assert.deepEqual(result.companyDiagnostics[0].checkReasons, {})
+  }
   const renderedCompanyDiagnostics = renderToStaticMarkup(React.createElement(renderedModule.exports.CompanyDiagnostics, {
     rows: diagnosticResults.companyDiagnostics,
   }))

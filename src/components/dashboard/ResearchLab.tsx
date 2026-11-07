@@ -635,7 +635,17 @@ function CompanyDiagnostics({ rows }: { rows: CompetitionCompanyDiagnostic[] | n
       : rows.length === 0 ? <p className="mt-2 text-[11px] text-[var(--muted)]">No company checks were recorded for this ICP.</p>
       : rows.map((row) => <details key={row.companyIndex} className="mt-3 rounded border border-[var(--line)] px-3 py-2">
         <summary className="cursor-pointer text-[12px] text-[var(--platinum)]">{row.companyName} · {row.qualified ? 'Qualified' : 'Not qualified'}{row.missingContact ? ' · Missing contact' : ''}{row.duplicateCompany ? ' · Duplicate company' : ''}</summary>
-        <dl className="mt-3 grid gap-2 sm:grid-cols-2">{(Object.keys(COMPANY_CHECK_LABELS) as Array<keyof typeof COMPANY_CHECK_LABELS>).map((name) => { const status = row.checks[name]; return status === undefined ? null : <div key={name} className="flex justify-between gap-3 text-[11px]"><dt className="text-[var(--muted-2)]">{COMPANY_CHECK_LABELS[name]}</dt><dd className="text-[var(--muted)]">{COMPANY_CHECK_STATUS_LABELS[status]}</dd></div> })}</dl>
+        <dl className="mt-3 grid gap-3 sm:grid-cols-2">{(Object.keys(COMPANY_CHECK_LABELS) as Array<keyof typeof COMPANY_CHECK_LABELS>).map((name) => {
+          const status = row.checks[name]
+          if (status === undefined) return null
+          const reasons = row.checkReasons?.[name] ?? []
+          return <div key={name} className="text-[11px]">
+            <dt className="text-[var(--muted-2)]">{COMPANY_CHECK_LABELS[name]}</dt>
+            <dd className="mt-1 text-[var(--muted)]"><span>{COMPANY_CHECK_STATUS_LABELS[status]}</span>
+              {reasons.map((reason, index) => <p key={`${reason.code}-${index}`} className="mt-1 leading-relaxed">{reason.message}</p>)}
+            </dd>
+          </div>
+        })}</dl>
         {row.contactFailure ? <p className="mt-2 text-[11px] text-[var(--muted)]">Contact check stopped at: {row.contactFailure}.</p> : null}
       </details>)}
   </div>
