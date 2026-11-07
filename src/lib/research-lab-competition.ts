@@ -674,7 +674,7 @@ export function competitionSubmissionStatusLabel(
     return 'Scored · not promoted'
   }
   if (submission.status === 'scored' && round.status !== 'published') {
-    return 'Scored · provisional'
+    return 'Scored'
   }
   if (submission.status === 'scoring_failed') return evaluationFailureLabel(submission)
   if (submission.status === 'queued' || submission.status === 'accepted') {
