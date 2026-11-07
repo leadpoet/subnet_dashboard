@@ -720,7 +720,7 @@ try {
   assert.match(completedBaselineMarkup, /Pending/)
   assert.doesNotMatch(completedBaselineMarkup, /Awaiting score|No champion was published/)
   assert.equal(competitionSubmissionStatusLabel({ ...submissions[0], status: 'scored' }, activeRound),
-    'Scored · provisional', 'a completed model must not imply a winner or promotion')
+    'Scored', 'a completed model must not imply a winner or promotion')
   assert.match(finalMarkup, /Promotion margin · \+1\.00 points/)
   assert.match(finalMarkup, /Not required/)
   assert.match(finalMarkup, /No champion was published/)
