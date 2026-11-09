@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 
 const ARENA_GATEWAY_URL = (
-  process.env.LEADPOET_GATEWAY_URL?.trim()
+  process.env.SUBNET71_GATEWAY_URL?.trim()
   || 'https://gateway.subnet71.com'
 ).replace(/\/+$/, '')
 

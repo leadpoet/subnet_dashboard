@@ -129,7 +129,7 @@ try {
 
   useScenario()
   const official = await fetchFreshSubnetEpochState()
-  assert.equal(official.schemaVersion, 'leadpoet.subnet_epoch_state.v1')
+  assert.equal(official.schemaVersion, 'subnet71.subnet_epoch_state.v1')
   assert.equal(official.headKind, 'best')
   assert.equal(official.netuid, 71)
   assert.equal(official.currentBlock, 8_637_160)

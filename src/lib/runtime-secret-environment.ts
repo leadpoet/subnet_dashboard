@@ -1,4 +1,4 @@
-const RUNTIME_SECRET_STORE_PROPERTY = '__leadpoetSubnetDashboardRuntimeSecretsV1'
+const RUNTIME_SECRET_STORE_PROPERTY = '__subnet71DashboardRuntimeSecretsV1'
 
 type RuntimeSecretStore = Readonly<Record<string, string>>
 type RuntimeSecretGlobal = typeof globalThis & {

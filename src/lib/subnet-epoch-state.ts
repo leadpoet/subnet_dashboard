@@ -187,7 +187,7 @@ async function readBestSubnetEpochState(): Promise<SubnetEpochSnapshot> {
   if (!position) throw new Error('Subnet epoch storage returned an inconsistent schedule')
 
   return {
-    schemaVersion: 'leadpoet.subnet_epoch_state.v1',
+    schemaVersion: 'subnet71.subnet_epoch_state.v1',
     headKind: 'best',
     netuid,
     blockHash,

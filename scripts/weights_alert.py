@@ -615,7 +615,7 @@ def main() -> int:
                 f", last set {behind} blocks ago" if behind is not None else ""
             )
             lines.append(f"• {label} · {uid_text}{set_text}: " + "; ".join(problems))
-        if any(vid == "leadpoet-primary" for vid, *_ in misses):
+        if any(vid == "sn71-primary" for vid, *_ in misses):
             lines.append(
                 "Primary miss ⇒ auditors have no bundle to copy; check gateway "
                 "/weights/submit responses and the validator log."

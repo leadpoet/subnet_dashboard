@@ -11,7 +11,7 @@ export async function startProduction({
     if (typeof values[key] === 'string') env[key] = values[key]
     else delete env[key]
   }
-  globalThis.__leadpoetSubnetDashboardRuntimeSecretsV1 = values
+  globalThis.__subnet71DashboardRuntimeSecretsV1 = values
 
   log(
     `Loaded ${Object.keys(values).length} validated runtime secrets from AWS Secrets Manager into the production worker.`,

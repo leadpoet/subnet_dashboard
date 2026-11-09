@@ -23,7 +23,7 @@ case "$(uname -m)" in
     ;;
 esac
 
-runtime_root="${NODE_RUNTIME_ROOT:-$HOME/.local/leadpoet-node}"
+runtime_root="${NODE_RUNTIME_ROOT:-$HOME/.local/subnet71-node}"
 runtime_dir="$runtime_root/v${node_version}-linux-${node_arch}"
 node_bin="$runtime_dir/bin/node"
 mkdir -p "$runtime_root"

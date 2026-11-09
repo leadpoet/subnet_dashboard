@@ -3,7 +3,7 @@
   "$pending": "None. Rizzo's monitored hotkey and expected coldkey now resolve to the on-chain Rizzo (Insured) identity; the fallback label is retained for identity-RPC outages.",
   "validators": [
     {
-      "id": "leadpoet-primary",
+      "id": "sn71-primary",
       "role": "primary",
       "label": "primary",
       "hotkey": "5FNVgRnrxMibhcBGEAaajGrYjsaCn441a5HuGUBUNnxEBLo9",

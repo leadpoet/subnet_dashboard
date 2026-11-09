@@ -275,7 +275,7 @@ export function AdminMetagraph() {
         throw new Error(payload.error || `Subnet epoch API returned ${response.status}`)
       }
       if (
-        payload.schemaVersion !== 'leadpoet.subnet_epoch_state.v1' ||
+        payload.schemaVersion !== 'subnet71.subnet_epoch_state.v1' ||
         payload.headKind !== 'best' ||
         !Number.isSafeInteger(payload.subnetEpochIndex) ||
         !Number.isSafeInteger(payload.blocksElapsed) ||

@@ -127,7 +127,7 @@ try {
   assert.match(routeSource, /fetchGatewayDeployment\(\{ gatewayUrl: GATEWAY_URL \}\)/)
   assert.match(routeSource, /\/arena\/v1\/current/)
   assert.doesNotMatch(routeSource, /buildValidatorDeployment\(|ops_attestation_current/)
-  assert.doesNotMatch(routeSource, /github\.com|Sourcing_model|fetchLeadpoetCommitComparison|manifestHash/)
+  assert.doesNotMatch(routeSource, /github\.com|Sourcing_model|manifestHash/)
 
   const componentSource = await readFile(resolve('src/app/admin/_components/AdminResearchLab.tsx'), 'utf8')
   assert.match(componentSource, /Gateway release/)
