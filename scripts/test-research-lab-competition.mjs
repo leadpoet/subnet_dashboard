@@ -1119,7 +1119,7 @@ try {
   }] })[0]
   const rejectionCases = [
     ['hardcoded_prepared_answers', 'prepared answers', 'Remove stored answers'],
-    ['fabricated_evidence', 'fabricated evidence', 'Do not substitute ICP requirements for company facts. Preserve uncertainty and return only source-supported claims.'],
+    ['fabricated_evidence', 'unsupported claims or evidence', 'Ground each claimed offering in retrieved company evidence, or remove the unsupported factual premise.'],
     ['malicious_behavior', 'disallowed code behavior', 'Remove the disallowed behavior'],
     ['reviewer_manipulation', 'review interference', 'Remove instructions or code'],
     ['duplicate_submission', 'duplicate submission', 'Make a meaningful behavior improvement before submitting again; cosmetic edits alone do not qualify.'],
@@ -1142,6 +1142,30 @@ try {
       assert.equal(submission.finalScore, null)
       assert.equal(submission.code.available, false)
     }
+  }
+  // November 9 public category shape, without private source or reviewer prose.
+  for (const submission_id of ['sub-f29c7cb94498a4143fda5a09601bdeb7', 'sub-95b894c1405c212f89115bdeeaec18f6']) {
+    const submission = normalizeCompetitionSubmissions({ submissions: [{
+      submission_id, miner_hotkey: '5PublicFixture', status: 'review_rejected',
+      is_baseline: false, stage1_score: null, final_score: null, is_champion: false,
+      code: { available: false, available_at: null, url: null },
+      code_review: { status: 'rejected', categories: ['fabricated_evidence'], admission_reason: 'source_policy_violation' },
+    }] })[0]
+    assert.equal(competitionSubmissionStatusLabel(submission, pendingRound), 'Rejected: unsupported claims or evidence')
+    const notice = competitionSubmissionEvaluationNotice(submission, pendingRound)
+    assert.match(notice, /For example, describing a company as already offering the product requested by the ICP needs company evidence/)
+    assert.match(notice, /This is an example of the rule, not the specific finding for this submission/)
+    assert.match(notice, /Ground each claimed offering in retrieved company evidence, or remove the unsupported factual premise/)
+    assert.doesNotMatch(notice, /fraud|deceiv|fabricated|private-file|tyche_arena/)
+  }
+  for (const [review, status, label] of [
+    [{ status: 'passed', categories: ['fabricated_evidence'] }, 'queued', 'Queued for validation'],
+    [{ status: 'error', error_code: 'code_review_provider_refused', categories: ['fabricated_evidence'] }, 'review_failed', 'Code review failed · provider declined request'],
+    [{ status: 'rejected', categories: ['future_private_category'] }, 'review_rejected', 'Code review rejected'],
+  ]) {
+    const submission = normalizePendingReview(review, status)
+    assert.equal(competitionSubmissionStatusLabel(submission, pendingRound), label)
+    assert.doesNotMatch(competitionSubmissionEvaluationNotice(submission, pendingRound) ?? '', /claimed offering|future_private_category/)
   }
   const reasonCases = [
     ['model_directed_research_required', 'review_rejected', 'Not qualified: model-directed research required', 'model decisions select research actions'],
@@ -1186,7 +1210,7 @@ try {
     const table = renderToStaticMarkup(React.createElement(renderedModule.exports.SubmissionTable, {
       submissions: normalized, round: pendingRound, selectedId: null, onSelect() {},
     }))
-    assert.equal(table.split('Rejected: fabricated evidence').length - 1, 16, 'all eight recorded reasons must render in desktop and mobile cells')
+    assert.equal(table.split('Rejected: unsupported claims or evidence').length - 1, 16, 'all eight recorded reasons must render in desktop and mobile cells')
     assert.equal(table.split(hostReasonsAvailable ? 'Review evidence could not be verified' : 'Code review failed · invalid reviewer response').length - 1, 2, 'the ninth incomplete review must have a different desktop and mobile label')
     for (const [index, submission] of normalized.entries()) {
       assert.equal(submission.finalScore, null)
@@ -1198,7 +1222,7 @@ try {
       const source = renderToStaticMarkup(React.createElement(renderedModule.exports.SourcePanel, {
         submission, cancelled: false, code: null, codeState: 'idle', selectedFile: null, onSelectFile() {}, onRequest() {},
       }))
-      assert.ok(details.includes(index < 8 ? 'Do not substitute ICP requirements for company facts' : 'no code violation was confirmed'))
+      assert.ok(details.includes(index < 8 ? 'Ground each claimed offering in retrieved company evidence' : 'no code violation was confirmed'))
       assert.ok(source.includes('Source was not published because this submission was not evaluated'))
       assert.doesNotMatch(table + details + source, /View source|Source locked|retrying|>0\.00</)
     }
