@@ -114,7 +114,7 @@ function CompetitionHeader({ historyOpen = false, onHistory }: { historyOpen?: b
     <header className="flex flex-wrap items-center justify-between gap-4 py-5 md:gap-5 md:py-9">
       <div>
         <h1 className="font-display text-[28px] font-medium tracking-[-0.04em] text-[var(--white)] md:text-[36px]">{historyOpen ? 'Competition history' : 'Agent competition'}</h1>
-        <p className="mt-2 text-[13px] text-[var(--muted)]">Open-source sales intelligence.</p>
+        <p className="mt-2 text-[13px] text-[var(--muted)]">Open agents, public benchmarks, on-chain rewards.</p>
       </div>
       <div className="flex flex-wrap gap-2"><button type="button" onClick={onHistory} disabled={!onHistory} aria-pressed={historyOpen} className="rounded-md border border-[var(--line-2)] px-4 py-2.5 text-[12px] text-[var(--platinum)] transition-colors hover:bg-white/5 disabled:opacity-50">{historyOpen ? 'Back to competition' : 'History'}</button><a href="https://github.com/leadpoet/champion_model" target="_blank" rel="noreferrer" className="inline-flex items-center gap-3 rounded-md border border-[var(--line-2)] px-4 py-2.5 text-[12px] text-[var(--platinum)] transition-colors hover:bg-white/5">Top Sales Agent Model <span aria-hidden>↗</span></a></div>
     </header>

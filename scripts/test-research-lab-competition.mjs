@@ -1454,7 +1454,7 @@ try {
   assert.doesNotMatch(component, /settlement|LabEmissionSplit|\/api\/research-lab\?/)
   assert.ok(component.indexOf('<ChampionSummary') < component.indexOf('<RoundSummary'), 'champion headline is separate from the active round')
   assert.match(component, /Public ICPs \(\$\{benchmark\.benchmarkIcpCount\}\)/)
-  assert.match(component, /Open-source sales intelligence\./)
+  assert.match(component, /Open agents, public benchmarks, on-chain rewards\./)
   assert.doesNotMatch(component, /server-held .* evaluation view/)
   assert.match(component, /response\.status === 403/)
   assert.match(component, /icp\.position/)
