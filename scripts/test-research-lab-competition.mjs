@@ -1494,6 +1494,9 @@ try {
   const live = normalizeCompetitionRewardSeats(liveSeats).seats
   assert.deepEqual(live.map((seat) => [seat.minimumImprovement, seat.baseSharePercent, seat.currentSharePercent, seat.halvings, seat.epochsToNextHalving]), [[20, 20, 20, 0, 25], [15, 15, 15, 0, 25], [8, 15, 15, 0, 25]])
   assert.equal(live[0].holder.improvement, 27.125)
+  const zeroPoolSeats = normalizeCompetitionRewardSeats({ ...liveSeats, reward_slot_policy: { ...liveSeats.reward_slot_policy, pool_percent: 0 } }).seats
+  assert.deepEqual(zeroPoolSeats.map((seat) => [seat.baseSharePercent, seat.currentSharePercent]), [[0, 0], [0, 0], [0, 0]], 'a valid legacy zero pool renders zero emissions')
+  assert.match(renderToStaticMarkup(React.createElement(renderedModule.exports.RewardSeats, { seats: { seats: zeroPoolSeats } })), /0%/)
 
   // The new signed contract allocates each tier directly from total emissions.
   // Keep the recorded 50% fixture intact to prove compatibility before activation.

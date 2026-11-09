@@ -644,7 +644,7 @@ export function normalizeCompetitionRewardSeats(value: unknown): CompetitionRewa
   const allocationBasis = policy.allocation_basis
   if (allocationBasis !== undefined && allocationBasis !== 'total_emissions') return null
   const poolPercent = policy.pool_percent === undefined ? 100 : integer(policy.pool_percent)
-  if (!poolPercent || poolPercent > 100 || (allocationBasis === 'total_emissions' && policy.pool_percent === undefined)) return null
+  if (poolPercent === null || poolPercent > 100 || (allocationBasis === 'total_emissions' && policy.pool_percent === undefined)) return null
   const clock = record(source.weekly_slot_decay)
   const clockSlots = Array.isArray(clock?.slots) && clock.slots.length === 3 ? clock.slots : null
   const epochsPerHalving = integer(clock?.epochs_per_halving)
