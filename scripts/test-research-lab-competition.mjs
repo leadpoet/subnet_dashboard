@@ -1119,7 +1119,7 @@ try {
   }] })[0]
   const rejectionCases = [
     ['hardcoded_prepared_answers', 'prepared answers', 'Remove stored answers'],
-    ['fabricated_evidence', 'unsupported claims or evidence', 'Ground each claimed offering in retrieved company evidence, or remove the unsupported factual premise.'],
+    ['fabricated_evidence', 'unsupported claims or evidence', 'Support each factual claim with retrieved source evidence, or remove the unsupported claim.'],
     ['malicious_behavior', 'disallowed code behavior', 'Remove the disallowed behavior'],
     ['reviewer_manipulation', 'review interference', 'Remove instructions or code'],
     ['duplicate_submission', 'duplicate submission', 'Make a meaningful behavior improvement before submitting again; cosmetic edits alone do not qualify.'],
@@ -1155,7 +1155,7 @@ try {
     const notice = competitionSubmissionEvaluationNotice(submission, pendingRound)
     assert.match(notice, /For example, describing a company as already offering the product requested by the ICP needs company evidence/)
     assert.match(notice, /This is an example of the rule, not the specific finding for this submission/)
-    assert.match(notice, /Ground each claimed offering in retrieved company evidence, or remove the unsupported factual premise/)
+    assert.match(notice, /Support each factual claim with retrieved source evidence, or remove the unsupported claim/)
     assert.doesNotMatch(notice, /fraud|deceiv|fabricated|private-file|tyche_arena/)
   }
   for (const [review, status, label] of [
@@ -1222,7 +1222,7 @@ try {
       const source = renderToStaticMarkup(React.createElement(renderedModule.exports.SourcePanel, {
         submission, cancelled: false, code: null, codeState: 'idle', selectedFile: null, onSelectFile() {}, onRequest() {},
       }))
-      assert.ok(details.includes(index < 8 ? 'Ground each claimed offering in retrieved company evidence' : 'no code violation was confirmed'))
+      assert.ok(details.includes(index < 8 ? 'Support each factual claim with retrieved source evidence' : 'no code violation was confirmed'))
       assert.ok(source.includes('Source was not published because this submission was not evaluated'))
       assert.doesNotMatch(table + details + source, /View source|Source locked|retrying|>0\.00</)
     }
