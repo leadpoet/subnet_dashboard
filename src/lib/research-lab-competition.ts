@@ -639,20 +639,26 @@ export function normalizeCompetitionRewardSeats(value: unknown): CompetitionRewa
   const tiers = policy?.tiers
   const slots = source?.reward_slots
   if (!source || !policy || !Array.isArray(tiers) || tiers.length !== 3 || !Array.isArray(slots) || slots.length !== 3) return null
-  // Older signed policies have no pool_percent: their tier percentages are already of total emissions.
+  // A missing basis retains the signed legacy within-pool arithmetic. The oldest
+  // policies also omit pool_percent, so their tiers already describe total emissions.
+  const allocationBasis = policy.allocation_basis
+  if (allocationBasis !== undefined && allocationBasis !== 'total_emissions') return null
   const poolPercent = policy.pool_percent === undefined ? 100 : integer(policy.pool_percent)
-  if (poolPercent === null) return null
+  if (!poolPercent || poolPercent > 100 || (allocationBasis === 'total_emissions' && policy.pool_percent === undefined)) return null
   const clock = record(source.weekly_slot_decay)
   const clockSlots = Array.isArray(clock?.slots) && clock.slots.length === 3 ? clock.slots : null
   const epochsPerHalving = integer(clock?.epochs_per_halving)
   const currentEpoch = source.epoch_eligible === true ? integer(source.current_epoch) : null
   const seats: CompetitionRewardSeat[] = []
+  let totalAllocationPercent = 0
   for (const [index, entry] of tiers.entries()) {
     const tier = record(entry)
     const minimumImprovement = integer(tier?.minimum_improvement)
     const allocationPercent = integer(tier?.allocation_percent)
-    if (!minimumImprovement || !allocationPercent) return null
-    const baseSharePercent = poolPercent * allocationPercent / 100
+    if (!minimumImprovement || minimumImprovement > 100 || !allocationPercent || allocationPercent > 100) return null
+    if (index > 0 && minimumImprovement >= seats[index - 1].minimumImprovement) return null
+    totalAllocationPercent += allocationPercent
+    const baseSharePercent = allocationBasis === 'total_emissions' ? allocationPercent : poolPercent * allocationPercent / 100
     const seat: CompetitionRewardSeat = { minimumImprovement, baseSharePercent, currentSharePercent: null, halvings: null, epochsToNextHalving: null, holder: null }
     if (slots[index] !== null) {
       const achievement = record(slots[index])
@@ -673,6 +679,7 @@ export function normalizeCompetitionRewardSeats(value: unknown): CompetitionRewa
     }
     seats.push(seat)
   }
+  if (totalAllocationPercent !== (allocationBasis === 'total_emissions' ? poolPercent : 100)) return null
   return { seats }
 }
 

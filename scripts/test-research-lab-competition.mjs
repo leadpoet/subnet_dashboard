@@ -1495,6 +1495,31 @@ try {
   assert.deepEqual(live.map((seat) => [seat.minimumImprovement, seat.baseSharePercent, seat.currentSharePercent, seat.halvings, seat.epochsToNextHalving]), [[20, 20, 20, 0, 25], [15, 15, 15, 0, 25], [8, 15, 15, 0, 25]])
   assert.equal(live[0].holder.improvement, 27.125)
 
+  // The new signed contract allocates each tier directly from total emissions.
+  // Keep the recorded 50% fixture intact to prove compatibility before activation.
+  const totalEmissionsPolicy = {
+    ...liveSeats.reward_slot_policy,
+    allocation_basis: 'total_emissions',
+    pool_percent: 75,
+    tiers: [
+      { minimum_improvement: 15, allocation_percent: 35 },
+      { minimum_improvement: 10, allocation_percent: 25 },
+      { minimum_improvement: 5, allocation_percent: 15 },
+    ],
+  }
+  const newSeatsInput = { ...liveSeats, reward_slot_policy: totalEmissionsPolicy }
+  const newSeats = normalizeCompetitionRewardSeats(newSeatsInput).seats
+  assert.deepEqual(newSeats.map((seat) => [seat.minimumImprovement, seat.baseSharePercent, seat.currentSharePercent]), [[15, 35, 35], [10, 25, 25], [5, 15, 15]])
+  for (const [halvings, expected] of [[1, [17.5, 12.5, 7.5]], [2, [8.75, 6.25, 3.75]], [4, [2.1875, 1.5625, 0.9375]]]) {
+    const decayed = normalizeCompetitionRewardSeats({ ...newSeatsInput, current_epoch: 26183 + halvings * 140 }).seats
+    assert.deepEqual(decayed.map((seat) => seat.currentSharePercent), expected)
+    assert.deepEqual(decayed.map((seat) => seat.epochsToNextHalving), [140, 140, 140])
+  }
+  const newMarkup = renderToStaticMarkup(React.createElement(renderedModule.exports.RewardSeats, { seats: { seats: newSeats } }))
+  for (const threshold of [15, 10, 5]) assert.ok(newMarkup.includes(`+${threshold} or more`))
+  for (const share of [35, 25, 15]) assert.ok(newMarkup.includes(`${share}%`))
+  assert.doesNotMatch(newMarkup, /\+20 or more|\+8 or more/)
+
   // A smaller new champion takes only the +8 seat; each seat decays on its own clock.
   const newerWin = { ...liveSeats.reward_slots[2], miner_hotkey: '5NewerSmallWinner', submission_id: 'sub-newer', round_id: 'arena-2026-11-09', winner_score: 40, baseline_score: 31, start_epoch: 26290 }
   const split = {
@@ -1508,6 +1533,13 @@ try {
   assert.deepEqual([splitSeats[0].halvings, splitSeats[0].currentSharePercent], [2, 5])
   assert.equal(splitSeats[1].holder, null)
   assert.deepEqual([splitSeats[2].holder.minerHotkey, splitSeats[2].holder.improvement, splitSeats[2].halvings, splitSeats[2].currentSharePercent], ['5NewerSmallWinner', 9, 1, 7.5])
+  const newSplitSeats = normalizeCompetitionRewardSeats({ ...split, reward_slot_policy: totalEmissionsPolicy }).seats
+  assert.deepEqual(newSplitSeats.map((seat) => [seat.baseSharePercent, seat.currentSharePercent]), [[35, 8.75], [25, null], [15, 7.5]])
+  assert.deepEqual(newSplitSeats.map((seat) => seat.holder), splitSeats.map((seat) => seat.holder), 'policy changes preserve recorded seat holders and achievement scores')
+  const newSplitMarkup = renderToStaticMarkup(React.createElement(renderedModule.exports.RewardSeats, { seats: { seats: newSplitSeats } }))
+  assert.match(newSplitMarkup, /8\.75%/)
+  assert.match(newSplitMarkup, /Halved 2× from 35% · next halving in 133 epochs/)
+  assert.match(newSplitMarkup, /Halved 1× from 15% · next halving in 100 epochs/)
 
   // Decay is never guessed, and a signed policy without a pot keeps total-emissions arithmetic.
   const { weekly_slot_decay: _clock, ...withoutClock } = liveSeats
@@ -1518,6 +1550,22 @@ try {
   for (const malformed of [null, {}, { ...liveSeats, reward_slots: [null] }, { ...liveSeats, reward_slots: [{ miner_hotkey: '5X' }, null, null] }, { ...liveSeats, reward_slot_policy: { ...liveSeats.reward_slot_policy, tiers: [] } }]) {
     assert.equal(normalizeCompetitionRewardSeats(malformed), null, 'a seat response outside the contract shows no seats')
   }
+  const { pool_percent: _newPool, ...newPolicyWithoutPool } = totalEmissionsPolicy
+  for (const policy of [
+    { ...totalEmissionsPolicy, allocation_basis: null },
+    { ...totalEmissionsPolicy, allocation_basis: 'unknown' },
+    { ...totalEmissionsPolicy, pool_percent: 0 },
+    { ...totalEmissionsPolicy, pool_percent: 101 },
+    { ...totalEmissionsPolicy, pool_percent: 50 },
+    newPolicyWithoutPool,
+    { ...totalEmissionsPolicy, tiers: totalEmissionsPolicy.tiers.map((tier, i) => i === 0 ? { ...tier, allocation_percent: 101 } : tier) },
+    { ...totalEmissionsPolicy, tiers: totalEmissionsPolicy.tiers.map((tier, i) => i === 0 ? { ...tier, allocation_percent: -1 } : tier) },
+    { ...totalEmissionsPolicy, tiers: totalEmissionsPolicy.tiers.map((tier, i) => i === 0 ? { ...tier, allocation_percent: 34.5 } : tier) },
+    { ...totalEmissionsPolicy, tiers: [...totalEmissionsPolicy.tiers].reverse() },
+    { ...totalEmissionsPolicy, tiers: totalEmissionsPolicy.tiers.map((tier) => ({ ...tier, minimum_improvement: 15 })) },
+    { ...liveSeats.reward_slot_policy, tiers: liveSeats.reward_slot_policy.tiers.map((tier, i) => i === 0 ? { ...tier, allocation_percent: 41 } : tier) },
+    { tiers: totalEmissionsPolicy.tiers },
+  ]) assert.equal(normalizeCompetitionRewardSeats({ ...liveSeats, reward_slot_policy: policy }), null, 'malformed reward policies must not display fabricated shares')
   assert.deepEqual([20, 1.25, 0.001].map(formatRewardSeatShare), ['20%', '1.25%', '<0.01%'])
 
   const seatsMarkup = renderToStaticMarkup(React.createElement(renderedModule.exports.RewardSeats, { seats: { seats: splitSeats } }))
