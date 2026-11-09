@@ -291,14 +291,14 @@ try {
   await act(async () => { roundSelect().props.onChange(nov6.round_id) })
   assert.equal(roundSelect().props.value, nov6.round_id)
   assert.ok(calls.some((url) => url.includes(`/rounds/${nov6.round_id}/submissions`)))
-  assert.equal(markup().split('Rejected: fabricated evidence').length - 1, 16, 'all eight recorded rejection labels remain visible in desktop and mobile cells')
+  assert.equal(markup().split('Rejected: unsupported claims or evidence').length - 1, 16, 'all eight recorded rejection labels remain visible in desktop and mobile cells')
   assert.match(markup(), /Code review failed · invalid reviewer response/)
   const scoreCells = renderer.root.findAllByType('td').filter((cell) => cell.props.className?.includes('text-right'))
   assert.equal(scoreCells.length, 9)
   assert.ok(scoreCells.every((cell) => renderedText(cell) === '—'), 'every excluded submission must retain its missing score')
   for (const row of reviewFixture.submissions) {
     await act(async () => { renderer.root.findAllByType('button').find((button) => button.props.title === row.submission_id).props.onClick() })
-    assert.match(markup(), row.status === 'review_rejected' ? /Do not substitute ICP requirements for company facts/ : /no code violation was confirmed/)
+    assert.match(markup(), row.status === 'review_rejected' ? /Support each factual claim with retrieved source evidence/ : /no code violation was confirmed/)
     assert.match(markup(), /Source was not published because this submission was not evaluated/)
     assert.doesNotMatch(markup(), /View source|0\.00/)
   }
