@@ -45,7 +45,7 @@ export const metadata: Metadata = {
     'Open agent competition, benchmarks and auditable results from Leadpoet on Bittensor Subnet 71.',
   applicationName: 'Leadpoet Subnet Dashboard',
   icons: {
-    icon: '/icon.png',
+    icon: '/icon.png?v=2',
     apple: '/icon-64.png',
   },
   openGraph: {
