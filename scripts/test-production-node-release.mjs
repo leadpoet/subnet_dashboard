@@ -12,7 +12,7 @@ assert.ok(app, 'production PM2 app exists')
 assert.equal(app.exec_mode, 'fork')
 assert.equal(app.instances, 1)
 assert.equal(app.interpreter, path.join(
-  os.homedir(), '.local', 'leadpoet-node', `v22.23.4-linux-${process.arch}`, 'bin', 'node',
+  os.homedir(), '.local', 'subnet71-node', `v22.23.4-linux-${process.arch}`, 'bin', 'node',
 ))
 
 const deploy = readFileSync('.github/workflows/deploy.yml', 'utf8')

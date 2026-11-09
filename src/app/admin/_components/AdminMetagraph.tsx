@@ -275,7 +275,7 @@ export function AdminMetagraph() {
         throw new Error(payload.error || `Subnet epoch API returned ${response.status}`)
       }
       if (
-        payload.schemaVersion !== 'leadpoet.subnet_epoch_state.v1' ||
+        payload.schemaVersion !== 'subnet71.subnet_epoch_state.v1' ||
         payload.headKind !== 'best' ||
         !Number.isSafeInteger(payload.subnetEpochIndex) ||
         !Number.isSafeInteger(payload.blocksElapsed) ||
@@ -333,11 +333,11 @@ export function AdminMetagraph() {
     }
     const handleAdminRefresh = () => void refreshAll()
     document.addEventListener('visibilitychange', handleVisibility)
-    window.addEventListener('leadpoet-admin-refresh', handleAdminRefresh)
+    window.addEventListener('subnet71-admin-refresh', handleAdminRefresh)
     return () => {
       window.clearInterval(interval)
       document.removeEventListener('visibilitychange', handleVisibility)
-      window.removeEventListener('leadpoet-admin-refresh', handleAdminRefresh)
+      window.removeEventListener('subnet71-admin-refresh', handleAdminRefresh)
     }
   }, [refreshAll])
 

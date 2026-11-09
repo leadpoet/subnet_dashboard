@@ -93,7 +93,7 @@ const baseline = { submission_id: 'baseline', miner_hotkey: '5Baseline', status:
 const competitor = { submission_id: 'competitor', miner_hotkey: '5Competitor', status: 'scoring', evaluation: { state: 'queued', validators: [] }, code: { available: false } }
 let benchmarkGated = true
 const publicResponse = (url) => {
-  if (url.endsWith('/metagraph')) return Response.json({ hotkeyToUid: { '5Validator': 0 }, names: { '5Validator': 'Leadpoet' } })
+  if (url.endsWith('/metagraph')) return Response.json({ hotkeyToUid: { '5Validator': 0 }, names: { '5Validator': 'Subnet 71' } })
   if (url.endsWith('/competition')) return Response.json(snapshot)
   const roundId = url.match(/\/rounds\/([^/]+)/)?.[1]
   if (url.endsWith('/submissions')) return Response.json({ round_id: roundId, submissions: [baseline, competitor] })
@@ -225,7 +225,7 @@ try {
   await advance(60_000)
   assert.match(markup(), /Evaluating/)
   assert.doesNotMatch(markup(), /Evaluation activity|more active models|File state not recorded/)
-  assert.match(markup(), /Leadpoet/)
+  assert.match(markup(), /Subnet 71/)
   assert.equal(calls.length, 5, 'one public polling cycle makes only summary and submissions requests')
   assert.equal(count('/metagraph'), 1, 'validator identity polling is shared and less frequent than progress polling')
   assert.equal(count('/results/baseline'), 0)

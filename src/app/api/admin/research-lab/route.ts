@@ -12,7 +12,7 @@ export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
 const GATEWAY_URL = (
-  process.env.LEADPOET_GATEWAY_URL?.trim() || 'https://gateway.subnet71.com'
+  process.env.SUBNET71_GATEWAY_URL?.trim() || 'https://gateway.subnet71.com'
 ).replace(/\/+$/, '')
 
 export type AdminResearchLabPayload = {

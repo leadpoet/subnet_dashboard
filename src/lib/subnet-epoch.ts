@@ -13,7 +13,7 @@ export interface SubnetEpochPosition {
 }
 
 export interface SubnetEpochSnapshot extends SubnetEpochPosition {
-  schemaVersion: 'leadpoet.subnet_epoch_state.v1'
+  schemaVersion: 'subnet71.subnet_epoch_state.v1'
   headKind: 'best'
   netuid: number
   blockHash: string

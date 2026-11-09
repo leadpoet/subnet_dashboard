@@ -83,9 +83,9 @@ class WeightsAlertIncidentStateTest(unittest.TestCase):
         messages = []
         registry = [
             {
-                "id": "leadpoet-primary",
+                "id": "sn71-primary",
                 "role": "primary",
-                "label": "primary (Leadpoet)",
+                "label": "primary (Subnet 71)",
                 "hotkey": "hotkey-primary",
                 "expectedColdkey": "coldkey-primary",
             },
@@ -150,7 +150,7 @@ class WeightsAlertIncidentStateTest(unittest.TestCase):
         self.assertEqual(len(messages), 1)
         self.assertIn("official epoch 24172 completed", messages[0])
         self.assertIn("checked at epoch 24173, block 14/360", messages[0])
-        self.assertIn("primary (Leadpoet)", messages[0])
+        self.assertIn("primary (Subnet 71)", messages[0])
         self.assertIn("auditor (TAO.com)", messages[0])
         self.assertIn("426 blocks since last set", messages[0])
         self.assertIn("427 blocks since last set", messages[0])
@@ -176,9 +176,9 @@ class WeightsAlertIncidentStateTest(unittest.TestCase):
 
         registry = [
             {
-                "id": "leadpoet-primary",
+                "id": "sn71-primary",
                 "role": "primary",
-                "label": "primary (Leadpoet)",
+                "label": "primary (Subnet 71)",
                 "hotkey": "hotkey-primary",
                 "expectedColdkey": "coldkey-primary",
             },
@@ -282,15 +282,15 @@ class WeightsAlertIncidentStateTest(unittest.TestCase):
                 return Metagraph()
 
             def query_identity(self, coldkey):
-                return types.SimpleNamespace(name="Leadpoet")
+                return types.SimpleNamespace(name="Subnet 71")
 
         state = {}
         messages = []
         registry = [
             {
-                "id": "leadpoet-primary",
+                "id": "sn71-primary",
                 "role": "primary",
-                "label": "primary (Leadpoet)",
+                "label": "primary (Subnet 71)",
                 "hotkey": "hotkey-primary",
                 "expectedColdkey": "coldkey-primary",
             }
@@ -331,9 +331,9 @@ class WeightsAlertIncidentStateTest(unittest.TestCase):
         self.assertEqual(len(messages), 1)
         self.assertIn("official epoch 24090 completed", messages[0])
         self.assertIn("430 blocks since last set", messages[0])
-        self.assertIn("primary (Leadpoet)", messages[0])
+        self.assertIn("primary (Subnet 71)", messages[0])
         self.assertEqual(
-            state["leadpoet-primary"],
+            state["sn71-primary"],
             ["weight_update_stale:1000"],
         )
 
@@ -406,9 +406,9 @@ class WeightsAlertIncidentStateTest(unittest.TestCase):
         state = {}
         stale_incident = ["weight_update_stale:1000"]
 
-        self.assertTrue(update_incident_state(state, "leadpoet-primary", stale_incident))
+        self.assertTrue(update_incident_state(state, "sn71-primary", stale_incident))
         self.assertFalse(
-            update_incident_state(state, "leadpoet-primary", stale_incident),
+            update_incident_state(state, "sn71-primary", stale_incident),
             "active-state identity must remain stable when only age and epoch change",
         )
 
@@ -417,30 +417,30 @@ class WeightsAlertIncidentStateTest(unittest.TestCase):
         incident_keys = ["weight_update_stale:1000"]
 
         self.assertTrue(
-            incidents_due_for_epoch(deliveries, "leadpoet-primary", incident_keys, 24_172)
+            incidents_due_for_epoch(deliveries, "sn71-primary", incident_keys, 24_172)
         )
         mark_incidents_delivered(
-            deliveries, "leadpoet-primary", incident_keys, 24_172
+            deliveries, "sn71-primary", incident_keys, 24_172
         )
         self.assertFalse(
-            incidents_due_for_epoch(deliveries, "leadpoet-primary", incident_keys, 24_172),
+            incidents_due_for_epoch(deliveries, "sn71-primary", incident_keys, 24_172),
             "a successful delivery must not repeat during the same completed epoch",
         )
         self.assertTrue(
-            incidents_due_for_epoch(deliveries, "leadpoet-primary", incident_keys, 24_173),
+            incidents_due_for_epoch(deliveries, "sn71-primary", incident_keys, 24_173),
             "an unresolved incident must remind after the next epoch completes",
         )
 
     def test_late_same_epoch_problem_does_not_redeliver_prior_incident_key(self):
         deliveries = {
-            "leadpoet-primary": {"weight_update_stale:1000": 24_172}
+            "sn71-primary": {"weight_update_stale:1000": 24_172}
         }
         incident_keys = ["validator_inactive", "weight_update_stale:1000"]
 
         self.assertEqual(
             incident_keys_due_for_epoch(
                 deliveries,
-                "leadpoet-primary",
+                "sn71-primary",
                 incident_keys,
                 24_172,
             ),
@@ -449,7 +449,7 @@ class WeightsAlertIncidentStateTest(unittest.TestCase):
 
     def test_legacy_active_incidents_seed_delivery_epoch_without_replay(self):
         state = {
-            "leadpoet-primary": ["weight_update_stale:1000"],
+            "sn71-primary": ["weight_update_stale:1000"],
             LAST_ALERT_EPOCH_KEY: 24_172,
         }
 
@@ -457,13 +457,13 @@ class WeightsAlertIncidentStateTest(unittest.TestCase):
 
         self.assertEqual(
             deliveries,
-            {"leadpoet-primary": {"weight_update_stale:1000": 24_172}},
+            {"sn71-primary": {"weight_update_stale:1000": 24_172}},
         )
         self.assertEqual(state[INCIDENT_DELIVERY_EPOCHS_KEY], deliveries)
         self.assertFalse(
             incidents_due_for_epoch(
                 deliveries,
-                "leadpoet-primary",
+                "sn71-primary",
                 ["weight_update_stale:1000"],
                 24_172,
             )
@@ -471,7 +471,7 @@ class WeightsAlertIncidentStateTest(unittest.TestCase):
         self.assertTrue(
             incidents_due_for_epoch(
                 deliveries,
-                "leadpoet-primary",
+                "sn71-primary",
                 ["weight_update_stale:1000"],
                 24_173,
             )
@@ -479,21 +479,21 @@ class WeightsAlertIncidentStateTest(unittest.TestCase):
 
     def test_recovery_prunes_delivery_state_for_recurrence(self):
         deliveries = {
-            "leadpoet-primary": {"weight_update_stale:1000": 24_172}
+            "sn71-primary": {"weight_update_stale:1000": 24_172}
         }
 
-        sync_incident_delivery_epochs(deliveries, "leadpoet-primary", [])
-        self.assertNotIn("leadpoet-primary", deliveries)
+        sync_incident_delivery_epochs(deliveries, "sn71-primary", [])
+        self.assertNotIn("sn71-primary", deliveries)
 
         sync_incident_delivery_epochs(
             deliveries,
-            "leadpoet-primary",
+            "sn71-primary",
             ["weight_update_stale:1000"],
         )
         self.assertTrue(
             incidents_due_for_epoch(
                 deliveries,
-                "leadpoet-primary",
+                "sn71-primary",
                 ["weight_update_stale:1000"],
                 24_172,
             ),
@@ -501,25 +501,25 @@ class WeightsAlertIncidentStateTest(unittest.TestCase):
         )
 
     def test_new_last_set_block_creates_a_new_stale_episode(self):
-        state = {"leadpoet-primary": ["weight_update_stale:1000"]}
+        state = {"sn71-primary": ["weight_update_stale:1000"]}
 
         self.assertTrue(
             update_incident_state(
                 state,
-                "leadpoet-primary",
+                "sn71-primary",
                 ["weight_update_stale:1360"],
             )
         )
 
     def test_recovery_clears_incident_for_a_later_recurrence(self):
-        state = {"leadpoet-primary": ["weight_update_stale:1000"]}
+        state = {"sn71-primary": ["weight_update_stale:1000"]}
 
-        self.assertFalse(update_incident_state(state, "leadpoet-primary", []))
-        self.assertNotIn("leadpoet-primary", state)
+        self.assertFalse(update_incident_state(state, "sn71-primary", []))
+        self.assertNotIn("sn71-primary", state)
         self.assertTrue(
             update_incident_state(
                 state,
-                "leadpoet-primary",
+                "sn71-primary",
                 ["weight_update_stale:1000"],
             )
         )
@@ -540,17 +540,17 @@ class WeightsAlertIncidentStateTest(unittest.TestCase):
         )
 
     def test_legacy_epoch_state_migrates_without_replaying(self):
-        state = {"leadpoet-primary": 24091}
+        state = {"sn71-primary": 24091}
 
         self.assertFalse(
             update_incident_state(
                 state,
-                "leadpoet-primary",
+                "sn71-primary",
                 ["weight_update_stale:1000"],
             )
         )
         self.assertEqual(
-            state["leadpoet-primary"],
+            state["sn71-primary"],
             ["weight_update_stale:1000"],
         )
 
@@ -570,13 +570,13 @@ class WeightsAlertIncidentStateTest(unittest.TestCase):
                 return Metagraph()
 
             def query_identity(self, coldkey):
-                return types.SimpleNamespace(name="Leadpoet")
+                return types.SimpleNamespace(name="Subnet 71")
 
         registry = [
             {
-                "id": "leadpoet-primary",
+                "id": "sn71-primary",
                 "role": "primary",
-                "label": "primary (Leadpoet)",
+                "label": "primary (Subnet 71)",
                 "hotkey": "hotkey-primary",
                 "expectedColdkey": "coldkey-primary",
             }
@@ -624,7 +624,7 @@ class WeightsAlertIncidentStateTest(unittest.TestCase):
         self.assertIn("missed weight set reminder", messages[1])
         self.assertIn("official epoch 24173 completed", messages[1])
         self.assertEqual(
-            state[INCIDENT_DELIVERY_EPOCHS_KEY]["leadpoet-primary"],
+            state[INCIDENT_DELIVERY_EPOCHS_KEY]["sn71-primary"],
             {"weight_update_stale:9948": 24_173},
         )
         self.assertEqual(state[LAST_ALERT_EPOCH_KEY], 24_173)
@@ -650,13 +650,13 @@ class WeightsAlertIncidentStateTest(unittest.TestCase):
                 return Metagraph()
 
             def query_identity(self, coldkey):
-                return types.SimpleNamespace(name="Leadpoet")
+                return types.SimpleNamespace(name="Subnet 71")
 
         registry = [
             {
-                "id": "leadpoet-primary",
+                "id": "sn71-primary",
                 "role": "primary",
-                "label": "primary (Leadpoet)",
+                "label": "primary (Subnet 71)",
                 "hotkey": "hotkey-primary",
                 "expectedColdkey": "coldkey-primary",
             }
@@ -703,7 +703,7 @@ class WeightsAlertIncidentStateTest(unittest.TestCase):
             self.assertEqual(weights_alert.main(), 0)
             self.assertNotIn(LAST_ALERT_EPOCH_KEY, state)
             self.assertEqual(
-                state[INCIDENT_DELIVERY_EPOCHS_KEY]["leadpoet-primary"],
+                state[INCIDENT_DELIVERY_EPOCHS_KEY]["sn71-primary"],
                 {},
                 "a failed webhook must leave the incident pending",
             )
@@ -715,7 +715,7 @@ class WeightsAlertIncidentStateTest(unittest.TestCase):
         self.assertTrue(any(message.startswith("ALERTED:") for message in logs))
         self.assertEqual(state[LAST_ALERT_EPOCH_KEY], 24_172)
         self.assertEqual(
-            state[INCIDENT_DELIVERY_EPOCHS_KEY]["leadpoet-primary"],
+            state[INCIDENT_DELIVERY_EPOCHS_KEY]["sn71-primary"],
             {"weight_update_stale:9948": 24_172},
         )
         self.assertEqual(state[HEARTBEAT_KEY]["status"], "alert_delivered")
@@ -749,9 +749,9 @@ class WeightsAlertIncidentStateTest(unittest.TestCase):
 
         registry = [
             {
-                "id": "leadpoet-primary",
+                "id": "sn71-primary",
                 "role": "primary",
-                "label": "primary (Leadpoet)",
+                "label": "primary (Subnet 71)",
                 "hotkey": "hotkey-primary",
                 "expectedColdkey": "coldkey-primary",
             },
@@ -798,11 +798,11 @@ class WeightsAlertIncidentStateTest(unittest.TestCase):
             self.assertEqual(weights_alert.main(), 0)
 
         self.assertEqual(len(messages), 2)
-        self.assertIn("primary (Leadpoet)", messages[0])
+        self.assertIn("primary (Subnet 71)", messages[0])
         self.assertNotIn("auditor ·", messages[0])
         self.assertIn("auditor · current UID 1", messages[1])
         self.assertIn("validator inactive", messages[1])
-        self.assertNotIn("primary (Leadpoet)", messages[1])
+        self.assertNotIn("primary (Subnet 71)", messages[1])
         self.assertEqual(
             state[INCIDENT_DELIVERY_EPOCHS_KEY]["auditor"],
             {"validator_inactive": 24_172},

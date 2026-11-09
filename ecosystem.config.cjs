@@ -6,7 +6,7 @@ const nextDistDir = process.env.NEXT_DIST_DIR || ".next";
 const nodeInterpreter = path.join(
   os.homedir(),
   ".local",
-  "leadpoet-node",
+  "subnet71-node",
   `v22.23.4-linux-${process.arch}`,
   "bin",
   "node",

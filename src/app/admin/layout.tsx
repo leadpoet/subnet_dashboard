@@ -3,7 +3,7 @@ import Link from 'next/link'
 import { AdminHeaderActions } from './_components/AdminHeaderActions'
 
 export const metadata: Metadata = {
-  title: 'Leadpoet Admin Portal',
+  title: 'Subnet 71 Admin Portal',
   robots: { index: false, follow: false },
 }
 
@@ -45,7 +45,7 @@ export default function AdminLayout({
                   className="text-sm font-medium truncate"
                   style={{ color: 'var(--text-primary)' }}
                 >
-                  Leadpoet Admin Portal
+                  Subnet 71 Admin Portal
                 </span>
               </div>
             </Link>

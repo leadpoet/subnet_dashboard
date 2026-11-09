@@ -584,15 +584,15 @@ try {
   assert.equal(unknownVersion.evaluation.codeVersions[0].commit, null)
   assert.equal(unknownVersion.evaluation.codeVersions[0].workingTree, 'unknown')
   assert.deepEqual(evaluationRow({ state: 'completed', validators: [], code_versions: [{ ...evaluationVersion, phase: 'unknown' }] }, 'scored').evaluation.codeVersions, [])
-  const validatorNames = normalizeValidatorNames({ names: { [primaryHotkey]: 'Leadpoet', [yumaHotkey]: 'Yuma', ghost: 'Wrong identity' }, hotkeyToUid: { [primaryHotkey]: 0, [yumaHotkey]: 155 } })
-  assert.deepEqual(validatorNames, { [primaryHotkey]: 'Leadpoet', [yumaHotkey]: 'Yuma' })
-  assert.deepEqual(normalizeValidatorNames({ names: { [primaryHotkey]: 'Leadpoet' } }), {})
+  const validatorNames = normalizeValidatorNames({ names: { [primaryHotkey]: 'Subnet 71', [yumaHotkey]: 'Yuma', ghost: 'Wrong identity' }, hotkeyToUid: { [primaryHotkey]: 0, [yumaHotkey]: 155 } })
+  assert.deepEqual(validatorNames, { [primaryHotkey]: 'Subnet 71', [yumaHotkey]: 'Yuma' })
+  assert.deepEqual(normalizeValidatorNames({ names: { [primaryHotkey]: 'Subnet 71' } }), {})
   const withNames = (node) => React.createElement(renderedModule.exports.ValidatorNamesContext.Provider, { value: validatorNames }, node)
   const progressMarkup = renderToStaticMarkup(withNames(React.createElement(renderedModule.exports.SubmissionTable, {
     submissions: [evaluating, { ...queued, submissionId: 'waiting' }], round: pendingRound, selectedId: null, onSelect() {},
   })))
   assert.match(progressMarkup, /Evaluating/)
-  assert.match(progressMarkup, /Scoring · .*Leadpoet/)
+  assert.match(progressMarkup, /Scoring · .*Subnet 71/)
   assert.match(progressMarkup, /Running · .*Yuma/)
   assert.match(progressMarkup, /Queued for validation/)
   assert.doesNotMatch(progressMarkup, /Commit not recorded|checkout state unknown/, 'live rows show status and validator, without missing technical metadata')
@@ -600,14 +600,14 @@ try {
     submissions: [versionedEvaluation], round: pendingRound, selectedId: null, onSelect() {},
   })))
   assert.doesNotMatch(activeVersionMarkup, /local modifications|\/commit\//)
-  assert.match(activeVersionMarkup, /Running · .*Leadpoet/)
+  assert.match(activeVersionMarkup, /Running · .*Subnet 71/)
   assert.match(activeVersionMarkup, /retrying tasks/)
   const multiVersionMarkup = renderToStaticMarkup(withNames(React.createElement(renderedModule.exports.SubmissionTable, {
     submissions: [multiVersionEvaluation], round: pendingRound, selectedId: null, onSelect() {},
   })))
   assert.match(multiVersionMarkup, /Evaluating/)
   assert.doesNotMatch(multiVersionMarkup, /bbbbbbbbbbbb|cccccccccccc|Uncommitted files detected|File state not recorded/)
-  assert.equal((multiVersionMarkup.match(/Leadpoet/g) ?? []).length, 2, 'each mutually exclusive mobile/desktop status shows a validator once per phase')
+  assert.equal((multiVersionMarkup.match(/Subnet 71/g) ?? []).length, 2, 'each mutually exclusive mobile/desktop status shows a validator once per phase')
   assert.match(multiVersionMarkup, /Scoring · .*Yuma/)
   const archivedVersionMarkup = renderToStaticMarkup(withNames(React.createElement(renderedModule.exports.EvaluationRunSummary, { submission: completedEvaluation })))
   assert.match(archivedVersionMarkup, /Execution/)
@@ -639,7 +639,7 @@ try {
   assert.deepEqual(renderedModule.exports.filterSubmissions(rowsWithBaselineLast, '5VerifiedDefender', 'all', searchDefenderRound), [baselineRow], 'the defending row is searchable by its displayed miner')
   assert.deepEqual(renderedModule.exports.filterSubmissions([baselineRow], baselineRow.minerHotkey, 'all', searchDefenderRound), [], 'the organizer key must not match the defending miner filter')
   const namedAttribution = renderToStaticMarkup(withNames(React.createElement(renderedModule.exports.ScoringAttributionSummary, { attribution: attributedResults.scoringAttribution })))
-  assert.match(namedAttribution, /Leadpoet \(5FNVgRnrx…xEBLo9\), Yuma \(5Chnr6Y72…LmU4BW\)/)
+  assert.match(namedAttribution, /Subnet 71 \(5FNVgRnrx…xEBLo9\), Yuma \(5Chnr6Y72…LmU4BW\)/)
   assert.match(namedAttribution, new RegExp(primaryHotkey), 'full hotkeys remain available in expanded attribution')
 
   const renderSummary = (round) => renderToStaticMarkup(React.createElement(renderedModule.exports.RoundSummary, { round }))

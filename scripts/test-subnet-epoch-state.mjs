@@ -129,7 +129,7 @@ try {
 
   useScenario()
   const official = await fetchFreshSubnetEpochState()
-  assert.equal(official.schemaVersion, 'leadpoet.subnet_epoch_state.v1')
+  assert.equal(official.schemaVersion, 'subnet71.subnet_epoch_state.v1')
   assert.equal(official.headKind, 'best')
   assert.equal(official.netuid, 71)
   assert.equal(official.currentBlock, 8_637_160)
@@ -267,7 +267,7 @@ try {
   assert.match(uiSource, /Data refreshed \{lastRefreshAt/)
   assert.match(uiSource, /onClick=\{\(\) => void refreshAll\(\)\}/)
   assert.equal(
-    (uiSource.match(/addEventListener\('leadpoet-admin-refresh'/g) ?? []).length,
+    (uiSource.match(/addEventListener\('subnet71-admin-refresh'/g) ?? []).length,
     1,
     'validator and epoch data must share one admin-refresh listener',
   )
