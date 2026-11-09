@@ -35,6 +35,8 @@ try {
     normalizeCompetitionResults,
     normalizeCompetitionHistory,
     normalizeCompetitionSnapshot,
+    normalizeCompetitionRewardSeats,
+    formatRewardSeatShare,
     normalizeCompetitionSubmissions,
     normalizeValidatorNames,
     isCompetitionReviewExcluded,
@@ -371,7 +373,7 @@ try {
   const renderedModule = { exports: {} }
   vm.runInNewContext(ts.transpileModule(component, {
     compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX },
-  }).outputText + '\nexports.ValidatorNamesContext = ValidatorNamesContext; exports.ChampionScoreHistory = ChampionScoreHistory; exports.ScoreHistoryTooltip = ScoreHistoryTooltip; exports.RoundSummary = RoundSummary; exports.ChampionSummary = ChampionSummary; exports.SubmissionTable = SubmissionTable; exports.PublishedResults = PublishedResults; exports.ScoringAttributionSummary = ScoringAttributionSummary; exports.IcpList = IcpList; exports.CompanyDiagnostics = CompanyDiagnostics; exports.SourcePanel = SourcePanel; exports.EvaluationRunSummary = EvaluationRunSummary; exports.filterSubmissions = filterSubmissions;', {
+  }).outputText + '\nexports.ValidatorNamesContext = ValidatorNamesContext; exports.RewardSeats = RewardSeats; exports.ChampionScoreHistory = ChampionScoreHistory; exports.ScoreHistoryTooltip = ScoreHistoryTooltip; exports.RoundSummary = RoundSummary; exports.ChampionSummary = ChampionSummary; exports.SubmissionTable = SubmissionTable; exports.PublishedResults = PublishedResults; exports.ScoringAttributionSummary = ScoringAttributionSummary; exports.IcpList = IcpList; exports.CompanyDiagnostics = CompanyDiagnostics; exports.SourcePanel = SourcePanel; exports.EvaluationRunSummary = EvaluationRunSummary; exports.filterSubmissions = filterSubmissions;', {
     module: renderedModule, exports: renderedModule.exports,
     require(name) {
       if (name === '@/lib/research-lab-competition') return require(join(outDir, 'research-lab-competition.js'))
@@ -1486,6 +1488,44 @@ try {
   assert.doesNotMatch(component, /More 10 ICPs/)
   assert.doesNotMatch(component, />Stage 1</)
   assert.doesNotMatch(component, /outputs|run_results|judge_evidence/)
+
+  // Recorded public /arena/v1/current on 2026-11-09: one +27 win holds all three seats.
+  const liveSeats = JSON.parse(await readFile(resolve('scripts/fixtures/competition-reward-seats-20261109.json'), 'utf8'))
+  const live = normalizeCompetitionRewardSeats(liveSeats).seats
+  assert.deepEqual(live.map((seat) => [seat.minimumImprovement, seat.baseSharePercent, seat.currentSharePercent, seat.halvings, seat.epochsToNextHalving]), [[20, 20, 20, 0, 25], [15, 15, 15, 0, 25], [8, 15, 15, 0, 25]])
+  assert.equal(live[0].holder.improvement, 27.125)
+
+  // A smaller new champion takes only the +8 seat; each seat decays on its own clock.
+  const newerWin = { ...liveSeats.reward_slots[2], miner_hotkey: '5NewerSmallWinner', submission_id: 'sub-newer', round_id: 'arena-2026-11-09', winner_score: 40, baseline_score: 31, start_epoch: 26290 }
+  const split = {
+    ...liveSeats,
+    current_epoch: 26470,
+    reward_slots: [liveSeats.reward_slots[0], null, newerWin],
+    weekly_slot_decay: { epochs_per_halving: 140, slots: [{ start_epoch: 26183, source_normalized_sha256: 'sha256:a' }, null, { start_epoch: 26290, source_normalized_sha256: 'sha256:b' }] },
+  }
+  const splitSeats = normalizeCompetitionRewardSeats(split).seats
+  assert.equal(splitSeats[0].holder.minerHotkey, liveSeats.reward_slots[0].miner_hotkey)
+  assert.deepEqual([splitSeats[0].halvings, splitSeats[0].currentSharePercent], [2, 5])
+  assert.equal(splitSeats[1].holder, null)
+  assert.deepEqual([splitSeats[2].holder.minerHotkey, splitSeats[2].holder.improvement, splitSeats[2].halvings, splitSeats[2].currentSharePercent], ['5NewerSmallWinner', 9, 1, 7.5])
+
+  // Decay is never guessed, and a signed policy without a pot keeps total-emissions arithmetic.
+  const { weekly_slot_decay: _clock, ...withoutClock } = liveSeats
+  assert.deepEqual(normalizeCompetitionRewardSeats(withoutClock).seats.map((seat) => seat.currentSharePercent), [null, null, null])
+  assert.equal(normalizeCompetitionRewardSeats({ ...liveSeats, epoch_eligible: false }).seats[0].currentSharePercent, null)
+  const { pool_percent: _pool, ...noPool } = liveSeats.reward_slot_policy
+  assert.equal(normalizeCompetitionRewardSeats({ ...liveSeats, reward_slot_policy: noPool }).seats[0].baseSharePercent, 40)
+  for (const malformed of [null, {}, { ...liveSeats, reward_slots: [null] }, { ...liveSeats, reward_slots: [{ miner_hotkey: '5X' }, null, null] }, { ...liveSeats, reward_slot_policy: { ...liveSeats.reward_slot_policy, tiers: [] } }]) {
+    assert.equal(normalizeCompetitionRewardSeats(malformed), null, 'a seat response outside the contract shows no seats')
+  }
+  assert.deepEqual([20, 1.25, 0.001].map(formatRewardSeatShare), ['20%', '1.25%', '<0.01%'])
+
+  const seatsMarkup = renderToStaticMarkup(React.createElement(renderedModule.exports.RewardSeats, { seats: { seats: splitSeats } }))
+  assert.match(seatsMarkup, /\+20 or more/)
+  assert.match(seatsMarkup, /Halved 2× from 20% · next halving in 133 epochs/)
+  assert.match(seatsMarkup, /5NewerSmallWinner/)
+  assert.match(seatsMarkup, /Open\. No winner holds this seat/)
+  assert.match(renderToStaticMarkup(React.createElement(renderedModule.exports.RewardSeats, { seats: null })), /temporarily unavailable/)
 
   const proxy = await readFile(resolve('src/lib/arena-public-proxy.ts'), 'utf8')
   assert.match(proxy, /PUBLIC_ID/)

@@ -1,0 +1,72 @@
+{
+  "epoch_eligible": true,
+  "current_epoch": 26298,
+  "reward_slot_policy": {
+    "decay": {
+      "max_halvings": 4,
+      "epochs_per_halving": 140
+    },
+    "tiers": [
+      {
+        "allocation_percent": 40,
+        "minimum_improvement": 20
+      },
+      {
+        "allocation_percent": 30,
+        "minimum_improvement": 15
+      },
+      {
+        "allocation_percent": 30,
+        "minimum_improvement": 8
+      }
+    ],
+    "pool_percent": 50,
+    "assignment_mode": "all_qualifying"
+  },
+  "reward_slots": [
+    {
+      "round_id": "arena-2026-11-03",
+      "start_epoch": 26183,
+      "miner_hotkey": "5HDmNaBQNVQoyApQbFQdSx6pD4ajcJdaYDJePufpWvoxCsrq",
+      "winner_score": 29.575,
+      "submission_id": "sub-28594d902080fb5213f4344c09ffb531",
+      "baseline_score": 2.45,
+      "baseline_submission_id": "baseline-2026-11-03"
+    },
+    {
+      "round_id": "arena-2026-11-03",
+      "start_epoch": 26183,
+      "miner_hotkey": "5HDmNaBQNVQoyApQbFQdSx6pD4ajcJdaYDJePufpWvoxCsrq",
+      "winner_score": 29.575,
+      "submission_id": "sub-28594d902080fb5213f4344c09ffb531",
+      "baseline_score": 2.45,
+      "baseline_submission_id": "baseline-2026-11-03"
+    },
+    {
+      "round_id": "arena-2026-11-03",
+      "start_epoch": 26183,
+      "miner_hotkey": "5HDmNaBQNVQoyApQbFQdSx6pD4ajcJdaYDJePufpWvoxCsrq",
+      "winner_score": 29.575,
+      "submission_id": "sub-28594d902080fb5213f4344c09ffb531",
+      "baseline_score": 2.45,
+      "baseline_submission_id": "baseline-2026-11-03"
+    }
+  ],
+  "weekly_slot_decay": {
+    "slots": [
+      {
+        "start_epoch": 26183,
+        "source_normalized_sha256": "sha256:1047b383f4b32dbc38d19e5f052384174d4a9a89a7c48b4620cecb18714ed06d"
+      },
+      {
+        "start_epoch": 26183,
+        "source_normalized_sha256": "sha256:1047b383f4b32dbc38d19e5f052384174d4a9a89a7c48b4620cecb18714ed06d"
+      },
+      {
+        "start_epoch": 26183,
+        "source_normalized_sha256": "sha256:1047b383f4b32dbc38d19e5f052384174d4a9a89a7c48b4620cecb18714ed06d"
+      }
+    ],
+    "epochs_per_halving": 140
+  }
+}
