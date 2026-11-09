@@ -354,7 +354,7 @@ def post_discord(content: str) -> bool:
         # so identify as the monitor explicitly.
         headers={
             "Content-Type": "application/json",
-            "User-Agent": "leadpoet-sn71-weights-watch/1.0",
+            "User-Agent": "sn71-weights-watch/1.0",
         },
     )
     try:

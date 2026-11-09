@@ -267,7 +267,7 @@ try {
   assert.match(uiSource, /Data refreshed \{lastRefreshAt/)
   assert.match(uiSource, /onClick=\{\(\) => void refreshAll\(\)\}/)
   assert.equal(
-    (uiSource.match(/addEventListener\('leadpoet-admin-refresh'/g) ?? []).length,
+    (uiSource.match(/addEventListener\('subnet71-admin-refresh'/g) ?? []).length,
     1,
     'validator and epoch data must share one admin-refresh listener',
   )

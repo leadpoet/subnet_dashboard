@@ -72,7 +72,7 @@ export function DashboardClient() {
         <header className="py-6 md:py-8">
           <div className="flex items-center justify-between gap-4">
             <span className="font-display text-[20px] md:text-[22px] font-semibold tracking-[-0.02em] text-[var(--white)]">
-              Leadpoet<span className="ml-3 hidden border-l border-[var(--line-3)] pl-3 text-[12px] font-normal tracking-normal text-[var(--muted)] sm:inline">Research lab</span>
+              Subnet 71<span className="ml-3 hidden border-l border-[var(--line-3)] pl-3 text-[12px] font-normal tracking-normal text-[var(--muted)] sm:inline">Research lab</span>
             </span>
             <span className="font-mono text-[10px] md:text-[10.5px] uppercase tracking-[0.18em] text-[var(--muted-2)] whitespace-nowrap">
               SN&nbsp;71

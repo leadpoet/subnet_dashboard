@@ -333,11 +333,11 @@ export function AdminMetagraph() {
     }
     const handleAdminRefresh = () => void refreshAll()
     document.addEventListener('visibilitychange', handleVisibility)
-    window.addEventListener('leadpoet-admin-refresh', handleAdminRefresh)
+    window.addEventListener('subnet71-admin-refresh', handleAdminRefresh)
     return () => {
       window.clearInterval(interval)
       document.removeEventListener('visibilitychange', handleVisibility)
-      window.removeEventListener('leadpoet-admin-refresh', handleAdminRefresh)
+      window.removeEventListener('subnet71-admin-refresh', handleAdminRefresh)
     }
   }, [refreshAll])
 

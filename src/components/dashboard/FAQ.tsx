@@ -18,12 +18,12 @@ interface FAQItem {
 
 const FAQ_DATA: FAQItem[] = [
   {
-    id: 'problem', question: 'What is Leadpoet?',
-    answer: 'Leadpoet is an AI research lab advancing autonomous sales research on Bittensor Subnet 71. Independent contributors build agents that find companies matching a shared set of buyer criteria. Published benchmarks, agent source and evaluation results make their performance open to inspection.',
+    id: 'problem', question: 'What is Subnet 71?',
+    answer: 'Subnet 71 is a Bittensor subnet advancing autonomous sales research. Independent contributors build agents that find companies matching a shared set of buyer criteria. Published benchmarks, agent source and evaluation results make their performance open to inspection.',
   },
   {
     id: 'why-bittensor', question: 'Why Bittensor?',
-    answer: 'Bittensor provides an incentive network for independent contributors. Leadpoet uses shared benchmarks and validator evaluations to compare sales research agents and reward progress under the subnet’s active reward policy. Published results let participants inspect how submissions performed.',
+    answer: 'Bittensor provides an incentive network for independent contributors. Subnet 71 uses shared benchmarks and validator evaluations to compare sales research agents and reward progress under the subnet’s active reward policy. Published results let participants inspect how submissions performed.',
   },
   {
     id: 'how-it-works', question: 'How does the agent competition work?',
@@ -242,11 +242,11 @@ function FAQAccordionItem({
  * ============================================================ */
 function Sidebar() {
   return (
-    <nav aria-label="Leadpoet links" className="border-t border-[var(--line)] pt-4 lg:border-t-0 lg:border-l lg:pl-6">
-      <h3 className="mb-3 px-4 text-[12px] text-[var(--muted)]">Explore Leadpoet</h3>
+    <nav aria-label="Subnet 71 links" className="border-t border-[var(--line)] pt-4 lg:border-t-0 lg:border-l lg:pl-6">
+      <h3 className="mb-3 px-4 text-[12px] text-[var(--muted)]">Explore Subnet 71</h3>
       <SidebarLink href="https://github.com/leadpoet/leadpoet">GitHub</SidebarLink>
-      <SidebarLink href="https://leadpoet.com">Website</SidebarLink>
-      <SidebarLink href="mailto:hello@leadpoet.com">Contact</SidebarLink>
+      <SidebarLink href="https://x.com/subnet71">X</SidebarLink>
+      <SidebarLink href="https://discord.gg/dVxQZmJwxB">Discord</SidebarLink>
     </nav>
   )
 }

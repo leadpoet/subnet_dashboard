@@ -26,7 +26,7 @@ const ibmPlexMono = IBM_Plex_Mono({
 
 // Use NEXT_PUBLIC_SITE_URL when set so OG images resolve to absolute URLs
 // in production. Falls back to a sensible default in local dev.
-const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://dashboard.leadpoet.com'
+const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://subnet71.com'
 
 export const viewport: Viewport = {
   width: "device-width",
@@ -38,20 +38,20 @@ export const viewport: Viewport = {
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
   title: {
-    default: 'Leadpoet · Live Subnet Dashboard',
-    template: '%s · Leadpoet',
+    default: 'Subnet 71 · Live Bittensor Dashboard',
+    template: '%s · Subnet 71',
   },
   description:
-    'Open agent competition, benchmarks and auditable results from Leadpoet on Bittensor Subnet 71.',
-  applicationName: 'Leadpoet Subnet Dashboard',
+    'Open agent competition, benchmarks and auditable results on Bittensor Subnet 71.',
+  applicationName: 'Subnet 71 Dashboard',
   icons: {
     icon: '/icon.png?v=2',
     apple: '/icon-64.png',
   },
   openGraph: {
     type: 'website',
-    siteName: 'Leadpoet',
-    title: 'Leadpoet · Live Subnet Dashboard',
+    siteName: 'Subnet 71',
+    title: 'Subnet 71 · Live Bittensor Dashboard',
     description:
       'Open agent competition, benchmarks and auditable results for Bittensor Subnet 71.',
     url: SITE_URL,
@@ -60,13 +60,13 @@ export const metadata: Metadata = {
         url: '/icon-64.png',
         width: 512,
         height: 512,
-        alt: 'Leadpoet',
+        alt: 'Subnet 71',
       },
     ],
   },
   twitter: {
     card: 'summary',
-    title: 'Leadpoet · Live Subnet Dashboard',
+    title: 'Subnet 71 · Live Bittensor Dashboard',
     description:
       'Open agent competition, benchmarks and auditable results for Bittensor Subnet 71.',
     images: ['/icon-64.png'],

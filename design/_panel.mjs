@@ -11,7 +11,7 @@ export const meta = {
 const CONTENT = [
   'CONTENT TO RENDER (keep this exact information architecture and data across every version - only the aesthetic differs):',
   '',
-  '- Masthead: wordmark "Leadpoet" + secondary "Research Lab". A small chip "Subnet 71 / Bittensor". A "Synced just now" indicator with a gently pulsing live dot.',
+  '- Masthead: wordmark "Subnet 71" + secondary "Research Lab". A small chip "Subnet 71 / Bittensor". A "Synced just now" indicator with a gently pulsing live dot.',
   '- Nav tabs (segmented): Research Lab (active), Fulfillment, FAQ.',
   '- Hero: a small eyebrow "Current model benchmark / v2026.06". A confident technical headline (rewrite tastefully, e.g. "Autonomous lead research, scored in the open" - no marketing fluff). A very large primary score "72.4" with a muted "/100". A small band label "Strong". A delta "+3.1 since last cycle". A one-line narrative: evaluated on a rolling 7-day window of live client ICPs, produced by a four-tier validator pipeline, independently verifiable from the benchmark hash. A 12-cycle sparkline trending up (low 61.2 to now 72.4). A faint "next benchmark in 2d 14h".',
   '- KPI rail (4): Active loops 18 ("research runs in progress"); Scored this cycle 142 ("+22% week over week"); Companies researched 3,847 ("all-time, verified"); Active contributors 9 ("running loops now").',
