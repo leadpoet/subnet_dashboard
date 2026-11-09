@@ -167,13 +167,16 @@ function ChampionSummary({ round, history = [], active = true }: { round: Compet
   )
 }
 
+// Policy order is largest seat first: that stays the phone and screen-reader order, and desktop centers it.
+const REWARD_SEAT_PODIUM = ['md:order-2 md:border-[var(--line-2)] md:py-6', 'md:order-1 md:mt-4', 'md:order-3 md:mt-4']
+
 function RewardSeats({ seats }: { seats: CompetitionRewardSeats | null | undefined }) {
   return (
     <section aria-label="Reward seats" aria-busy={seats === undefined} className="mt-6">
       <h2 className="text-[13px] text-[var(--muted)]">Reward seats</h2>
       {seats === null ? <p role="status" className="mt-3 text-[12px] text-[var(--muted)]">Reward seats are temporarily unavailable. This section will retry automatically.</p> : <>
         <ul className="mt-3 grid min-w-0 gap-3 md:grid-cols-3">
-          {seats ? seats.seats.map((seat) => <RewardSeatCard key={seat.minimumImprovement} seat={seat} />) : [0, 1, 2].map((key) => <li key={key} className="h-[132px] shimmer rounded-xl" />)}
+          {seats ? seats.seats.map((seat, index) => <RewardSeatCard key={seat.minimumImprovement} seat={seat} podiumClass={REWARD_SEAT_PODIUM[index]} />) : REWARD_SEAT_PODIUM.map((podiumClass) => <li key={podiumClass} className={`min-h-[132px] shimmer rounded-xl ${podiumClass}`} />)}
         </ul>
         <p className="mt-3 text-[11px] leading-relaxed text-[var(--muted-2)]">A new champion takes only the seats its improvement clears, so a larger seat can stay with an earlier winner. Shares are shown before any funding reduction.</p>
       </>}
@@ -181,12 +184,12 @@ function RewardSeats({ seats }: { seats: CompetitionRewardSeats | null | undefin
   )
 }
 
-function RewardSeatCard({ seat }: { seat: CompetitionRewardSeat }) {
+function RewardSeatCard({ seat, podiumClass }: { seat: CompetitionRewardSeat; podiumClass: string }) {
   const share = seat.currentSharePercent ?? seat.baseSharePercent
   const holder = seat.holder
   const wonOn = holder?.roundId.match(/\d{4}-\d{2}-\d{2}$/)?.[0] ?? null
   return (
-    <li className="min-w-0 rounded-xl border border-[var(--line)] bg-[var(--surface)] p-4">
+    <li className={`min-w-0 rounded-xl border border-[var(--line)] bg-[var(--surface)] p-4 ${podiumClass}`}>
       <div className="flex items-baseline justify-between gap-3">
         <h3 className="text-[13px] text-[var(--platinum)]">+{seat.minimumImprovement} or more</h3>
         <p className="whitespace-nowrap font-mono text-[13px] text-[var(--white)]">{formatRewardSeatShare(share)}<span className="ml-1 font-sans text-[11px] text-[var(--muted)]">of emissions</span></p>
