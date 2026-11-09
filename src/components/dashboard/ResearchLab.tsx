@@ -17,7 +17,10 @@ import {
   competitionChampionHistory,
   competitionSubmissionMiner,
   type CompetitionScoreHistoryPoint,
+  type CompetitionRewardSeat,
+  type CompetitionRewardSeats,
   formatCompetitionScore,
+  formatRewardSeatShare,
   currentChampionRound,
   latestChampionScore,
   normalizeCompetitionBenchmark,
@@ -25,6 +28,7 @@ import {
   normalizeCompetitionResults,
   normalizeCompetitionSnapshot,
   normalizeCompetitionHistory,
+  normalizeCompetitionRewardSeats,
   type CompetitionHistoryPage,
   normalizeCompetitionSubmissions,
   normalizeValidatorNames,
@@ -57,6 +61,12 @@ export function ResearchLab({
     catch { setValidatorNames({}) }
   }, [])
   useVisiblePolling(refreshValidatorNames, 300_000, { enabled: active })
+  const [rewardSeats, setRewardSeats] = useState<CompetitionRewardSeats | null | undefined>(undefined)
+  const refreshRewardSeats = useCallback(async () => {
+    try { setRewardSeats(normalizeCompetitionRewardSeats(await fetchJson('/api/research-lab/current'))) }
+    catch { setRewardSeats((current) => current ?? null) }
+  }, [])
+  useVisiblePolling(refreshRewardSeats, 300_000, { enabled: active })
 
   const fetchData = useCallback(async () => {
     try {
@@ -84,7 +94,7 @@ export function ResearchLab({
   return (
     <ValidatorNamesContext.Provider value={validatorNames}><div className="w-full pb-12">
       <CompetitionHeader historyOpen={historyOpen} onHistory={() => setHistoryOpen((open) => !open)} />
-      {historyOpen ? <CompetitionHistory active={active} /> : !competition ? <Unavailable message="Competition data is temporarily unavailable. This page will retry automatically." /> : selectedRound ? <><ChampionSummary round={championRound} history={competitionChampionHistory(competition)} active={active} /><div className="mt-6 max-w-sm"><span className={filterLabelClass}>Competition round</span><CompetitionSelect label="Competition round" value={selectedRound.roundId} options={roundOptions.map((round) => ({ value: round.roundId, label: `${round.evaluationDate ? formatDay(round.evaluationDate) : round.roundId} · ${humanize(round.status)}` }))} onChange={setSelectedRoundId} /></div><RoundSummary round={selectedRound} /><RoundWorkspace key={selectedRound.roundId} round={selectedRound} active={active} /></> : <p className="border-b border-[var(--line)] py-12 text-[14px] text-[var(--muted)]">No production competition round is available.</p>}
+      {historyOpen ? <CompetitionHistory active={active} /> : !competition ? <Unavailable message="Competition data is temporarily unavailable. This page will retry automatically." /> : selectedRound ? <><ChampionSummary round={championRound} history={competitionChampionHistory(competition)} active={active} /><RewardSeats seats={rewardSeats} /><div className="mt-6 max-w-sm"><span className={filterLabelClass}>Competition round</span><CompetitionSelect label="Competition round" value={selectedRound.roundId} options={roundOptions.map((round) => ({ value: round.roundId, label: `${round.evaluationDate ? formatDay(round.evaluationDate) : round.roundId} · ${humanize(round.status)}` }))} onChange={setSelectedRoundId} /></div><RoundSummary round={selectedRound} /><RoundWorkspace key={selectedRound.roundId} round={selectedRound} active={active} /></> : <p className="border-b border-[var(--line)] py-12 text-[14px] text-[var(--muted)]">No production competition round is available.</p>}
       {error && competition ? <p className="mt-5 text-[12px] text-[var(--muted-2)]">Latest refresh failed: {error}</p> : null}
     </div></ValidatorNamesContext.Provider>
   )
@@ -96,6 +106,7 @@ function ResearchLabLoading() {
       <div className="flex flex-col justify-center"><h2 className="text-[13px] text-[var(--muted)]">Current champion</h2><div className="mt-4 h-[88px] w-48 shimmer rounded-md" /><div className="mt-5 h-4 w-56 shimmer rounded" /><div className="mt-2 h-3 w-36 shimmer rounded" /></div>
       <div className="hidden md:block"><div className="text-[13px] text-[var(--platinum)]">Champion score by day <span className="text-[11px] text-[var(--muted-2)]">/100</span></div><div className="mt-3 h-[180px] shimmer rounded-md" /><div className="mt-2 h-3 w-36 shimmer rounded" /></div>
     </section>
+    <RewardSeats seats={undefined} />
     <section className="mt-8 border-y border-[var(--line)] py-5"><div className="grid gap-5 sm:grid-cols-[1fr_2fr]"><div className="h-12 w-32 shimmer rounded" /><div className="grid grid-cols-2 gap-5"><div className="h-12 shimmer rounded" /><div className="h-12 shimmer rounded" /></div></div><div className="mt-5 h-4 w-24 shimmer rounded" /></section>
     <section className="pt-10"><h3 className="font-display text-[22px] text-[var(--platinum)]">Submissions</h3><div className="my-5 h-10 shimmer rounded-md" /><SubmissionRowsLoading /></section>
   </div>
@@ -154,6 +165,45 @@ function ChampionSummary({ round, history = [], active = true }: { round: Compet
       <div id={historyId} className={`${historyExpanded ? 'block pt-4' : 'hidden'} min-w-0 md:block md:pt-0`}>{active && (desktopHistory || historyExpanded) ? <ChampionScoreHistory points={history} /> : null}</div>
     </section>
   )
+}
+
+function RewardSeats({ seats }: { seats: CompetitionRewardSeats | null | undefined }) {
+  return (
+    <section aria-label="Reward seats" aria-busy={seats === undefined} className="mt-6">
+      <h2 className="text-[13px] text-[var(--muted)]">Reward seats</h2>
+      {seats === null ? <p role="status" className="mt-3 text-[12px] text-[var(--muted)]">Reward seats are temporarily unavailable. This section will retry automatically.</p> : <>
+        <ul className="mt-3 grid min-w-0 gap-3 md:grid-cols-3">
+          {seats ? seats.seats.map((seat) => <RewardSeatCard key={seat.minimumImprovement} seat={seat} />) : [0, 1, 2].map((key) => <li key={key} className="h-[132px] shimmer rounded-xl" />)}
+        </ul>
+        <p className="mt-3 text-[11px] leading-relaxed text-[var(--muted-2)]">A new champion takes only the seats its improvement clears, so a larger seat can stay with an earlier winner. Shares are shown before any funding reduction.</p>
+      </>}
+    </section>
+  )
+}
+
+function RewardSeatCard({ seat }: { seat: CompetitionRewardSeat }) {
+  const share = seat.currentSharePercent ?? seat.baseSharePercent
+  const holder = seat.holder
+  const wonOn = holder?.roundId.match(/\d{4}-\d{2}-\d{2}$/)?.[0] ?? null
+  return (
+    <li className="min-w-0 rounded-xl border border-[var(--line)] bg-[var(--surface)] p-4">
+      <div className="flex items-baseline justify-between gap-3">
+        <h3 className="text-[13px] text-[var(--platinum)]">+{seat.minimumImprovement} or more</h3>
+        <p className="whitespace-nowrap font-mono text-[13px] text-[var(--white)]">{formatRewardSeatShare(share)}<span className="ml-1 font-sans text-[11px] text-[var(--muted)]">of emissions</span></p>
+      </div>
+      {holder ? <div className="mt-3 space-y-1.5 text-[12px] text-[var(--muted)]">
+        <p className="font-mono text-[var(--platinum)]" title={holder.minerHotkey}>{shortHotkey(holder.minerHotkey)}</p>
+        <p>+{formatCompetitionScore(holder.improvement)} · {formatCompetitionScore(holder.winnerScore)} vs {formatCompetitionScore(holder.baselineScore)}{wonOn ? ` · ${formatDay(wonOn)}` : ''}</p>
+        <p>{rewardSeatDecayLabel(seat)}</p>
+      </div> : <p className="mt-3 text-[12px] text-[var(--muted)]">Open. No winner holds this seat, so its share is burned.</p>}
+    </li>
+  )
+}
+
+function rewardSeatDecayLabel(seat: CompetitionRewardSeat): string {
+  if (seat.currentSharePercent === null || seat.halvings === null || seat.epochsToNextHalving === null) return `Base share · current decay unavailable`
+  const next = `next halving in ${seat.epochsToNextHalving} ${seat.epochsToNextHalving === 1 ? 'epoch' : 'epochs'}`
+  return seat.halvings === 0 ? `Full share · ${next}` : `Halved ${seat.halvings}× from ${formatRewardSeatShare(seat.baseSharePercent)} · ${next}`
 }
 
 function RoundSummary({ round }: { round: CompetitionRoundSummary }) {

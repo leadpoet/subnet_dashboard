@@ -610,6 +610,77 @@ export function latestChampionScore(round: CompetitionRoundSummary | null, histo
   return submissionId ? history.filter((point) => point.championSubmissionId === submissionId).at(-1) ?? null : null
 }
 
+export type CompetitionRewardSeat = {
+  minimumImprovement: number
+  /** Share of total emissions before decay. */
+  baseSharePercent: number
+  /** Share of total emissions after decay; null when the signed decay clock is not published. */
+  currentSharePercent: number | null
+  halvings: number | null
+  epochsToNextHalving: number | null
+  holder: {
+    minerHotkey: string
+    submissionId: string
+    roundId: string
+    winnerScore: number
+    baselineScore: number
+    improvement: number
+  } | null
+}
+
+export type CompetitionRewardSeats = { seats: CompetitionRewardSeat[] }
+
+/** The three reward seats from the public current-round state, in policy order.
+ * Mirrors the validator kernel's weekly clock: a seat halves every epochs_per_halving
+ * from its own start epoch. Decay is never guessed when the signed clock is absent. */
+export function normalizeCompetitionRewardSeats(value: unknown): CompetitionRewardSeats | null {
+  const source = record(value)
+  const policy = record(source?.reward_slot_policy)
+  const tiers = policy?.tiers
+  const slots = source?.reward_slots
+  if (!source || !policy || !Array.isArray(tiers) || tiers.length !== 3 || !Array.isArray(slots) || slots.length !== 3) return null
+  // Older signed policies have no pool_percent: their tier percentages are already of total emissions.
+  const poolPercent = policy.pool_percent === undefined ? 100 : integer(policy.pool_percent)
+  if (poolPercent === null) return null
+  const clock = record(source.weekly_slot_decay)
+  const clockSlots = Array.isArray(clock?.slots) && clock.slots.length === 3 ? clock.slots : null
+  const epochsPerHalving = integer(clock?.epochs_per_halving)
+  const currentEpoch = source.epoch_eligible === true ? integer(source.current_epoch) : null
+  const seats: CompetitionRewardSeat[] = []
+  for (const [index, entry] of tiers.entries()) {
+    const tier = record(entry)
+    const minimumImprovement = integer(tier?.minimum_improvement)
+    const allocationPercent = integer(tier?.allocation_percent)
+    if (!minimumImprovement || !allocationPercent) return null
+    const baseSharePercent = poolPercent * allocationPercent / 100
+    const seat: CompetitionRewardSeat = { minimumImprovement, baseSharePercent, currentSharePercent: null, halvings: null, epochsToNextHalving: null, holder: null }
+    if (slots[index] !== null) {
+      const achievement = record(slots[index])
+      const minerHotkey = text(achievement?.miner_hotkey)
+      const submissionId = text(achievement?.submission_id)
+      const roundId = text(achievement?.round_id)
+      const winnerScore = score(achievement?.winner_score)
+      const baselineScore = score(achievement?.baseline_score)
+      if (!minerHotkey || !submissionId || !roundId || winnerScore === null || baselineScore === null) return null
+      seat.holder = { minerHotkey, submissionId, roundId, winnerScore, baselineScore, improvement: winnerScore - baselineScore }
+      const startEpoch = integer(record(clockSlots?.[index])?.start_epoch)
+      if (startEpoch !== null && epochsPerHalving && currentEpoch !== null && currentEpoch >= startEpoch) {
+        const elapsed = currentEpoch - startEpoch
+        seat.halvings = Math.floor(elapsed / epochsPerHalving)
+        seat.epochsToNextHalving = epochsPerHalving - (elapsed % epochsPerHalving)
+        seat.currentSharePercent = baseSharePercent / 2 ** seat.halvings
+      }
+    }
+    seats.push(seat)
+  }
+  return { seats }
+}
+
+export function formatRewardSeatShare(percent: number): string {
+  if (percent > 0 && percent < 0.01) return '<0.01%'
+  return `${Number(percent.toFixed(2))}%`
+}
+
 /** The miner behind a submission row; the defending entry runs the champion it names. */
 export function competitionSubmissionMiner(submission: Pick<CompetitionSubmission, 'isBaseline' | 'minerHotkey'>, round: Pick<CompetitionRoundSummary, 'defendingChampion'>): string | null {
   return submission.isBaseline ? round.defendingChampion?.minerHotkey ?? null : submission.minerHotkey

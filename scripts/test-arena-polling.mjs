@@ -95,6 +95,7 @@ let benchmarkGated = true
 const publicResponse = (url) => {
   if (url.endsWith('/metagraph')) return Response.json({ hotkeyToUid: { '5Validator': 0 }, names: { '5Validator': 'Subnet 71' } })
   if (url.endsWith('/competition')) return Response.json(snapshot)
+  if (url.endsWith('/current')) return Response.json({})
   const roundId = url.match(/\/rounds\/([^/]+)/)?.[1]
   if (url.endsWith('/submissions')) return Response.json({ round_id: roundId, submissions: [baseline, competitor] })
   if (url.endsWith('/benchmark')) {
@@ -209,14 +210,15 @@ try {
 
   // Exercise the actual parent/child refresh cascade and saved visible output.
   await act(async () => { renderer = TestRenderer.create(React.createElement(ResearchLab), rendererOptions) })
-  assert.equal(calls.length, 3)
+  assert.equal(calls.length, 4)
   assert.equal(count('/metagraph'), 1)
+  assert.equal(count('/current'), 1)
   assert.match(markup(), /Queued for validation/)
   const historyToggle = () => renderer.root.findAllByType('button').find((button) => button.children.some((child) => typeof child !== 'string' && child.children.some((text) => text === 'Show score history' || text === 'Hide score history')))
   assert.equal(historyToggle().props['aria-expanded'], false)
   await act(async () => { historyToggle().props.onClick() })
   assert.equal(historyToggle().props['aria-expanded'], true, 'score history can expand without reloading the competition')
-  assert.equal(calls.length, 3, 'opening score history reuses existing public scores')
+  assert.equal(calls.length, 4, 'opening score history reuses existing public scores')
   await act(async () => { historyToggle().props.onClick() })
   assert.equal(historyToggle().props['aria-expanded'], false)
   const inspectionToggle = () => renderer.root.findAllByType('button').find((button) => button.props.title === 'competitor')
@@ -226,7 +228,8 @@ try {
   assert.match(markup(), /Evaluating/)
   assert.doesNotMatch(markup(), /Evaluation activity|more active models|File state not recorded/)
   assert.match(markup(), /Subnet 71/)
-  assert.equal(calls.length, 5, 'one public polling cycle makes only summary and submissions requests')
+  assert.equal(calls.length, 6, 'one public polling cycle makes only summary and submissions requests')
+  assert.equal(count('/current'), 1, 'reward seats poll on the slower identity cadence')
   assert.equal(count('/metagraph'), 1, 'validator identity polling is shared and less frequent than progress polling')
   assert.equal(count('/results/baseline'), 0)
   assert.equal(calls.some((url) => url.endsWith('/code')), false, 'source remains on demand')
@@ -243,7 +246,7 @@ try {
   assert.equal(calls.length, beforeHidden, 'hidden public tabs do no polling')
   benchmarkGated = false
   await setVisibility('visible')
-  assert.equal(calls.length, beforeHidden + 3, 'resuming refreshes only visible endpoints once')
+  assert.equal(calls.length, beforeHidden + 4, 'resuming refreshes only visible endpoints once')
   await act(async () => { inspectionToggle().props.onClick() })
   assert.match(markup(), /Public ICP 1/, 'a previously gated benchmark becomes visible after release')
   await act(async () => { historyToggle().props.onClick() })
@@ -254,7 +257,7 @@ try {
   assert.equal(calls.length, beforeInactive, 'switching to FAQ pauses the kept-mounted competition')
   assert.doesNotMatch(markup(), /Champion score by day/, 'hidden competition must not measure a chart inside the inactive panel')
   await act(async () => { renderer.update(React.createElement(ResearchLab, { active: true })) })
-  assert.equal(calls.length, beforeInactive + 5)
+  assert.equal(calls.length, beforeInactive + 6)
   assert.equal(historyToggle().props['aria-expanded'], true, 'returning to competition preserves expanded score history')
   assert.match(markup(), /Champion score by day/, 'score history returns when competition becomes visible')
   const pending = deferred()
