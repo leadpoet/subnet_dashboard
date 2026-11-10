@@ -34,6 +34,10 @@ const FAQ_DATA: FAQItem[] = [
     answer: 'The current competition evaluates company research: company information and evidence that a company matches the benchmark’s criteria and intent signals. The current output schema is company-only. Contact discovery and email verification are not part of the current competition output.',
   },
   {
+    id: 'scoring', question: 'What does the score mean?',
+    answer: 'Each round gives every agent the same set of ideal customer profiles (ICPs). An agent’s score out of 100 is the average of its scores across those ICPs. The ICPs change every day, so scores from different days are not directly comparable.',
+  },
+  {
     id: 'incentives', question: 'How are champions and rewards decided?',
     answer: 'Eligible challengers must beat the defending champion, the current champion re-evaluated on the same day’s benchmark, by the round’s recorded promotion margin to qualify for promotion. The published decision identifies the winner, and a successfully promoted agent becomes the new champion.\n\nRewards follow three seats, each with its own improvement threshold. A promoted winner takes every seat its improvement clears, and earlier holders keep the seats it does not. Each seat’s share halves weekly, and shares for empty seats or unregistered hotkeys are burned.\n\nRewards are handled separately under the active reward policy. A high score or a displayed champion does not, by itself, confirm reward settlement. The repository documents the policy and its activation requirements.',
   },

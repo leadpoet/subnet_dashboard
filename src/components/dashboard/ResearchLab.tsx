@@ -15,6 +15,11 @@ import {
   competitionSubmissionStatusLabel,
   competitionRoundOptions,
   competitionChampionHistory,
+  competitionRoundOutcome,
+  competitionSubmissionPromotionGap,
+  compareCompetitionSubmissions,
+  formatCompetitionScorePrecise,
+  normalizeCompetitionCurrentRound,
   competitionSubmissionMiner,
   type CompetitionScoreHistoryPoint,
   type CompetitionRewardSeat,
@@ -55,6 +60,7 @@ export function ResearchLab({
   const [competition, setCompetition] = useState<CompetitionSnapshot | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [lastUpdatedAt, setLastUpdatedAt] = useState<number | null>(null)
   const [validatorNames, setValidatorNames] = useState<Record<string, string>>({})
   const refreshValidatorNames = useCallback(async () => {
     try { setValidatorNames(normalizeValidatorNames(await fetchJson('/api/metagraph'))) }
@@ -62,9 +68,13 @@ export function ResearchLab({
   }, [])
   useVisiblePolling(refreshValidatorNames, 300_000, { enabled: active })
   const [rewardSeats, setRewardSeats] = useState<CompetitionRewardSeats | null | undefined>(undefined)
+  const [currentRound, setCurrentRound] = useState<ReturnType<typeof normalizeCompetitionCurrentRound> | null>(null)
   const refreshRewardSeats = useCallback(async () => {
-    try { setRewardSeats(normalizeCompetitionRewardSeats(await fetchJson('/api/research-lab/current'))) }
-    catch { setRewardSeats((current) => current ?? null) }
+    try {
+      const response = await fetchJson('/api/research-lab/current')
+      setRewardSeats(normalizeCompetitionRewardSeats(response))
+      setCurrentRound(normalizeCompetitionCurrentRound(response))
+    } catch { setRewardSeats((current) => current ?? null) }
   }, [])
   useVisiblePolling(refreshRewardSeats, 300_000, { enabled: active })
 
@@ -76,6 +86,7 @@ export function ResearchLab({
         setCompetition(normalized)
         setSelectedRoundId((current) => current && competitionRoundOptions(normalized).some((round) => round.roundId === current) ? current : null)
         setError(null)
+        setLastUpdatedAt(Date.now())
         onSync?.()
       } else setError('Competition data did not match the public contract.')
     } catch (requestError) {
@@ -94,8 +105,8 @@ export function ResearchLab({
   return (
     <ValidatorNamesContext.Provider value={validatorNames}><div className="w-full pb-12">
       <CompetitionHeader historyOpen={historyOpen} onHistory={() => setHistoryOpen((open) => !open)} />
-      {historyOpen ? <CompetitionHistory active={active} /> : !competition ? <Unavailable message="Competition data is temporarily unavailable. This page will retry automatically." /> : selectedRound ? <><ChampionSummary round={championRound} history={competitionChampionHistory(competition)} active={active} /><RewardSeats seats={rewardSeats} /><div className="mt-6 max-w-sm"><span className={filterLabelClass}>Competition round</span><CompetitionSelect label="Competition round" value={selectedRound.roundId} options={roundOptions.map((round) => ({ value: round.roundId, label: `${round.evaluationDate ? formatUtcDate(round.evaluationDate) : round.roundId} · ${roundStatusLabel(round.status).replace(' in progress', '')}` }))} onChange={setSelectedRoundId} /></div><RoundSummary round={selectedRound} /><RoundWorkspace key={selectedRound.roundId} round={selectedRound} active={active} /></> : <p className="border-b border-[var(--line)] py-12 text-[14px] text-[var(--muted)]">No production competition round is available.</p>}
-      {error && competition ? <p className="mt-5 text-[12px] text-[var(--muted-2)]">Latest refresh failed: {error}</p> : null}
+      {historyOpen ? <CompetitionHistory active={active} /> : !competition ? <Unavailable message="Competition data is temporarily unavailable. This page will retry automatically." /> : selectedRound ? <><ChampionSummary round={championRound} history={competitionChampionHistory(competition)} active={active} kingHotkey={currentRound?.kingHotkey ?? null} /><RoundBrief open={competition.openRound} latest={competition.latestCompletedRound} replacementCutoff={currentRound?.openRoundId === competition.openRound?.roundId ? currentRound?.replacementCutoff ?? null : null} /><RewardSeats seats={rewardSeats} /><div className="mt-6 max-w-sm"><span className={filterLabelClass}>Competition round</span><CompetitionSelect label="Competition round" value={selectedRound.roundId} options={roundOptions.map((round) => ({ value: round.roundId, label: `${round.evaluationDate ? formatUtcDate(round.evaluationDate) : round.roundId} · ${roundStatusLabel(round.status).replace(' in progress', '')}` }))} onChange={setSelectedRoundId} /></div><RoundSummary round={selectedRound} /><RoundWorkspace key={selectedRound.roundId} round={selectedRound} active={active} /></> : <p className="border-b border-[var(--line)] py-12 text-[14px] text-[var(--muted)]">No production competition round is available.</p>}
+      {error && competition ? <p role="status" className="mt-5 text-[12px] text-[var(--muted)]">Couldn’t refresh.{lastUpdatedAt ? ` Showing data from ${formatUtcTime(lastUpdatedAt)}.` : ' Showing the last update.'}</p> : null}
     </div></ValidatorNamesContext.Provider>
   )
 }
@@ -106,6 +117,7 @@ function ResearchLabLoading() {
       <div className="flex flex-col justify-center"><h2 className="text-[14px] text-[var(--muted)]">Current champion</h2><div className="mt-4 h-[88px] w-48 shimmer rounded-md" /><div className="mt-5 h-4 w-56 shimmer rounded" /><div className="mt-2 h-3 w-36 shimmer rounded" /></div>
       <div className="hidden md:block"><div className="text-[14px] text-[var(--platinum)]">Champion score by day <span className="text-[12px] text-[var(--muted-2)]">/100</span></div><div className="mt-3 h-[180px] shimmer rounded-md" /><div className="mt-2 h-3 w-36 shimmer rounded" /></div>
     </section>
+    <div className="mt-6 min-h-[254px] shimmer rounded-xl sm:min-h-[134px]" />
     <RewardSeats seats={undefined} />
     <section className="mt-8 border-y border-[var(--line)] py-5"><div className="grid gap-5 sm:grid-cols-[1fr_2fr]"><div className="h-12 w-32 shimmer rounded" /><div className="grid grid-cols-2 gap-5"><div className="h-12 shimmer rounded" /><div className="h-12 shimmer rounded" /></div></div><div className="mt-5 h-4 w-24 shimmer rounded" /></section>
     <section className="pt-10"><h2 className="font-display text-[20px] text-[var(--platinum)]">Submissions</h2><div className="my-5 h-10 shimmer rounded-md" /><SubmissionRowsLoading /></section>
@@ -132,9 +144,10 @@ function CompetitionHeader({ historyOpen = false, onHistory }: { historyOpen?: b
   )
 }
 
-function ChampionSummary({ round, history = [], active = true }: { round: CompetitionRoundSummary | null; history?: CompetitionScoreHistoryPoint[]; active?: boolean }) {
+function ChampionSummary({ round, history = [], active = true, kingHotkey = null }: { round: CompetitionRoundSummary | null; history?: CompetitionScoreHistoryPoint[]; active?: boolean; kingHotkey?: string | null }) {
   const champion = round?.champion
-  const latest = latestChampionScore(round, history)
+  // The crowning round can age out of the public window while its champion still reigns.
+  const latest = round ? latestChampionScore(round, history) : kingHotkey ? history.filter((point) => point.championHotkey === kingHotkey).at(-1) ?? null : null
   const [historyExpanded, setHistoryExpanded] = useState(false)
   const historyId = useId()
   const [desktopHistory, setDesktopHistory] = useState(false)
@@ -157,7 +170,7 @@ function ChampionSummary({ round, history = [], active = true }: { round: Compet
           <p className="font-mono text-[12px]" title={champion.minerHotkey}>{shortHotkey(champion.minerHotkey)}</p>
           {latest && !latest.newChampion ? <p>Crowned {formatUtcDate(round.evaluationDate)} · winning score {formatCompetitionScore(champion.finalScore)}</p> : null}
           {champion.finalScore === null && !latest ? <p>Champion score unavailable.</p> : null}
-        </div> : <p className="col-span-2 text-[12px] text-[var(--muted)] md:mt-5">No promoted champion in published history.</p>}
+        </div> : kingHotkey ? <div className="col-span-2 space-y-1.5 text-[12px] text-[var(--muted)] md:mt-5">{latest ? <p>Latest score · {formatUtcDate(latest.evaluationDate)}</p> : null}<p className="font-mono text-[12px]" title={kingHotkey}>{shortHotkey(kingHotkey)}</p></div> : <p className="col-span-2 text-[12px] text-[var(--muted)] md:mt-5">No promoted champion in published history.</p>}
       </div>
       <button type="button" aria-expanded={historyExpanded} aria-controls={historyId} onClick={() => setHistoryExpanded((expanded) => !expanded)} className="mt-4 flex min-h-11 w-full items-center justify-between border-t border-[var(--line)] pt-3 text-[14px] text-[var(--platinum)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 md:hidden">
         <span>{historyExpanded ? 'Hide score history' : 'Show score history'}</span><ChevronDown aria-hidden className={`h-4 w-4 transition-transform ${historyExpanded ? 'rotate-180' : ''}`} />
@@ -165,6 +178,38 @@ function ChampionSummary({ round, history = [], active = true }: { round: Compet
       <div id={historyId} className={`${historyExpanded ? 'block pt-4' : 'hidden'} min-w-0 md:block md:pt-0`}>{active && (desktopHistory || historyExpanded) ? <ChampionScoreHistory points={history} /> : null}</div>
     </section>
   )
+}
+
+function RoundBrief({ open, latest, replacementCutoff }: { open: CompetitionRoundSummary | null; latest: CompetitionRoundSummary | null; replacementCutoff: string | null }) {
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 30_000)
+    return () => window.clearInterval(timer)
+  }, [])
+  const latestRoundId = latest?.status === 'published' ? latest.roundId : null
+  const [latestSubmissions, setLatestSubmissions] = useState<{ roundId: string; submissions: CompetitionSubmission[] } | null>(null)
+  useEffect(() => {
+    if (!latestRoundId) return
+    let current = true
+    fetchJson(`/api/research-lab/rounds/${encodeURIComponent(latestRoundId)}/submissions`)
+      .then((response) => { if (current) setLatestSubmissions({ roundId: latestRoundId, submissions: normalizeCompetitionSubmissions(response) }) })
+      .catch(() => {})
+    return () => { current = false }
+  }, [latestRoundId])
+  const outcome = latest ? competitionRoundOutcome(latest, latestSubmissions?.roundId === latest.roundId ? latestSubmissions.submissions : null) : null
+  const cutoff = open?.submissionCutoff ?? null
+  const remaining = cutoff ? Date.parse(cutoff) - now : Number.NaN
+  if (!cutoff && !outcome) return null
+  return <dl className="mt-6 grid gap-5 rounded-xl border border-[var(--line)] bg-[var(--surface)] p-4 sm:grid-cols-2 sm:gap-8 md:px-8 md:py-5">
+    {open && cutoff && Number.isFinite(remaining) ? <RoundDetail label="Submissions close" note={<>{formatUtc(cutoff)}{replacementCutoff ? ` · replacements until ${formatUtcTime(Date.parse(replacementCutoff))}` : ''}<span className="mt-1 block">To win, beat the defending champion by {formatCompetitionScore(open.promotionMargin)} on the same ICPs</span></>}>{remaining > 0 ? `In ${formatRemaining(remaining)}` : 'Closed'}</RoundDetail> : null}
+    {latest && outcome ? <RoundDetail label={`Latest result · ${formatUtcDate(latest.evaluationDate)}`} note={outcome.detail}>{outcome.label}</RoundDetail> : null}
+  </dl>
+}
+
+function formatRemaining(milliseconds: number): string {
+  const minutes = Math.ceil(milliseconds / 60_000)
+  const hours = Math.floor(minutes / 60)
+  return hours ? `${hours}h ${minutes % 60}m` : `${minutes}m`
 }
 
 // Policy order is largest seat first: that stays the phone and screen-reader order, and desktop centers it.
@@ -196,7 +241,7 @@ function RewardSeatCard({ seat, podiumClass }: { seat: CompetitionRewardSeat; po
       </div>
       {holder ? <div className="mt-3 space-y-1.5 text-[12px] text-[var(--muted)]">
         <p className="font-mono text-[var(--platinum)]" title={holder.minerHotkey}>{shortHotkey(holder.minerHotkey)}</p>
-        <p>+{formatCompetitionScore(holder.improvement)} · {formatCompetitionScore(holder.winnerScore)} vs {formatCompetitionScore(holder.baselineScore)}{wonOn ? ` · ${formatUtcDate(wonOn)}` : ''}</p>
+        <p>+{formatCompetitionScorePrecise(holder.improvement)} · {formatCompetitionScorePrecise(holder.winnerScore)} vs {formatCompetitionScorePrecise(holder.baselineScore)}{wonOn ? ` · ${formatUtcDate(wonOn)}` : ''}</p>
         <p>{rewardSeatDecayLabel(seat)}</p>
       </div> : <p className="mt-3 text-[12px] text-[var(--muted)]">Open. No winner holds this seat, so its share is burned.</p>}
     </li>
@@ -213,10 +258,10 @@ function RoundSummary({ round }: { round: CompetitionRoundSummary }) {
   const baselineScore = round.baseline?.finalScore ?? null
   const evaluationComplete = round.status === 'published'
   return (
-    <section aria-label="Current round" className="mt-6 md:mt-8 border-y border-[var(--line)]">
+    <section aria-label="Selected round" className="mt-6 md:mt-8 border-y border-[var(--line)]">
       <div className="grid gap-3 py-4 sm:grid-cols-[1fr_2fr] sm:gap-8 sm:py-5">
         <div>
-          <div className="text-[12px] text-[var(--muted)]">Current round</div>
+          <div className="text-[12px] text-[var(--muted)]">Round status</div>
           <div className="mt-2 flex items-center gap-2 text-[14px] text-[var(--platinum)]"><span aria-hidden className="h-1.5 w-1.5 rounded-full bg-[var(--white)]" />{roundStatusLabel(round.status)}</div>
         </div>
         <CompetitionSchedule round={round} />
@@ -227,7 +272,7 @@ function RoundSummary({ round }: { round: CompetitionRoundSummary }) {
           <RoundDetail label="Defending champion score" note={baselineScore === null ? null : evaluationComplete ? (round.publishedAt ? `Published ${formatUtc(round.publishedAt)}` : 'Published result') : round.status === 'scored' ? 'Final result pending' : 'Round still in progress'}>{baselineScore === null ? 'Awaiting score' : formatCompetitionScore(baselineScore)}</RoundDetail>
           {round.champion ? <RoundDetail label="Champion" note={<>{championMetricDetail(round, round.champion.finalScore)}{round.promotionStatus === 'superseded' ? <> This round’s champion was not promoted because a newer evaluation day was published.</> : null}</>}><span className="font-mono">{shortHotkey(round.champion.minerHotkey)}</span></RoundDetail>
             : round.cancelReason ? <RoundDetail label="Promotion" note={humanize(round.cancelReason)}>No champion was published</RoundDetail>
-              : <RoundDetail label="Promotion" note={evaluationComplete ? 'No champion was published' : null}>{evaluationComplete ? humanize(round.promotionStatus ?? 'not required') : 'Pending'}</RoundDetail>}
+              : <RoundDetail label="Promotion" note={evaluationComplete ? 'No new champion was published' : null}>{evaluationComplete ? (round.promotionStatus ?? 'not_required') === 'not_required' && baselineScore !== null ? 'Champion held' : humanize(round.promotionStatus ?? 'not required') : 'Pending'}</RoundDetail>}
           <RoundDetail label="Promotion margin">+{formatCompetitionScore(round.promotionMargin)} points</RoundDetail>
           {round.submissionCutoff ? <RoundDetail label="Submissions close">{formatUtc(round.submissionCutoff)}</RoundDetail> : null}
           {round.publicAt ? <RoundDetail label="ICPs publish">{formatUtc(round.publicAt)}</RoundDetail> : null}
@@ -498,7 +543,7 @@ function filterSubmissions(submissions: CompetitionSubmission[], query: string, 
     if (status === 'review') return submission.status === 'review_failed' || ['pending', 'running', 'in_progress', 'error'].includes(submission.codeReview.status ?? '')
     if (status === 'scored') return submission.evaluation?.state === 'completed' || ['scored', 'champion'].includes(submission.status)
     return true
-  }).sort((left, right) => Number(right.isBaseline) - Number(left.isBaseline))
+  }).sort(compareCompetitionSubmissions)
 }
 
 function isSubmissionRetrying(submission: CompetitionSubmission) {
@@ -585,7 +630,7 @@ function SubmissionTable({ submissions, round, selectedId, onSelect, expandedCon
               <button id={`evaluation-toggle-${submission.submissionId}`} type="button" onClick={() => onSelect(submission.submissionId)} className={`w-full px-4 py-4 ${evaluationRowButtonClass}`} aria-expanded={selected} aria-controls={`submission-${submission.submissionId}`} title={submission.submissionId}>
                 <span className="flex flex-wrap items-center gap-x-2 gap-y-1"><span className="font-mono text-[12px] text-[var(--platinum)]">{shortId(submission.submissionId)}</span>{submission.isBaseline ? <span className="text-[12px] text-[var(--muted)]">Defending champion</span> : null}</span>
                 <span className="mt-1 block font-mono text-[12px] text-[var(--muted)] sm:hidden" title={miner ?? undefined}>{miner ? shortHotkey(miner) : 'Run by organizer'}</span>
-                <span className="mt-2 flex items-center gap-1 text-[12px] text-[var(--platinum)]">{selected ? 'Close evaluation' : 'View evaluation'}<ChevronRight aria-hidden className={`h-3.5 w-3.5 transition-transform ${selected ? 'rotate-90' : ''}`} /></span>
+                <span className="mt-2 flex items-center gap-1 text-[12px] text-[var(--platinum)]">{submission.status === 'review_rejected' ? selected ? 'Close review' : 'View review' : selected ? 'Close evaluation' : 'View evaluation'}<ChevronRight aria-hidden className={`h-3.5 w-3.5 transition-transform ${selected ? 'rotate-90' : ''}`} /></span>
               </button>
               <div className="px-4 pb-4 text-[14px] leading-relaxed text-[var(--muted)] sm:hidden"><SubmissionStatus submission={submission} round={round} /></div>
             </td>
@@ -608,7 +653,8 @@ function ValidatorIdentity({ hotkey, full = false }: { hotkey: string; full?: bo
 function SubmissionStatus({ submission, round }: { submission: CompetitionSubmission; round: CompetitionRoundSummary }) {
   const evaluating = submission.status === 'scoring' && submission.evaluation?.state === 'evaluating'
   const retrying = isSubmissionRetrying(submission) && submission.evaluation?.state === 'evaluating'
-  return <div><span className={evaluating ? 'text-[var(--platinum)]' : ''}>{competitionSubmissionStatusLabel(submission, round)}</span>{retrying ? <span className="ml-1">· retrying tasks</span> : null}{evaluating ? <div className="mt-1 space-y-1 text-[12px] text-[var(--muted)]">{submission.evaluation?.validators.filter((validator, index, validators) => validators.findIndex((item) => item.hotkey === validator.hotkey && item.phase === validator.phase) === index).map(({ hotkey, phase }) => <div key={`${hotkey}-${phase}`}>{phase === 'scoring' ? 'Scoring' : 'Running'} · <ValidatorIdentity hotkey={hotkey} /></div>)}</div> : null}</div>
+  const gap = competitionSubmissionPromotionGap(submission, round)
+  return <div>{gap !== null ? <div className="text-[12px] text-[var(--muted)]">{formatCompetitionScorePrecise(gap)} short of promotion</div> : null}<span className={evaluating ? 'text-[var(--platinum)]' : ''}>{competitionSubmissionStatusLabel(submission, round)}</span>{retrying ? <span className="ml-1">· retrying tasks</span> : null}{evaluating ? <div className="mt-1 space-y-1 text-[12px] text-[var(--muted)]">{submission.evaluation?.validators.filter((validator, index, validators) => validators.findIndex((item) => item.hotkey === validator.hotkey && item.phase === validator.phase) === index).map(({ hotkey, phase }) => <div key={`${hotkey}-${phase}`}>{phase === 'scoring' ? 'Scoring' : 'Running'} · <ValidatorIdentity hotkey={hotkey} /></div>)}</div> : null}</div>
 }
 
 function ValidatorCodeVersion({ commit, workingTree, full = false }: { commit: string | null; workingTree: 'clean' | 'dirty' | 'unknown'; full?: boolean }) {
@@ -629,13 +675,13 @@ function PublishedResults({ benchmark, benchmarkState, results, resultsState, ro
   if (benchmarkState === 'gated') return <ResultFrame>{attributionSummary}<InlineNotice>All {round.benchmarkIcpCount} ICPs become public{round.publicAt ? ` at ${formatUtc(round.publicAt)}` : ' at the scheduled release'}. Each model’s score appears when its evaluation is complete.</InlineNotice></ResultFrame>
   if (!benchmark || benchmarkState === 'error') return <ResultFrame>{attributionSummary}<InlineNotice>Published public-ICP details are temporarily unavailable.</InlineNotice></ResultFrame>
   if (evaluationNotice) return <PendingIcpResults benchmark={benchmark}>{evaluationNotice}</PendingIcpResults>
-  const exactZdrBlock = (submission.status === 'provider_blocked' || submission.status === 'evaluation_incomplete')
-    && competitionEvaluationFailureGuidance(submission) !== null
-  if (submission.status === 'scoring_failed' || exactZdrBlock || (submission.status === 'scoring' && submission.evaluation?.state === 'failed')) {
+  const incompleteEvaluation = (submission.status === 'provider_blocked' || submission.status === 'evaluation_incomplete')
+    && submission.finalScore === null && (results?.finalScore ?? null) === null
+  if (submission.status === 'scoring_failed' || incompleteEvaluation || (submission.status === 'scoring' && submission.evaluation?.state === 'failed')) {
     const scores = round.status === 'published' && resultsState === 'available' && results?.publicIcpStatus === 'ready' && results.finalScore === null ? results.publicScores : undefined
     const causes = competitionEvaluationFailureCauses(submission)
     const guidance = competitionEvaluationFailureGuidance(submission)
-    return <PendingIcpResults benchmark={benchmark} scores={scores}>{competitionSubmissionStatusLabel(submission, round)}. No complete evaluation score is available.{causes.length > 1 ? <> Recorded causes: {causes.join('; ')}.</> : null}{guidance ? <> {guidance}</> : null}</PendingIcpResults>
+    return <PendingIcpResults benchmark={benchmark} scores={scores}>{competitionSubmissionStatusLabel(submission, round)}. {scores?.size ? `${scores.size} of ${benchmark.benchmarkIcpCount} ICPs scored. ` : ''}No complete evaluation score is available.{causes.length > 1 ? <> Recorded causes: {causes.join('; ')}.</> : null}{guidance ? <> {guidance}</> : null}</PendingIcpResults>
   }
   if ((!submission.isBaseline || round.status !== 'published') && resultsState === 'error') return <PendingIcpResults benchmark={benchmark}>The ICPs are public. Published scores are temporarily unavailable.</PendingIcpResults>
   if ((!submission.isBaseline || round.status !== 'published') && resultsState === 'loading') return <PendingIcpResults benchmark={benchmark}>Loading this model’s score and diagnostics.</PendingIcpResults>
@@ -751,6 +797,7 @@ function humanize(value: string): string { const normalized = value.trim().repla
 function shortId(value: string): string { return value.length > 18 ? `${value.slice(0, 9)}…${value.slice(-6)}` : value }
 function shortHotkey(value: string): string { return value.length > 18 ? `${value.slice(0, 9)}…${value.slice(-6)}` : value }
 function formatUtc(value: string): string { const date = new Date(value); return Number.isFinite(date.getTime()) ? `${new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone: 'UTC' }).format(date)} UTC` : value }
+function formatUtcTime(value: number): string { return Number.isFinite(value) ? `${new Intl.DateTimeFormat('en-US', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone: 'UTC' }).format(new Date(value))} UTC` : '' }
 function formatUtcDate(value: string | null): string { if (!value) return 'Date unavailable'; const date = new Date(`${value}T00:00:00Z`); return Number.isFinite(date.getTime()) ? `${new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' }).format(date)}` : value }
 function utcCalendarDate(value: string | null): string | null { if (!value) return null; const date = new Date(value); return Number.isFinite(date.getTime()) ? date.toISOString().slice(0, 10) : null }
 function errorMessage(value: unknown, fallback: string): string { return value instanceof Error ? value.message : fallback }
