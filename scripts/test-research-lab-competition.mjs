@@ -41,6 +41,7 @@ try {
     normalizeCompetitionHistory,
     normalizeCompetitionSnapshot,
     normalizeCompetitionRewardSeats,
+    competitionRewardSeatReductions,
     formatRewardSeatShare,
     normalizeCompetitionSubmissions,
     normalizeValidatorNames,
@@ -1533,6 +1534,28 @@ try {
   assert.deepEqual(fundingSeats(kingHotkey, 500000), [10, 7.5, 7.5], 'a funding halving shows on every seat the champion holds')
   assert.deepEqual(fundingSeats('5earlierHolder', 500000), [null, 7.5, 7.5], 'a funding halving never reduces another holder')
   assert.deepEqual(fundingSeats(kingHotkey, 1000000), [null, null, null], 'a full factor shows no slash')
+  const reductionsAt = (halvings, ppm, holder = kingHotkey) => {
+    const startEpoch = 26000
+    const parsed = normalizeCompetitionRewardSeats({
+      ...liveSeats,
+      king: { hotkey: kingHotkey },
+      champion_reward_factor_ppm: ppm,
+      epoch_eligible: true,
+      current_epoch: startEpoch + 140 * halvings + 5,
+      weekly_slot_decay: { epochs_per_halving: 140, slots: [{ start_epoch: startEpoch }, { start_epoch: startEpoch }, { start_epoch: startEpoch }] },
+      reward_slots: liveSeats.reward_slots.map((slot, index) => index === 0 ? { ...slot, miner_hotkey: holder } : slot),
+    }).seats[0]
+    return { base: parsed.baseSharePercent, epochsPerHalving: parsed.epochsPerHalving, reductions: competitionRewardSeatReductions(parsed) }
+  }
+  assert.deepEqual(reductionsAt(0, 1000000), { base: 20, epochsPerHalving: 140, reductions: [] }, 'a full share has nothing to strike through')
+  assert.deepEqual(reductionsAt(2, 1000000).reductions, [{ kind: 'weekly', divisor: 4, sharePercent: 5 }], 'weekly decay is listed on its own')
+  assert.deepEqual(reductionsAt(0, 500000).reductions, [{ kind: 'funding', divisor: 2, sharePercent: 10 }], 'failed keys are listed on their own')
+  assert.deepEqual(reductionsAt(1, 500000).reductions, [{ kind: 'weekly', divisor: 2, sharePercent: 10 }, { kind: 'funding', divisor: 2, sharePercent: 5 }], 'both cuts stack in kernel order')
+  assert.deepEqual(reductionsAt(1, 500000, '5earlierHolder').reductions, [{ kind: 'weekly', divisor: 2, sharePercent: 10 }], 'failed keys never reduce another holder')
+  assert.equal(normalizeCompetitionRewardSeats(liveSeats).fundingFactorKnown, false, 'a response without the factor cannot confirm a full share')
+  assert.equal(normalizeCompetitionRewardSeats({ ...liveSeats, champion_reward_factor_ppm: 1000000 }).fundingFactorKnown, true)
+  assert.equal(normalizeCompetitionRewardSeats({ ...liveSeats, champion_reward_factor_ppm: 500000 }).fundingFactorKnown, true)
+  assert.equal(normalizeCompetitionRewardSeats({ ...liveSeats, champion_reward_factor_ppm: 750000 }).fundingFactorKnown, false, 'an unsigned value is never read as a known factor')
   assert.equal(formatCompetitionScorePrecise(live[0].holder.improvement), '27.125', 'seat arithmetic stays exact')
   assert.equal(formatCompetitionScorePrecise(2.45), '2.45')
   assert.equal(formatCompetitionScorePrecise(8), '8.00')
@@ -1604,8 +1627,21 @@ try {
   assert.deepEqual(newSplitSeats.map((seat) => seat.holder), splitSeats.map((seat) => seat.holder), 'policy changes preserve recorded seat holders and achievement scores')
   const newSplitMarkup = renderToStaticMarkup(React.createElement(renderedModule.exports.RewardSeats, { seats: { seats: newSplitSeats } }))
   assert.match(newSplitMarkup, /8\.75%/)
-  assert.match(newSplitMarkup, /Halved 2× from 35% · next halving in 133 epochs/)
-  assert.match(newSplitMarkup, /Halved 1× from 15% · next halving in 100 epochs/)
+  assert.match(newSplitMarkup, /<s [^>]*><span [^>]*>Full share <\/span>35%<\/s>/, 'the full share is struck through')
+  assert.match(newSplitMarkup, /Weekly decay ÷4/)
+  assert.match(newSplitMarkup, /Next halving in 133 epochs/)
+  assert.match(newSplitMarkup, /Weekly decay ÷2/)
+  assert.match(newSplitMarkup, /Next halving in 100 epochs/)
+  const championHotkey = split.reward_slots[0].miner_hotkey
+  const keysOutMarkup = renderToStaticMarkup(React.createElement(renderedModule.exports.RewardSeats, { seats: normalizeCompetitionRewardSeats({ ...split, king: { hotkey: championHotkey }, champion_reward_factor_ppm: 500000 }) }))
+  assert.match(keysOutMarkup, /Weekly decay ÷4 · Keys out ÷2/, 'both reasons sit beside the number')
+  assert.match(keysOutMarkup, /aria-label="2\.5% now\. See why this share is reduced"/, 'the actual number opens the reasons')
+  assert.match(keysOutMarkup, /Hover or tap the current share/)
+  const fullMarkup = renderToStaticMarkup(React.createElement(renderedModule.exports.RewardSeats, { seats: normalizeCompetitionRewardSeats({ ...liveSeats, champion_reward_factor_ppm: 1000000 }) }))
+  assert.doesNotMatch(fullMarkup, /<s /, 'a full share is not struck through')
+  assert.match(fullMarkup, /Full share · next halving in 25 epochs/)
+  assert.doesNotMatch(fullMarkup, /before any halving/, 'a published full factor needs no caveat')
+  assert.match(renderToStaticMarkup(React.createElement(renderedModule.exports.RewardSeats, { seats: normalizeCompetitionRewardSeats(liveSeats) })), /before any halving for a champion’s failed provider keys/, 'without the factor the page says what it cannot confirm')
 
   // Decay is never guessed, and a signed policy without a pot keeps total-emissions arithmetic.
   const { weekly_slot_decay: _clock, ...withoutClock } = liveSeats
@@ -1636,7 +1672,8 @@ try {
 
   const seatsMarkup = renderToStaticMarkup(React.createElement(renderedModule.exports.RewardSeats, { seats: { seats: splitSeats } }))
   assert.match(seatsMarkup, /\+20 or more/)
-  assert.match(seatsMarkup, /Halved 2× from 20% · next halving in 133 epochs/)
+  assert.match(seatsMarkup, /<s [^>]*><span [^>]*>Full share <\/span>20%<\/s>/)
+  assert.match(seatsMarkup, /Next halving in 133 epochs/)
   assert.match(seatsMarkup, /5NewerSmallWinner/)
   assert.match(seatsMarkup, /Open\. No winner holds this seat/)
   assert.match(renderToStaticMarkup(React.createElement(renderedModule.exports.RewardSeats, { seats: null })), /temporarily unavailable/)

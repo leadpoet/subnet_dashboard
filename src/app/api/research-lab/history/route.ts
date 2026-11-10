@@ -3,6 +3,9 @@ import { proxyPublicArenaJson } from '@/lib/arena-public-proxy'
 
 export const dynamic = 'force-dynamic'
 
+// History reads every entrant and took 6-9 seconds on 2026-11-09, past the default 8-second limit.
+const HISTORY_TIMEOUT_MS = 20_000
+
 export async function GET(request: Request) {
   const params = new URL(request.url).searchParams
   const cursor = params.get('cursor') ?? ''
@@ -16,5 +19,5 @@ export async function GET(request: Request) {
   const query = new URLSearchParams({ limit: '25', hotkey })
   if (day) query.set('day', day)
   if (cursor) query.set('cursor', cursor)
-  return proxyPublicArenaJson(`/arena/v1/history?${query}`)
+  return proxyPublicArenaJson(`/arena/v1/history?${query}`, HISTORY_TIMEOUT_MS)
 }
