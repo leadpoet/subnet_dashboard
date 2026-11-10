@@ -32,7 +32,9 @@ Keep the generated URL out of Git, tickets, chat, terminal history and logs.
 
 The following procedure sends one labelled test to the candidate Slack webhook
 before replacing the active URL. A failed test leaves the Discord destination
-unchanged. It writes a protected rollback copy and never edits incident state.
+unchanged. Confirm the labelled test is visible in the intended private channel
+at the second prompt before the destination changes. The procedure writes a
+protected rollback copy and never edits incident state.
 Paste the URL only at the hidden prompt; do not place it in a shell argument.
 If a rollback file already exists, stop and inspect the prior switch first.
 
@@ -67,6 +69,12 @@ if not monitor.post_alert(
     url=candidate,
 ):
     raise SystemExit("Slack did not acknowledge the test; destination unchanged.")
+
+with open("/dev/tty", "r+") as terminal:
+    terminal.write("Verify the test in private #lab-bugs, then type lab-bugs: ")
+    terminal.flush()
+    if terminal.readline().strip() != "lab-bugs":
+        raise SystemExit("Channel confirmation missing; destination unchanged.")
 
 fd = os.open(backup, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
 with os.fdopen(fd, "w") as handle:

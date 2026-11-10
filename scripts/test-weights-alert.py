@@ -123,7 +123,9 @@ class WeightsAlertWebhookTest(unittest.TestCase):
         self.assertNotIn("secret", logs[0])
         self.assertIn("RuntimeError", logs[0])
 
-        with patch.object(weights_alert, "_open_webhook") as open_webhook:
+        with patch.object(weights_alert, "_open_webhook") as open_webhook, patch.object(
+            weights_alert, "log", side_effect=logs.append
+        ):
             self.assertFalse(
                 weights_alert.post_alert(
                     "SN71 alert", "https://untrusted.example/hooks/secret"
