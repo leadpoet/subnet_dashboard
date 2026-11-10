@@ -12,9 +12,10 @@ waits for the epoch boundary before deciding that the epoch was missed.
 
 Posts one combined message when a problem is first observed, then one reminder
 for every newly completed official epoch until it recovers. Notification state
-advances only after Discord confirms delivery, so webhook failures remain
-eligible for retry. Late problems discovered after an epoch's combined message
-can still page without re-sending incidents already delivered in that epoch.
+advances only after the configured webhook confirms delivery, so webhook
+failures remain eligible for retry. Late problems discovered after an epoch's
+combined message can still page without re-sending incidents already delivered
+in that epoch.
 Webhook URL lives in WEBHOOK_FILE (one line); empty/missing file = retryable
 delivery failure.
 
@@ -23,9 +24,13 @@ Usage: weights_alert.py [--test]   (--test posts a labeled test message)
 
 import json
 import os
+import re
 import sys
+import tempfile
 import time
 import urllib.request
+from urllib.parse import urlsplit
+from typing import Optional
 
 # Watched validators are pinned to reviewed hotkey/coldkey pairs in
 # validator_registry.json, shared with the dashboard UI. UIDs and on-chain
@@ -57,10 +62,23 @@ def load_registry() -> list:
 
 
 def safe_identity_name(value) -> str:
-    """Return a bounded, single-line identity name safe for Discord text."""
+    """Return a bounded, single-line identity name safe for chat text."""
     name = " ".join(str(value or "").split())
-    # Prevent an on-chain display name from creating a Discord mention.
-    return name[:80].replace("@", "@\u200b")
+    # Prevent an on-chain display name from creating a mention or link in
+    # either supported webhook provider.
+    name = name[:80]
+    name = name.replace("@", "@\u200b").replace("<", "‹").replace(">", "›")
+    name = re.sub(
+        r"(?i)https?://",
+        lambda match: match.group(0).replace("://", "\u200b://"),
+        name,
+    )
+    name = re.sub(
+        r"(?i)www\.",
+        lambda match: f"{match.group(0)[0]}\u200b{match.group(0)[1:]}",
+        name,
+    )
+    return name
 
 
 def query_identity_name(subtensor, coldkey: str) -> str:
@@ -86,6 +104,8 @@ def display_label(role: str, fallback_label: str, identity_name: str) -> str:
 
 NETUID = 71
 WEBHOOK_FILE = os.path.expanduser("~/.config/leadpoet/weights_alert_webhook")
+WEBHOOK_ENV = "WEIGHTS_ALERT_WEBHOOK"
+WEBHOOK_ROLLBACK_FILE = WEBHOOK_FILE + ".before-slack"
 STATE_FILE = os.path.expanduser("~/.config/leadpoet/weights_alert_state.json")
 LOG_FILE = os.path.expanduser("~/weights_alert.log")
 LAST_ALERT_EPOCH_KEY = "__last_alert_epoch__"
@@ -341,30 +361,171 @@ def webhook_url() -> str:
         return ""
 
 
-def post_discord(content: str) -> bool:
-    url = webhook_url()
+SLACK_WEBHOOK_HOSTS = frozenset(("hooks.slack.com", "hooks.slack-gov.com"))
+DISCORD_WEBHOOK_HOSTS = frozenset(
+    ("discord.com", "discordapp.com", "www.discord.com", "www.discordapp.com")
+)
+
+
+def webhook_provider(url: str) -> str:
+    """Return the provider for an exact official HTTPS webhook URL."""
+    if not isinstance(url, str) or not url:
+        return ""
+    try:
+        parts = urlsplit(url)
+        host = parts.hostname.lower() if parts.hostname else ""
+        port = parts.port
+    except (TypeError, ValueError):
+        return ""
+    if (
+        parts.scheme.lower() != "https"
+        or not host
+        or port is not None
+        or parts.username is not None
+        or parts.password is not None
+        or parts.query
+        or parts.fragment
+    ):
+        return ""
+
+    segments = parts.path.split("/")
+    if host in SLACK_WEBHOOK_HOSTS and len(segments) == 5 and segments[1] == "services":
+        return "slack" if all(segments[2:]) else ""
+    if (
+        host in DISCORD_WEBHOOK_HOSTS
+        and len(segments) == 5
+        and segments[1:3] == ["api", "webhooks"]
+    ):
+        return "discord" if all(segments[3:]) else ""
+    return ""
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Keep provider acknowledgement tied to the configured endpoint."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+def _open_webhook(request):
+    return urllib.request.build_opener(_NoRedirect()).open(request, timeout=15)
+
+
+def post_alert(content: str, url: Optional[str] = None) -> bool:
+    """Post to the configured official Slack or legacy Discord webhook."""
+    url = webhook_url() if url is None else url
     if not url:
-        log(f"log-only (no webhook): {content!r}")
+        log("log-only (no webhook configured)")
         return False
-    body = json.dumps({"content": content}).encode("utf-8")
+    provider = webhook_provider(url)
+    if not provider:
+        log("webhook rejected (unsupported endpoint)")
+        return False
+    if provider == "slack":
+        payload = {
+            "text": content,
+            "mrkdwn": False,
+            "link_names": False,
+            "parse": "none",
+            "unfurl_links": False,
+            "unfurl_media": False,
+        }
+    else:
+        payload = {"content": content}
+    body = json.dumps(payload).encode("utf-8")
     request = urllib.request.Request(
         url,
         data=body,
-        # Discord's edge rejects the default Python-urllib user agent (403),
-        # so identify as the monitor explicitly.
         headers={
             "Content-Type": "application/json",
             "User-Agent": "sn71-weights-watch/1.0",
         },
     )
     try:
-        with urllib.request.urlopen(request, timeout=15) as response:
+        with _open_webhook(request) as response:
+            if provider == "slack":
+                acknowledgement = (
+                    response.read(4096).decode("utf-8", "replace").strip()
+                )
+                return response.status == 200 and acknowledgement == "ok"
             return 200 <= response.status < 300
     except Exception as exc:
         # A dead webhook must not crash the pass. The caller retains the
         # incident's previous delivery epoch so the next cron tick retries it.
-        log(f"discord post failed: {exc}")
+        status = getattr(exc, "code", None)
+        if isinstance(status, int):
+            log(f"{provider} post failed (HTTPError, status={status})")
+        else:
+            log(f"{provider} post failed ({type(exc).__name__})")
         return False
+
+
+def webhook_workspace(url: str) -> str:
+    """Return the Slack workspace segment for a validated Slack webhook."""
+    if webhook_provider(url) != "slack":
+        return ""
+    return urlsplit(url).path.split("/")[2]
+
+
+def _replace_private_file(path: str, content: str) -> None:
+    """Write content privately and replace the target atomically."""
+    directory = os.path.dirname(path) or "."
+    fd, pending = tempfile.mkstemp(prefix=".weights-webhook-", dir=directory)
+    try:
+        if hasattr(os, "fchmod"):
+            os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "w") as handle:
+            fd = None
+            handle.write(content)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(pending, path)
+    finally:
+        if fd is not None:
+            os.close(fd)
+        if os.path.exists(pending):
+            os.unlink(pending)
+
+
+def configure_webhook_from_env(expected_slack_workspace: str) -> str:
+    """Safely switch the active destination when the deployment secret exists.
+
+    The candidate is read only from ``WEIGHTS_ALERT_WEBHOOK``. A missing
+    candidate is a no-op so ordinary releases preserve the current destination.
+    A candidate is tested before a private rollback copy and atomic replacement.
+    """
+    candidate = os.environ.get(WEBHOOK_ENV, "").strip()
+    if not candidate:
+        return "no-op"
+    if webhook_provider(candidate) != "slack":
+        raise ValueError("candidate is not an official Slack webhook")
+    if webhook_workspace(candidate) != expected_slack_workspace:
+        raise ValueError("candidate Slack webhook has the wrong workspace")
+
+    target = WEBHOOK_FILE
+    if os.path.islink(target) or not os.path.isfile(target):
+        raise RuntimeError("active webhook file is missing or unsafe")
+    previous = webhook_url()
+    if not webhook_provider(previous):
+        raise RuntimeError("active webhook is missing or unsupported")
+    if previous == candidate:
+        return "no-op"
+    rollback = WEBHOOK_ROLLBACK_FILE
+    if os.path.lexists(rollback) and (
+        os.path.islink(rollback) or not os.path.isfile(rollback)
+    ):
+        raise RuntimeError("rollback copy is unsafe")
+
+    test_message = (
+        "SN71 missed-weight monitor — connection test only. "
+        "This verifies the configured alert destination; no incident was generated."
+    )
+    if not post_alert(test_message, url=candidate):
+        raise RuntimeError("candidate webhook did not acknowledge the test")
+
+    _replace_private_file(rollback, previous + "\n")
+    _replace_private_file(target, candidate + "\n")
+    return "switched"
 
 
 def _scale(value):
@@ -399,12 +560,31 @@ def official_epoch_state(subtensor):
 
 
 def main() -> int:
+    if "--configure-webhook" in sys.argv:
+        expected_workspace = ""
+        try:
+            index = sys.argv.index("--expected-slack-workspace")
+            expected_workspace = sys.argv[index + 1]
+            status = configure_webhook_from_env(expected_workspace)
+        except Exception as exc:
+            log(f"webhook configuration failed ({type(exc).__name__})")
+            print(
+                f"webhook configuration failed ({type(exc).__name__})",
+                file=sys.stderr,
+            )
+            return 1
+        print(f"webhook configuration: {status}")
+        return 0
+
     if "--test" in sys.argv:
-        sent = post_discord(
+        sent = post_alert(
             "✅ SN71 weights watch: test message (official-epoch alerting is wired up)"
         )
-        print("test message sent" if sent else "log-only (no webhook configured)")
-        return 0
+        if sent:
+            print("test message sent")
+            return 0
+        print("test message failed", file=sys.stderr)
+        return 1
 
     state = load_state()
     deliveries = incident_delivery_epochs(state)
@@ -597,7 +777,7 @@ def main() -> int:
         )
         alert_label = "missed weight set reminder" if is_reminder else "missed weight set"
         lines = [
-            f"🚨 **SN71 {alert_label}** "
+            f"🚨 SN71 {alert_label} "
             f"(official epoch {completed_epoch_index} completed; checked at "
             f"epoch {epoch_index}, block {epoch_block}/{tempo})"
         ]
@@ -620,7 +800,7 @@ def main() -> int:
                 "Primary miss ⇒ auditors have no bundle to copy; check gateway "
                 "/weights/submit responses and the validator log."
             )
-        delivery_succeeded = post_discord("\n".join(lines))
+        delivery_succeeded = post_alert("\n".join(lines))
         if delivery_succeeded:
             for vid, *_, incident_keys in misses:
                 mark_incidents_delivered(
