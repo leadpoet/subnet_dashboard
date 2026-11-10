@@ -1045,6 +1045,13 @@ try {
   }))
   assert.match(incompleteBaselineResults, /This model’s score and diagnostics appear/)
   assert.doesNotMatch(incompleteBaselineResults, /Zenskar|HiddenLayer/)
+  const loadingScoredResults = renderToStaticMarkup(React.createElement(renderedModule.exports.PublishedResults, {
+    submission: { ...submissions[0], isBaseline: false, finalScore: 38.8 },
+    round: activeRound, benchmark, benchmarkState: 'available', results: null, resultsState: 'loading',
+  }))
+  assert.match(loadingScoredResults, /Loading this model’s score and diagnostics\./)
+  assert.doesNotMatch(loadingScoredResults, /appear when its evaluation and cost checks are complete/,
+    'a finished score that is still loading must not read as an unfinished evaluation')
   assert.equal(unpublishedResults.companyDiagnostics, null)
   const unpublishedDiagnosticsMarkup = renderToStaticMarkup(React.createElement(renderedModule.exports.PublishedResults, {
     submission: submissions[0], round: pendingRound, benchmark, benchmarkState: 'available',
@@ -1385,6 +1392,25 @@ try {
     ].slice(0, expectedCalls), 'only legacy failures without a displayed reason need a detail lookup')
     return response.json()
   }
+  const resultRouteSource = await readFile(resolve('src/app/api/research-lab/rounds/[roundId]/results/[submissionId]/route.ts'), 'utf8')
+  const resultDeadlines = []
+  const resultProxyModule = { exports: {} }
+  vm.runInNewContext(ts.transpileModule(proxySource, {
+    compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
+  }).outputText, {
+    module: resultProxyModule, exports: resultProxyModule.exports, require, process: { env: {} },
+    AbortSignal: { timeout: (ms) => { resultDeadlines.push(ms); return undefined } },
+    fetch: async () => Response.json({ ok: true }),
+  })
+  const resultRouteModule = { exports: {} }
+  vm.runInNewContext(ts.transpileModule(resultRouteSource, {
+    compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
+  }).outputText, {
+    module: resultRouteModule, exports: resultRouteModule.exports,
+    require: (name) => name === '@/lib/arena-public-proxy' ? resultProxyModule.exports : require(name),
+  })
+  assert.equal((await resultRouteModule.exports.GET(null, { params: Promise.resolve({ roundId: 'arena-2026-11-09', submissionId: 'sub-a' }) })).status, 200)
+  assert.ok(resultDeadlines[0] >= 15_000, 'a full result must outlast the 5-11 s the gateway took on Nov 9, 2026')
   const detailedFailures = {
     ...credentialFixture.submissions,
     submissions: Array.from({ length: 145 }, (_, index) => ({
