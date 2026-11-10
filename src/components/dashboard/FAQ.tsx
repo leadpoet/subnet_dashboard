@@ -245,7 +245,6 @@ function Sidebar() {
     <nav aria-label="Subnet 71 links" className="border-t border-[var(--line)] pt-4 lg:border-t-0 lg:border-l lg:pl-6">
       <h3 className="mb-3 px-4 text-[12px] text-[var(--muted)]">Explore Subnet 71</h3>
       <SidebarLink href="https://github.com/leadpoet/leadpoet">GitHub</SidebarLink>
-      <SidebarLink href="https://x.com/subnet71">X</SidebarLink>
       <SidebarLink href="https://discord.gg/dVxQZmJwxB">Discord</SidebarLink>
     </nav>
   )
