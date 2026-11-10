@@ -773,7 +773,7 @@ try {
     round: { ...activeRound, defendingChampion: { submissionId: 'sub-champion', minerHotkey: defenderHotkey } }, selectedId: null, onSelect: () => {},
   }))
   assert.match(namedDefendingTable, />Defending champion</)
-  assert.match(namedDefendingTable, new RegExp(`title="${defenderHotkey}">${defenderHotkey.slice(0, 8)}`), 'the defending row names the champion miner it ran')
+  assert.match(namedDefendingTable, new RegExp(`title="${defenderHotkey}"[^>]*>(?:<[^>]+>)*${defenderHotkey.slice(0, 8)}`), 'the defending row names the champion miner it ran')
   assert.doesNotMatch(namedDefendingTable, /Run by organizer/)
   assert.equal(competitionSubmissionMiner({ isBaseline: false, minerHotkey: '5miner' }, { defendingChampion: null }), '5miner')
   assert.equal(competitionSubmissionMiner({ isBaseline: true, minerHotkey: '5organizer' }, { defendingChampion: null }), null)

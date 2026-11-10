@@ -167,10 +167,10 @@ function ChampionSummary({ round, history = [], active = true, kingHotkey = null
         </div>
         {round && champion ? <div className="col-span-2 space-y-1.5 text-[12px] text-[var(--muted)] md:mt-5">
           {latest && !latest.newChampion ? <p>Latest score · {formatUtcDate(latest.evaluationDate)}</p> : <p>Winning score · crowned {formatUtcDate(round.evaluationDate)}</p>}
-          <p className="font-mono text-[12px]" title={champion.minerHotkey}>{shortHotkey(champion.minerHotkey)}</p>
+          <p className="font-mono text-[12px]" title={champion.minerHotkey}><CopyableHotkey hotkey={champion.minerHotkey} /></p>
           {latest && !latest.newChampion ? <p>Crowned {formatUtcDate(round.evaluationDate)} · winning score {formatCompetitionScore(champion.finalScore)}</p> : null}
           {champion.finalScore === null && !latest ? <p>Champion score unavailable.</p> : null}
-        </div> : kingHotkey ? <div className="col-span-2 space-y-1.5 text-[12px] text-[var(--muted)] md:mt-5">{latest ? <p>Latest score · {formatUtcDate(latest.evaluationDate)}</p> : null}<p className="font-mono text-[12px]" title={kingHotkey}>{shortHotkey(kingHotkey)}</p></div> : <p className="col-span-2 text-[12px] text-[var(--muted)] md:mt-5">No promoted champion in published history.</p>}
+        </div> : kingHotkey ? <div className="col-span-2 space-y-1.5 text-[12px] text-[var(--muted)] md:mt-5">{latest ? <p>Latest score · {formatUtcDate(latest.evaluationDate)}</p> : null}<p className="font-mono text-[12px]" title={kingHotkey}><CopyableHotkey hotkey={kingHotkey} /></p></div> : <p className="col-span-2 text-[12px] text-[var(--muted)] md:mt-5">No promoted champion in published history.</p>}
       </div>
       <button type="button" aria-expanded={historyExpanded} aria-controls={historyId} onClick={() => setHistoryExpanded((expanded) => !expanded)} className="mt-4 flex min-h-11 w-full items-center justify-between border-t border-[var(--line)] pt-3 text-[14px] text-[var(--platinum)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 md:hidden">
         <span>{historyExpanded ? 'Hide score history' : 'Show score history'}</span><ChevronDown aria-hidden className={`h-4 w-4 transition-transform ${historyExpanded ? 'rotate-180' : ''}`} />
@@ -240,7 +240,7 @@ function RewardSeatCard({ seat, podiumClass }: { seat: CompetitionRewardSeat; po
         <p className="whitespace-nowrap font-mono text-[14px] text-[var(--white)]">{formatRewardSeatShare(share)}<span className="ml-1 font-sans text-[12px] text-[var(--muted)]">of emissions</span></p>
       </div>
       {holder ? <div className="mt-3 space-y-1.5 text-[12px] text-[var(--muted)]">
-        <p className="font-mono text-[var(--platinum)]" title={holder.minerHotkey}>{shortHotkey(holder.minerHotkey)}</p>
+        <p className="font-mono text-[var(--platinum)]" title={holder.minerHotkey}><CopyableHotkey hotkey={holder.minerHotkey} /></p>
         <p>+{formatCompetitionScorePrecise(holder.improvement)} · {formatCompetitionScorePrecise(holder.winnerScore)} vs {formatCompetitionScorePrecise(holder.baselineScore)}{wonOn ? ` · ${formatUtcDate(wonOn)}` : ''}</p>
         <p>{rewardSeatDecayLabel(seat)}</p>
       </div> : <p className="mt-3 text-[12px] text-[var(--muted)]">Open. No winner holds this seat, so its share is burned.</p>}
@@ -634,7 +634,7 @@ function SubmissionTable({ submissions, round, selectedId, onSelect, expandedCon
               </button>
               <div className="px-4 pb-4 text-[14px] leading-relaxed text-[var(--muted)] sm:hidden"><SubmissionStatus submission={submission} round={round} /></div>
             </td>
-            <td className="hidden break-words px-4 py-4 font-mono text-[12px] text-[var(--muted)] sm:table-cell" title={miner ?? undefined}>{miner ? shortHotkey(miner) : 'Run by organizer'}</td>
+            <td className="hidden break-words px-4 py-4 font-mono text-[12px] text-[var(--muted)] sm:table-cell" title={miner ?? undefined}>{miner ? <CopyableHotkey hotkey={miner} /> : 'Run by organizer'}</td>
             <td className="hidden px-3 py-4 text-[14px] leading-relaxed text-[var(--muted)] sm:table-cell"><SubmissionStatus submission={submission} round={round} /></td>
             <td className="px-4 py-4 text-right align-top font-mono text-[14px] text-[var(--platinum)] sm:align-middle">{formatCompetitionScore(submission.finalScore)}</td>
           </tr>{selected && expandedContent ? <tr id={`submission-${submission.submissionId}`}><td colSpan={4} className="border-t border-[var(--line)] bg-[var(--surface)]">{expandedContent}</td></tr> : null}</Fragment>
@@ -795,6 +795,23 @@ function roundStatusLabel(value: string): string {
 }
 function humanize(value: string): string { const normalized = value.trim().replaceAll('_', ' '); return normalized ? normalized[0].toUpperCase() + normalized.slice(1) : 'Unavailable' }
 function shortId(value: string): string { return value.length > 18 ? `${value.slice(0, 9)}…${value.slice(-6)}` : value }
+/** The short hotkey copies the full one. It sits above a row's stretched button so a copy does not open the row. */
+function CopyableHotkey({ hotkey }: { hotkey: string }) {
+  const [outcome, setOutcome] = useState<'copied' | 'failed' | null>(null)
+  const resetTimer = useRef<number | undefined>(undefined)
+  useEffect(() => () => window.clearTimeout(resetTimer.current), [])
+  const short = shortHotkey(hotkey)
+  const copy = async () => {
+    let next: 'copied' | 'failed' = 'copied'
+    try { await navigator.clipboard.writeText(hotkey) } catch { next = 'failed' }
+    setOutcome(next)
+    window.clearTimeout(resetTimer.current)
+    resetTimer.current = window.setTimeout(() => setOutcome(null), 1500)
+  }
+  const message = outcome === 'copied' ? 'Copied' : outcome === 'failed' ? 'Copy failed' : null
+  return <button type="button" onClick={copy} title={hotkey} aria-label={message ?? `Copy hotkey ${short}`} className="relative z-10 inline-block rounded-sm text-left font-mono transition-colors hover:text-[var(--white)]"><span className={message ? 'invisible' : undefined}>{short}</span>{message ? <span className="absolute inset-0 whitespace-nowrap text-[var(--white)]">{message}</span> : null}</button>
+}
+
 function shortHotkey(value: string): string { return value.length > 18 ? `${value.slice(0, 9)}…${value.slice(-6)}` : value }
 function formatUtc(value: string): string { const date = new Date(value); return Number.isFinite(date.getTime()) ? `${new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone: 'UTC' }).format(date)} UTC` : value }
 function formatUtcTime(value: number): string { return Number.isFinite(value) ? `${new Intl.DateTimeFormat('en-US', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone: 'UTC' }).format(new Date(value))} UTC` : '' }
