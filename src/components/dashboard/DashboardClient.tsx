@@ -19,6 +19,19 @@ export function DashboardClient() {
   )
   const navWrapRef = useRef<HTMLDivElement>(null)
   const tabIndicatorRef = useRef<HTMLSpanElement>(null)
+  const surfaceRef = useRef<HTMLDivElement>(null)
+
+  // Browsers can show the focus outline after a click. Keep it for Tab users only.
+  useEffect(() => {
+    const onPointerDown = () => { if (surfaceRef.current) surfaceRef.current.dataset.input = 'pointer' }
+    const onKeyDown = (event: KeyboardEvent) => { if (event.key === 'Tab' && surfaceRef.current) delete surfaceRef.current.dataset.input }
+    document.addEventListener('pointerdown', onPointerDown, true)
+    document.addEventListener('keydown', onKeyDown, true)
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown, true)
+      document.removeEventListener('keydown', onKeyDown, true)
+    }
+  }, [])
 
   const activateTab = useCallback((tab: DashboardTabKey) => {
     setMountedTabs((current) => new Set(current).add(tab))
@@ -67,7 +80,7 @@ export function DashboardClient() {
   }, [activeTab])
 
   return (
-    <div className="dashboard-surface relative min-h-screen">
+    <div ref={surfaceRef} className="dashboard-surface relative min-h-screen">
       <div className="relative z-10 max-w-[1240px] mx-auto px-5 md:px-8">
         <header className="py-6 md:py-8">
           <div className="flex items-center gap-4">

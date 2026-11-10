@@ -565,6 +565,19 @@ body::before {
   outline-offset: -2px;
 }
 
+.dashboard-surface[data-input="pointer"] :is(button, a, summary, [role="tab"], [role="combobox"]):focus-visible {
+  outline: none !important;
+  box-shadow: none !important;
+}
+
+.dashboard-surface[data-input="pointer"] [role="combobox"]:focus-visible {
+  border-color: var(--line-2) !important;
+}
+
+.dashboard-surface[data-input="pointer"] :focus-visible::after {
+  box-shadow: none !important;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .dashboard-surface *, .dashboard-surface *::after,
   .dashboard-popover *, .dashboard-popover *::after {
