@@ -619,6 +619,7 @@ export type CompetitionRewardSeat = {
   /** Share after a funding halving; null unless the gateway publishes one for this seat's holder. */
   postFundingSharePercent: number | null
   halvings: number | null
+  epochsPerHalving: number | null
   epochsToNextHalving: number | null
   holder: {
     minerHotkey: string
@@ -630,8 +631,21 @@ export type CompetitionRewardSeat = {
   } | null
 }
 
-export type CompetitionRewardSeats = { seats: CompetitionRewardSeat[] }
+export type CompetitionRewardSeats = {
+  seats: CompetitionRewardSeat[]
+  /** False until the gateway publishes the signed champion factor, so a full share cannot yet be confirmed. */
+  fundingFactorKnown: boolean
+}
 
+export type CompetitionRewardSeatReduction = {
+  kind: 'weekly' | 'funding'
+  /** What this reduction divides the share by: 4 after two weekly halvings. */
+  divisor: number
+  /** The share once this reduction is applied. */
+  sharePercent: number
+}
+
+const FULL_REWARD_FACTOR_PPM = 1_000_000
 const FUNDING_HALVED_REWARD_FACTOR_PPM = 500_000
 
 /** The three reward seats from the public current-round state, in policy order.
@@ -654,6 +668,7 @@ export function normalizeCompetitionRewardSeats(value: unknown): CompetitionRewa
   const epochsPerHalving = integer(clock?.epochs_per_halving)
   const currentEpoch = source.epoch_eligible === true ? integer(source.current_epoch) : null
   const fundingHalved = source.champion_reward_factor_ppm === FUNDING_HALVED_REWARD_FACTOR_PPM
+  const fundingFactorKnown = fundingHalved || source.champion_reward_factor_ppm === FULL_REWARD_FACTOR_PPM
   const kingHotkey = text(record(source.king)?.hotkey)
   const seats: CompetitionRewardSeat[] = []
   let totalAllocationPercent = 0
@@ -665,7 +680,7 @@ export function normalizeCompetitionRewardSeats(value: unknown): CompetitionRewa
     if (index > 0 && minimumImprovement >= seats[index - 1].minimumImprovement) return null
     totalAllocationPercent += allocationPercent
     const baseSharePercent = allocationBasis === 'total_emissions' ? allocationPercent : poolPercent * allocationPercent / 100
-    const seat: CompetitionRewardSeat = { minimumImprovement, baseSharePercent, currentSharePercent: null, postFundingSharePercent: null, halvings: null, epochsToNextHalving: null, holder: null }
+    const seat: CompetitionRewardSeat = { minimumImprovement, baseSharePercent, currentSharePercent: null, postFundingSharePercent: null, halvings: null, epochsPerHalving: null, epochsToNextHalving: null, holder: null }
     if (slots[index] !== null) {
       const achievement = record(slots[index])
       const minerHotkey = text(achievement?.miner_hotkey)
@@ -679,6 +694,7 @@ export function normalizeCompetitionRewardSeats(value: unknown): CompetitionRewa
       if (startEpoch !== null && epochsPerHalving && currentEpoch !== null && currentEpoch >= startEpoch) {
         const elapsed = currentEpoch - startEpoch
         seat.halvings = Math.floor(elapsed / epochsPerHalving)
+        seat.epochsPerHalving = epochsPerHalving
         seat.epochsToNextHalving = epochsPerHalving - (elapsed % epochsPerHalving)
         seat.currentSharePercent = baseSharePercent / 2 ** seat.halvings
       }
@@ -688,7 +704,15 @@ export function normalizeCompetitionRewardSeats(value: unknown): CompetitionRewa
     seats.push(seat)
   }
   if (totalAllocationPercent !== (allocationBasis === 'total_emissions' ? poolPercent : 100)) return null
-  return { seats }
+  return { seats, fundingFactorKnown }
+}
+
+/** Each cut between a seat's full share and what it pays now, in the order the validator kernel applies them. */
+export function competitionRewardSeatReductions(seat: CompetitionRewardSeat): CompetitionRewardSeatReduction[] {
+  const reductions: CompetitionRewardSeatReduction[] = []
+  if (seat.halvings && seat.currentSharePercent !== null) reductions.push({ kind: 'weekly', divisor: 2 ** seat.halvings, sharePercent: seat.currentSharePercent })
+  if (seat.postFundingSharePercent !== null) reductions.push({ kind: 'funding', divisor: 2, sharePercent: seat.postFundingSharePercent })
+  return reductions
 }
 
 export function formatRewardSeatShare(percent: number): string {

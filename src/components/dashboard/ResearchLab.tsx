@@ -1,7 +1,8 @@
 'use client'
 
-import { Fragment, createContext, useCallback, useContext, useEffect, useId, useRef, useState, type ReactNode } from 'react'
+import { Fragment, createContext, useCallback, useContext, useEffect, useId, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
 import { Check, ChevronDown, ChevronRight, ChevronUp } from 'lucide-react'
+import * as Popover from '@radix-ui/react-popover'
 import * as Select from '@radix-ui/react-select'
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { useVisiblePolling } from '@/lib/hooks/useVisiblePolling'
@@ -23,7 +24,9 @@ import {
   competitionSubmissionMiner,
   type CompetitionScoreHistoryPoint,
   type CompetitionRewardSeat,
+  type CompetitionRewardSeatReduction,
   type CompetitionRewardSeats,
+  competitionRewardSeatReductions,
   formatCompetitionScore,
   formatRewardSeatShare,
   currentChampionRound,
@@ -223,21 +226,25 @@ function RewardSeats({ seats }: { seats: CompetitionRewardSeats | null | undefin
         <ul className="mt-3 grid min-w-0 gap-3 md:grid-cols-3">
           {seats ? seats.seats.map((seat, index) => <RewardSeatCard key={seat.minimumImprovement} seat={seat} podiumClass={REWARD_SEAT_PODIUM[index]} />) : REWARD_SEAT_PODIUM.map((podiumClass) => <li key={podiumClass} className={`min-h-[132px] shimmer rounded-xl ${podiumClass}`} />)}
         </ul>
-        <p className="mt-3 text-[12px] leading-relaxed text-[var(--muted-2)]">A new champion takes only the seats its improvement clears, so a larger seat can stay with an earlier winner. {seats?.seats.some((seat) => seat.postFundingSharePercent !== null) ? 'Shares show the amount before funding halvings, then the amount after.' : 'Shares are shown before funding halvings.'}</p>
+        <p className="mt-3 text-[12px] leading-relaxed text-[var(--muted-2)]">A new champion takes only the seats its improvement clears, so a larger seat can stay with an earlier winner. {rewardSeatsNote(seats)}</p>
       </>}
     </section>
   )
 }
 
+function rewardSeatsNote(seats: CompetitionRewardSeats | undefined): string {
+  if (seats?.seats.some((seat) => competitionRewardSeatReductions(seat).length)) return 'A struck-through share is the seat’s full amount. Hover or tap the current share to see each reduction.'
+  return seats?.fundingFactorKnown ? '' : 'Shares are shown before any halving for a champion’s failed provider keys.'
+}
+
 function RewardSeatCard({ seat, podiumClass }: { seat: CompetitionRewardSeat; podiumClass: string }) {
-  const share = seat.currentSharePercent ?? seat.baseSharePercent
   const holder = seat.holder
   const wonOn = holder?.roundId.match(/\d{4}-\d{2}-\d{2}$/)?.[0] ?? null
   return (
     <li className={`min-w-0 rounded-xl border border-[var(--line)] bg-[var(--surface)] p-4 ${podiumClass}`}>
-      <div className="flex items-baseline justify-between gap-3">
+      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
         <h3 className="text-[14px] text-[var(--platinum)]">+{seat.minimumImprovement} or more</h3>
-        <p className="whitespace-nowrap font-mono text-[14px] text-[var(--white)]">{seat.postFundingSharePercent === null ? formatRewardSeatShare(share) : <><span className="text-[var(--muted)]">{formatRewardSeatShare(share)}</span><span className="text-[var(--muted)]" aria-hidden> / </span><span className="sr-only"> before funding halving, </span>{formatRewardSeatShare(seat.postFundingSharePercent)}<span className="sr-only"> after</span></>}<span className="ml-1 font-sans text-[12px] text-[var(--muted)]">of emissions</span></p>
+        <RewardSeatShare seat={seat} />
       </div>
       {holder ? <div className="mt-3 space-y-1.5 text-[12px] text-[var(--muted)]">
         <p className="font-mono text-[var(--platinum)]" title={holder.minerHotkey}><CopyableHotkey hotkey={holder.minerHotkey} /></p>
@@ -250,9 +257,79 @@ function RewardSeatCard({ seat, podiumClass }: { seat: CompetitionRewardSeat; po
 
 function rewardSeatDecayLabel(seat: CompetitionRewardSeat): string {
   if (seat.currentSharePercent === null || seat.halvings === null || seat.epochsToNextHalving === null) return `Base share · current decay unavailable`
-  const next = `next halving in ${seat.epochsToNextHalving} ${seat.epochsToNextHalving === 1 ? 'epoch' : 'epochs'}`
-  if (seat.halvings === 0 && seat.postFundingSharePercent !== null) return `Funding halved · ${next}`
-  return seat.halvings === 0 ? `Full share · ${next}` : `Halved ${seat.halvings}× from ${formatRewardSeatShare(seat.baseSharePercent)} · ${next}`
+  const epochs = `${seat.epochsToNextHalving} ${seat.epochsToNextHalving === 1 ? 'epoch' : 'epochs'}`
+  return competitionRewardSeatReductions(seat).length ? `Next halving in ${epochs}` : `Full share · next halving in ${epochs}`
+}
+
+const REWARD_REDUCTION_LABEL = { weekly: 'Weekly decay', funding: 'Keys out' } as const
+
+function RewardSeatShare({ seat }: { seat: CompetitionRewardSeat }) {
+  const reductions = competitionRewardSeatReductions(seat)
+  const emissions = <span className="ml-1 font-sans text-[12px] text-[var(--muted)]">of emissions</span>
+  const shareClass = 'whitespace-nowrap font-mono text-[14px] text-[var(--white)]'
+  if (!reductions.length) return <p className={shareClass}>{formatRewardSeatShare(seat.currentSharePercent ?? seat.baseSharePercent)}{emissions}</p>
+  return (
+    <div className="ml-auto text-right">
+      <p className={shareClass}>
+        <s className="text-[var(--muted)]"><span className="sr-only">Full share </span>{formatRewardSeatShare(seat.baseSharePercent)}</s>{' '}
+        <RewardShareBreakdown seat={seat} reductions={reductions} />{emissions}
+      </p>
+      <p className="mt-0.5 text-[12px] text-[var(--muted)]">{reductions.map((reduction) => `${REWARD_REDUCTION_LABEL[reduction.kind]} ÷${reduction.divisor}`).join(' · ')}</p>
+    </div>
+  )
+}
+
+/** Opens on hover or keyboard focus for the number itself; a tap toggles it, since touch has no hover. */
+function RewardShareBreakdown({ seat, reductions }: { seat: CompetitionRewardSeat; reductions: CompetitionRewardSeatReduction[] }) {
+  const [open, setOpen] = useState(false)
+  const hovering = useRef(false)
+  const hover = (next: boolean) => (event: ReactPointerEvent) => {
+    if (event.pointerType !== 'mouse') return
+    hovering.current = next
+    setOpen(next)
+  }
+  const actual = formatRewardSeatShare(reductions[reductions.length - 1].sharePercent)
+  return (
+    <Popover.Root open={open} onOpenChange={setOpen}>
+      <Popover.Trigger
+        onPointerEnter={hover(true)}
+        onPointerLeave={hover(false)}
+        onFocus={(event) => { if (event.currentTarget.matches(':focus-visible')) setOpen(true) }}
+        onBlur={() => setOpen(false)}
+        onClick={(event) => { if (hovering.current) event.preventDefault() }}
+        aria-label={`${actual} now. See why this share is reduced`}
+        className="cursor-help rounded-sm underline decoration-[var(--muted)] decoration-dotted underline-offset-4"
+      >{actual}</Popover.Trigger>
+      <Popover.Portal>
+        <Popover.Content
+          align="end"
+          sideOffset={8}
+          collisionPadding={16}
+          onOpenAutoFocus={(event) => event.preventDefault()}
+          onCloseAutoFocus={(event) => event.preventDefault()}
+          className="pointer-events-none z-50 w-72 max-w-[calc(100vw-32px)] space-y-3 rounded-md border border-[var(--line-3)] bg-[var(--surface)] p-3 text-[12px] leading-relaxed text-[var(--muted)] shadow-lg"
+        >
+          <RewardShareStep label="Full seat share" share={seat.baseSharePercent} />
+          {reductions.map((reduction) => <RewardShareStep key={reduction.kind} label={`${REWARD_REDUCTION_LABEL[reduction.kind]} ÷${reduction.divisor}`} share={reduction.sharePercent}>{rewardReductionReason(reduction, seat)}</RewardShareStep>)}
+        </Popover.Content>
+      </Popover.Portal>
+    </Popover.Root>
+  )
+}
+
+function RewardShareStep({ label, share, children }: { label: string; share: number; children?: ReactNode }) {
+  return (
+    <div>
+      <p className="flex items-baseline justify-between gap-3 text-[var(--platinum)]"><span>{label}</span><span className="font-mono">{formatRewardSeatShare(share)}</span></p>
+      {children ? <p className="mt-1">{children}</p> : null}
+    </div>
+  )
+}
+
+function rewardReductionReason(reduction: CompetitionRewardSeatReduction, seat: CompetitionRewardSeat): string {
+  if (reduction.kind === 'funding') return 'One of the champion’s own provider keys kept failing during its daily rerun, so the organizer’s account paid instead. Its share stays halved until a rerun finishes on its own keys or it wins a new round.'
+  const halvings = seat.halvings ?? 0
+  return `A seat halves every ${seat.epochsPerHalving} epochs, about a week, while the same model holds it. This one has halved ${halvings} ${halvings === 1 ? 'time' : 'times'}.`
 }
 
 function RoundSummary({ round }: { round: CompetitionRoundSummary }) {
