@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import json
 import sys
 import types
 import unittest
@@ -25,6 +26,115 @@ from weights_alert import (
     sync_incident_delivery_epochs,
     update_incident_state,
 )
+
+
+class _FakeResponse:
+    def __init__(self, status, body=b""):
+        self.status = status
+        self._body = body
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        return False
+
+    def read(self, _limit):
+        return self._body
+
+
+class WeightsAlertWebhookTest(unittest.TestCase):
+    def test_webhook_provider_requires_exact_official_https_endpoint(self):
+        self.assertEqual(
+            weights_alert.webhook_provider(
+                "https://hooks.slack.com/services/T000/B000/secret"
+            ),
+            "slack",
+        )
+        self.assertEqual(
+            weights_alert.webhook_provider(
+                "https://discord.com/api/webhooks/123/secret"
+            ),
+            "discord",
+        )
+        for url in (
+            "http://hooks.slack.com/services/T000/B000/secret",
+            "https://example.com/services/T000/B000/secret",
+            "https://hooks.slack.com/services/T000/B000/secret?wait=true",
+            "https://hooks.slack.com:443/services/T000/B000/secret",
+            "https://hooks.slack.com/services/T000/B000/secret/extra",
+        ):
+            with self.subTest(url=url):
+                self.assertEqual(weights_alert.webhook_provider(url), "")
+
+    def test_slack_requires_http_200_and_plain_ok_acknowledgement(self):
+        slack_url = "https://hooks.slack.com/services/T000/B000/secret"
+        for status, body, expected in ((200, b"ok", True), (200, b"error", False), (204, b"ok", False)):
+            with self.subTest(status=status, body=body):
+                response = _FakeResponse(status, body)
+                with patch.object(weights_alert, "_open_webhook", return_value=response) as open_webhook:
+                    self.assertEqual(
+                        weights_alert.post_alert("SN71 alert", slack_url), expected
+                    )
+                request = open_webhook.call_args.args[0]
+                self.assertEqual(
+                    json.loads(request.data),
+                    {
+                        "text": "SN71 alert",
+                        "mrkdwn": False,
+                        "link_names": False,
+                        "parse": "none",
+                        "unfurl_links": False,
+                        "unfurl_media": False,
+                    },
+                )
+
+    def test_discord_legacy_webhook_accepts_success_status_without_body(self):
+        discord_url = "https://discord.com/api/webhooks/123/secret"
+        response = _FakeResponse(204)
+        with patch.object(weights_alert, "_open_webhook", return_value=response) as open_webhook:
+            self.assertTrue(weights_alert.post_alert("SN71 alert", discord_url))
+        request = open_webhook.call_args.args[0]
+        self.assertEqual(json.loads(request.data), {"content": "SN71 alert"})
+
+    def test_redirects_are_not_followed(self):
+        self.assertIsNone(
+            weights_alert._NoRedirect().redirect_request(
+                None, None, 302, "Found", {}, "https://example.com/redirect"
+            )
+        )
+
+    def test_webhook_errors_redact_url_and_unsupported_urls_are_not_opened(self):
+        slack_url = "https://hooks.slack.com/services/T000/B000/secret"
+        logs = []
+        with ExitStack() as stack:
+            stack.enter_context(
+                patch.object(
+                    weights_alert,
+                    "_open_webhook",
+                    side_effect=RuntimeError(f"failed {slack_url} secret token"),
+                )
+            )
+            stack.enter_context(
+                patch.object(weights_alert, "log", side_effect=logs.append)
+            )
+            self.assertFalse(weights_alert.post_alert("SN71 alert", slack_url))
+        self.assertNotIn(slack_url, logs[0])
+        self.assertNotIn("secret", logs[0])
+        self.assertIn("RuntimeError", logs[0])
+
+        with patch.object(weights_alert, "_open_webhook") as open_webhook:
+            self.assertFalse(
+                weights_alert.post_alert(
+                    "SN71 alert", "https://untrusted.example/hooks/secret"
+                )
+            )
+        open_webhook.assert_not_called()
+
+    def test_test_mode_returns_nonzero_when_provider_rejects_message(self):
+        with patch.object(weights_alert, "post_alert", return_value=False):
+            with patch.object(sys, "argv", ["weights_alert.py", "--test"]):
+                self.assertEqual(weights_alert.main(), 1)
 
 
 class WeightsAlertIncidentStateTest(unittest.TestCase):
@@ -137,7 +247,7 @@ class WeightsAlertIncidentStateTest(unittest.TestCase):
             stack.enter_context(
                 patch.object(
                     weights_alert,
-                    "post_discord",
+                    "post_alert",
                     side_effect=lambda content: messages.append(content) or True,
                 )
             )
@@ -218,7 +328,7 @@ class WeightsAlertIncidentStateTest(unittest.TestCase):
             stack.enter_context(
                 patch.object(
                     weights_alert,
-                    "post_discord",
+                    "post_alert",
                     side_effect=lambda content: messages.append(content) or True,
                 )
             )
@@ -264,6 +374,13 @@ class WeightsAlertIncidentStateTest(unittest.TestCase):
         self.assertNotIn("\n", name)
         self.assertNotIn("@everyone", name)
         self.assertLessEqual(len(name), 81)
+
+    def test_identity_name_breaks_mentions_and_links(self):
+        name = safe_identity_name("<@U123> https://evil.example/x www.evil.example")
+
+        self.assertNotIn("<@U123>", name)
+        self.assertNotIn("https://", name)
+        self.assertNotIn("www.", name)
 
     def test_main_waits_for_completed_epoch_at_404_to_430_block_transition(self):
         class Metagraph:
@@ -320,7 +437,7 @@ class WeightsAlertIncidentStateTest(unittest.TestCase):
             stack.enter_context(
                 patch.object(
                     weights_alert,
-                    "post_discord",
+                    "post_alert",
                     side_effect=lambda content: messages.append(content) or True,
                 )
             )
@@ -389,7 +506,7 @@ class WeightsAlertIncidentStateTest(unittest.TestCase):
             stack.enter_context(
                 patch.object(
                     weights_alert,
-                    "post_discord",
+                    "post_alert",
                     side_effect=lambda content: messages.append(content) or True,
                 )
             )
@@ -609,7 +726,7 @@ class WeightsAlertIncidentStateTest(unittest.TestCase):
             stack.enter_context(
                 patch.object(
                     weights_alert,
-                    "post_discord",
+                    "post_alert",
                     side_effect=lambda content: messages.append(content) or True,
                 )
             )
@@ -691,7 +808,7 @@ class WeightsAlertIncidentStateTest(unittest.TestCase):
             )
             stack.enter_context(patch.object(weights_alert, "save_state"))
             stack.enter_context(
-                patch.object(weights_alert, "post_discord", side_effect=deliver)
+                patch.object(weights_alert, "post_alert", side_effect=deliver)
             )
             stack.enter_context(
                 patch.object(
@@ -789,7 +906,7 @@ class WeightsAlertIncidentStateTest(unittest.TestCase):
             stack.enter_context(
                 patch.object(
                     weights_alert,
-                    "post_discord",
+                    "post_alert",
                     side_effect=lambda content: messages.append(content) or True,
                 )
             )
