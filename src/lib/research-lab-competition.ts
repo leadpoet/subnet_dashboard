@@ -616,6 +616,8 @@ export type CompetitionRewardSeat = {
   baseSharePercent: number
   /** Share of total emissions after decay; null when the signed decay clock is not published. */
   currentSharePercent: number | null
+  /** Share after a funding halving; null unless the gateway publishes one for this seat's holder. */
+  postFundingSharePercent: number | null
   halvings: number | null
   epochsToNextHalving: number | null
   holder: {
@@ -629,6 +631,8 @@ export type CompetitionRewardSeat = {
 }
 
 export type CompetitionRewardSeats = { seats: CompetitionRewardSeat[] }
+
+const FUNDING_HALVED_REWARD_FACTOR_PPM = 500_000
 
 /** The three reward seats from the public current-round state, in policy order.
  * Mirrors the validator kernel's weekly clock: a seat halves every epochs_per_halving
@@ -649,6 +653,8 @@ export function normalizeCompetitionRewardSeats(value: unknown): CompetitionRewa
   const clockSlots = Array.isArray(clock?.slots) && clock.slots.length === 3 ? clock.slots : null
   const epochsPerHalving = integer(clock?.epochs_per_halving)
   const currentEpoch = source.epoch_eligible === true ? integer(source.current_epoch) : null
+  const fundingHalved = source.champion_reward_factor_ppm === FUNDING_HALVED_REWARD_FACTOR_PPM
+  const kingHotkey = text(record(source.king)?.hotkey)
   const seats: CompetitionRewardSeat[] = []
   let totalAllocationPercent = 0
   for (const [index, entry] of tiers.entries()) {
@@ -659,7 +665,7 @@ export function normalizeCompetitionRewardSeats(value: unknown): CompetitionRewa
     if (index > 0 && minimumImprovement >= seats[index - 1].minimumImprovement) return null
     totalAllocationPercent += allocationPercent
     const baseSharePercent = allocationBasis === 'total_emissions' ? allocationPercent : poolPercent * allocationPercent / 100
-    const seat: CompetitionRewardSeat = { minimumImprovement, baseSharePercent, currentSharePercent: null, halvings: null, epochsToNextHalving: null, holder: null }
+    const seat: CompetitionRewardSeat = { minimumImprovement, baseSharePercent, currentSharePercent: null, postFundingSharePercent: null, halvings: null, epochsToNextHalving: null, holder: null }
     if (slots[index] !== null) {
       const achievement = record(slots[index])
       const minerHotkey = text(achievement?.miner_hotkey)
@@ -676,6 +682,8 @@ export function normalizeCompetitionRewardSeats(value: unknown): CompetitionRewa
         seat.epochsToNextHalving = epochsPerHalving - (elapsed % epochsPerHalving)
         seat.currentSharePercent = baseSharePercent / 2 ** seat.halvings
       }
+      // The funding factor reduces only the current champion's seats, never another holder's.
+      if (fundingHalved && minerHotkey === kingHotkey) seat.postFundingSharePercent = (seat.currentSharePercent ?? baseSharePercent) / 2
     }
     seats.push(seat)
   }

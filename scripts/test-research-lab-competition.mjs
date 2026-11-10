@@ -1522,7 +1522,17 @@ try {
   const liveSeats = JSON.parse(await readFile(resolve('scripts/fixtures/competition-reward-seats-20261109.json'), 'utf8'))
   const live = normalizeCompetitionRewardSeats(liveSeats).seats
   assert.deepEqual(live.map((seat) => [seat.minimumImprovement, seat.baseSharePercent, seat.currentSharePercent, seat.halvings, seat.epochsToNextHalving]), [[20, 20, 20, 0, 25], [15, 15, 15, 0, 25], [8, 15, 15, 0, 25]])
-  assert.equal(live[0].holder.improvement, 27.125)
+  assert.deepEqual(live.map((seat) => seat.postFundingSharePercent), [null, null, null], 'no slash without a published funding factor')
+  const kingHotkey = live[0].holder.minerHotkey
+  const fundingSeats = (slotHolder, ppm) => normalizeCompetitionRewardSeats({
+    ...liveSeats,
+    king: { hotkey: kingHotkey },
+    champion_reward_factor_ppm: ppm,
+    reward_slots: liveSeats.reward_slots.map((slot, index) => index === 0 ? { ...slot, miner_hotkey: slotHolder } : slot),
+  }).seats.map((seat) => seat.postFundingSharePercent)
+  assert.deepEqual(fundingSeats(kingHotkey, 500000), [10, 7.5, 7.5], 'a funding halving shows on every seat the champion holds')
+  assert.deepEqual(fundingSeats('5earlierHolder', 500000), [null, 7.5, 7.5], 'a funding halving never reduces another holder')
+  assert.deepEqual(fundingSeats(kingHotkey, 1000000), [null, null, null], 'a full factor shows no slash')
   assert.equal(formatCompetitionScorePrecise(live[0].holder.improvement), '27.125', 'seat arithmetic stays exact')
   assert.equal(formatCompetitionScorePrecise(2.45), '2.45')
   assert.equal(formatCompetitionScorePrecise(8), '8.00')
