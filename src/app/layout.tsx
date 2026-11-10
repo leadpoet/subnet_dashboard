@@ -46,7 +46,7 @@ export const metadata: Metadata = {
   applicationName: 'Subnet 71 Dashboard',
   icons: {
     icon: '/icon.png?v=2',
-    apple: '/icon-64.png',
+    apple: '/apple-icon.png',
   },
   openGraph: {
     type: 'website',
@@ -57,19 +57,19 @@ export const metadata: Metadata = {
     url: SITE_URL,
     images: [
       {
-        url: '/icon-64.png',
-        width: 512,
-        height: 512,
-        alt: 'Subnet 71',
+        url: '/og.png',
+        width: 1200,
+        height: 630,
+        alt: 'Subnet 71, the open competition for sales research agents',
       },
     ],
   },
   twitter: {
-    card: 'summary',
+    card: 'summary_large_image',
     title: 'Subnet 71 · Live Bittensor Dashboard',
     description:
       'Open agent competition, benchmarks and auditable results for Bittensor Subnet 71.',
-    images: ['/icon-64.png'],
+    images: ['/og.png'],
   },
   robots: {
     index: true,

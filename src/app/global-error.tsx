@@ -11,20 +11,20 @@ export default function GlobalError({
     // Log to console for client-side debugging / production telemetry pipelines.
     console.error('[GlobalError] unrecoverable error:', error)
   }
+  // This page replaces the root layout, so it cannot rely on the app stylesheet.
   return (
-    <html>
-      <body>
-        <div className="flex min-h-screen items-center justify-center">
-          <div className="text-center">
-            <h2 className="text-xl font-bold mb-4">Something went wrong!</h2>
-            <button
-              onClick={() => reset()}
-              className="px-4 py-2 bg-blue-500 text-white rounded"
-            >
-              Try again
-            </button>
-          </div>
-        </div>
+    <html lang="en">
+      <body style={{ margin: 0, background: '#0b0d10', color: '#f3f5f7', font: '14px/1.5 system-ui, sans-serif', colorScheme: 'dark' }}>
+        <main style={{ display: 'flex', minHeight: '100vh', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 20, padding: 20 }}>
+          <h1 style={{ margin: 0, fontSize: 28, fontWeight: 500, letterSpacing: '-0.04em' }}>Something went wrong</h1>
+          <button
+            type="button"
+            onClick={() => reset()}
+            style={{ minHeight: 44, padding: '0 16px', borderRadius: 6, border: '1px solid rgba(224, 232, 242, 0.24)', background: 'transparent', color: '#e1e5e9', font: 'inherit', cursor: 'pointer' }}
+          >
+            Try again
+          </button>
+        </main>
       </body>
     </html>
   )
