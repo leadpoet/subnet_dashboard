@@ -688,6 +688,70 @@ export function formatRewardSeatShare(percent: number): string {
   return `${Number(percent.toFixed(2))}%`
 }
 
+/** Up to three decimals, because the gateway scores in thousandths and rounding can hide a real margin. */
+export function formatCompetitionScorePrecise(value: number): string {
+  const thousandths = value.toFixed(3)
+  return thousandths.endsWith('0') ? thousandths.slice(0, -1) : thousandths
+}
+
+/** The score a challenger needed in a round: the defender's score on that round's ICPs plus its margin. */
+export function competitionPromotionBar(round: Pick<CompetitionRoundSummary, 'baseline' | 'promotionMargin'>): number | null {
+  const defender = round.baseline?.finalScore ?? null
+  return defender === null ? null : defender + round.promotionMargin
+}
+
+/** How far a published challenger fell short of its round's bar; null when no shortfall is proven. */
+export function competitionSubmissionPromotionGap(
+  submission: Pick<CompetitionSubmission, 'isBaseline' | 'finalScore'>,
+  round: Pick<CompetitionRoundSummary, 'status' | 'baseline' | 'promotionMargin'>,
+): number | null {
+  if (round.status !== 'published' || submission.isBaseline || submission.finalScore === null) return null
+  const bar = competitionPromotionBar(round)
+  if (bar === null || submission.finalScore >= bar) return null
+  return bar - submission.finalScore
+}
+
+/** The defending entry first, then highest score. Unscored entries keep their order at the end. */
+export function compareCompetitionSubmissions(
+  left: Pick<CompetitionSubmission, 'isBaseline' | 'finalScore'>,
+  right: Pick<CompetitionSubmission, 'isBaseline' | 'finalScore'>,
+): number {
+  return Number(right.isBaseline) - Number(left.isBaseline)
+    || Number(right.finalScore !== null) - Number(left.finalScore !== null)
+    || (right.finalScore ?? 0) - (left.finalScore ?? 0)
+}
+
+/** One-line public outcome of a published round. Submissions are null until they load.
+ * "Needed" is left out when a challenger's score reached the bar without a promotion,
+ * because the page cannot explain that case from public data. */
+export function competitionRoundOutcome(
+  round: CompetitionRoundSummary,
+  submissions: Pick<CompetitionSubmission, 'isBaseline' | 'finalScore'>[] | null,
+): { label: string; detail: string | null } | null {
+  if (round.status !== 'published') return null
+  const defender = round.baseline?.finalScore ?? null
+  const versus = defender === null ? '' : ` against the defender's ${formatCompetitionScore(defender)}`
+  if (round.champion && round.promotionStatus === 'promoted') return { label: 'New champion', detail: `Scored ${formatCompetitionScore(round.champion.finalScore)}${versus}` }
+  if (round.champion && round.promotionStatus === 'pending') return { label: 'Promotion pending', detail: `Scored ${formatCompetitionScore(round.champion.finalScore)}${versus}` }
+  if (round.champion && round.promotionStatus === 'superseded') return { label: 'Superseded by a newer round', detail: null }
+  if (round.champion || defender === null) return { label: 'No new champion published', detail: null }
+  const bar = competitionPromotionBar(round) as number
+  const scores = submissions?.filter((entry) => !entry.isBaseline && entry.finalScore !== null).map((entry) => entry.finalScore as number) ?? []
+  const best = scores.length ? Math.max(...scores) : null
+  const parts = [
+    best !== null ? `Best challenger ${formatCompetitionScore(best)}` : submissions ? 'No challenger scored' : null,
+    best === null || best < bar ? `Needed ${formatCompetitionScore(bar)}` : null,
+  ].filter(isPresent)
+  return { label: 'Champion held', detail: parts.join(' · ') || null }
+}
+
+/** Public current-round facts the competition snapshot does not carry. */
+export function normalizeCompetitionCurrentRound(value: unknown): { kingHotkey: string | null; openRoundId: string | null; replacementCutoff: string | null } {
+  const source = record(value)
+  const open = record(source?.open_round)
+  return { kingHotkey: text(record(source?.king)?.hotkey) || null, openRoundId: text(open?.round_id) || null, replacementCutoff: text(open?.submission_replacement_cutoff) || null }
+}
+
 /** The miner behind a submission row; the defending entry runs the champion it names. */
 export function competitionSubmissionMiner(submission: Pick<CompetitionSubmission, 'isBaseline' | 'minerHotkey'>, round: Pick<CompetitionRoundSummary, 'defendingChampion'>): string | null {
   return submission.isBaseline ? round.defendingChampion?.minerHotkey ?? null : submission.minerHotkey

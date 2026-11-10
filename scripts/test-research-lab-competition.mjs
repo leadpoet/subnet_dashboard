@@ -22,6 +22,11 @@ try {
   const require = createRequire(import.meta.url)
   const {
     DEFAULT_REPO_URL,
+    competitionRoundOutcome,
+    competitionSubmissionPromotionGap,
+    compareCompetitionSubmissions,
+    formatCompetitionScorePrecise,
+    normalizeCompetitionCurrentRound,
     competitionSubmissionEvaluationNotice,
     competitionSubmissionStatusLabel,
     competitionRoundOptions,
@@ -723,8 +728,8 @@ try {
   assert.equal(competitionSubmissionStatusLabel({ ...submissions[0], status: 'scored' }, activeRound),
     'Scored', 'a completed model must not imply a winner or promotion')
   assert.match(finalMarkup, /Promotion margin.*\+.*1\.00.* points/)
-  assert.match(finalMarkup, /Not required/)
-  assert.match(finalMarkup, /No champion was published/)
+  assert.match(finalMarkup, /Champion held/)
+  assert.match(finalMarkup, /No new champion was published/)
   assert.match(finalMarkup, /0\.00/, 'a published zero baseline is not pending')
   assert.match(renderSummary(snapshot.latestRound), /Cancelled round/)
   assert.doesNotMatch(renderSummary(snapshot.latestRound), /Decision follows completed evaluation/)
@@ -1518,6 +1523,30 @@ try {
   const live = normalizeCompetitionRewardSeats(liveSeats).seats
   assert.deepEqual(live.map((seat) => [seat.minimumImprovement, seat.baseSharePercent, seat.currentSharePercent, seat.halvings, seat.epochsToNextHalving]), [[20, 20, 20, 0, 25], [15, 15, 15, 0, 25], [8, 15, 15, 0, 25]])
   assert.equal(live[0].holder.improvement, 27.125)
+  assert.equal(formatCompetitionScorePrecise(live[0].holder.improvement), '27.125', 'seat arithmetic stays exact')
+  assert.equal(formatCompetitionScorePrecise(2.45), '2.45')
+  assert.equal(formatCompetitionScorePrecise(8), '8.00')
+  assert.equal(normalizeCompetitionCurrentRound({ king: { hotkey: '5king' } }).kingHotkey, '5king', 'the reigning champion survives its crowning round aging out')
+  assert.deepEqual(normalizeCompetitionCurrentRound(null), { kingHotkey: null, openRoundId: null, replacementCutoff: null })
+
+  // Published Nov 9 round: the defender scored 32.95 with an 8-point margin and nobody cleared it.
+  const heldRound = { status: 'published', promotionStatus: 'not_required', promotionMargin: 8, champion: null, baseline: { finalScore: 32.95 } }
+  const nov9Entries = [{ isBaseline: false, finalScore: null }, { isBaseline: false, finalScore: 33.45 }, { isBaseline: true, finalScore: 32.95 }, { isBaseline: false, finalScore: 38.8 }, { isBaseline: false, finalScore: null }]
+  assert.deepEqual(competitionRoundOutcome(heldRound, nov9Entries), { label: 'Champion held', detail: 'Best challenger 38.80 · Needed 40.95' })
+  assert.deepEqual(competitionRoundOutcome(heldRound, null), { label: 'Champion held', detail: 'Needed 40.95' }, 'loading never invents a challenger')
+  assert.deepEqual(competitionRoundOutcome(heldRound, [{ isBaseline: true, finalScore: 32.95 }]), { label: 'Champion held', detail: 'No challenger scored · Needed 40.95' })
+  assert.deepEqual(competitionRoundOutcome(heldRound, [{ isBaseline: false, finalScore: 41 }]), { label: 'Champion held', detail: 'Best challenger 41.00' }, 'an unexplained clear never claims the bar was missed')
+  assert.equal(competitionRoundOutcome({ ...heldRound, baseline: null }, null).label, 'No new champion published', 'no defender score means no held claim')
+  assert.equal(competitionRoundOutcome({ ...heldRound, status: 'stage2' }, null), null, 'an unfinished round has no outcome')
+  assert.equal(competitionRoundOutcome({ ...heldRound, promotionStatus: 'promoted', champion: { finalScore: 29.575 }, baseline: { finalScore: 2.45 } }, null).label, 'New champion')
+  assert.equal(competitionRoundOutcome({ ...heldRound, promotionStatus: 'superseded', champion: { finalScore: 50 } }, null).label, 'Superseded by a newer round', 'a superseded winner is never called champion')
+
+  assert.ok(Math.abs(competitionSubmissionPromotionGap({ isBaseline: false, finalScore: 38.8 }, heldRound) - 2.15) < 1e-9)
+  assert.equal(competitionSubmissionPromotionGap({ isBaseline: false, finalScore: 41 }, heldRound), null)
+  assert.equal(competitionSubmissionPromotionGap({ isBaseline: true, finalScore: 32.95 }, heldRound), null)
+  assert.equal(competitionSubmissionPromotionGap({ isBaseline: false, finalScore: null }, heldRound), null)
+  assert.equal(competitionSubmissionPromotionGap({ isBaseline: false, finalScore: 38.8 }, { ...heldRound, status: 'stage2' }), null, 'provisional scores get no shortfall')
+  assert.deepEqual([...nov9Entries].sort(compareCompetitionSubmissions).map((entry) => entry.finalScore), [32.95, 38.8, 33.45, null, null], 'defender first, then best score, unscored last')
   const zeroPoolSeats = normalizeCompetitionRewardSeats({ ...liveSeats, reward_slot_policy: { ...liveSeats.reward_slot_policy, pool_percent: 0 } }).seats
   assert.deepEqual(zeroPoolSeats.map((seat) => [seat.baseSharePercent, seat.currentSharePercent]), [[0, 0], [0, 0], [0, 0]], 'a valid legacy zero pool renders zero emissions')
   assert.match(renderToStaticMarkup(React.createElement(renderedModule.exports.RewardSeats, { seats: { seats: zeroPoolSeats } })), /0%/)
