@@ -655,7 +655,6 @@ try {
   })) {
     const markup = renderSummary({ ...snapshot.latestCompletedRound, status, publishedAt: null, baseline: null })
     assert.match(markup, /Pending/, `${status} must not imply a final promotion decision`)
-    assert.match(markup, /Decision follows completed evaluation/)
     assert.match(markup, /Awaiting score/, `${status} must distinguish a missing baseline score from zero`)
     assert.doesNotMatch(markup, /Not required|No champion was published|Stage1 scored/)
     assert.ok(markup.includes(label), `${status} must use a readable round status`)
@@ -714,16 +713,16 @@ try {
   }
   const completedBaselineMarkup = renderSummary(completedBaselineRound)
   assert.match(completedBaselineMarkup, /0\.00/)
-  assert.match(completedBaselineMarkup, /Defending champion score · /)
-  assert.match(completedBaselineMarkup, /Defending champion evaluated/)
-  assert.match(completedBaselineMarkup, /points above the defending champion/)
+  assert.match(completedBaselineMarkup, /Defending champion score/)
+  assert.match(completedBaselineMarkup, /Round still in progress/)
+  assert.match(completedBaselineMarkup, /Promotion margin/)
   assert.doesNotMatch(completedBaselineMarkup, /Baseline|baseline/, 'round details never call the defending champion a baseline')
-  assert.match(renderSummary({ ...completedBaselineRound, status: 'scored' }), /Final result pending\./)
+  assert.match(renderSummary({ ...completedBaselineRound, status: 'scored' }), /Final result pending/)
   assert.match(completedBaselineMarkup, /Pending/)
   assert.doesNotMatch(completedBaselineMarkup, /Awaiting score|No champion was published/)
   assert.equal(competitionSubmissionStatusLabel({ ...submissions[0], status: 'scored' }, activeRound),
     'Scored', 'a completed model must not imply a winner or promotion')
-  assert.match(finalMarkup, /Promotion margin · \+1\.00 points/)
+  assert.match(finalMarkup, /Promotion margin.*\+.*1\.00.* points/)
   assert.match(finalMarkup, /Not required/)
   assert.match(finalMarkup, /No champion was published/)
   assert.match(finalMarkup, /0\.00/, 'a published zero baseline is not pending')
@@ -862,7 +861,7 @@ try {
     }).rounds[0]
     assert.equal(dynamicRound.benchmarkIcpCount, count)
     assert.equal(dynamicRound.promotionMargin, 0.5)
-    assert.match(renderSummary(dynamicRound), /Promotion margin · \+0\.50 points/)
+    assert.match(renderSummary(dynamicRound), /Promotion margin.*\+.*0\.50.* points/)
     const dynamicBenchmark = normalizeCompetitionBenchmark({
       ...benchmarkPayload, benchmark_icp_count: count, public_icp_count: count,
       icps: Array.from({ length: count }, (_, icp_position) => ({ icp_position, icp_id: `icp-${icp_position}`, prompt: 'Public ICP' })),
@@ -1503,7 +1502,6 @@ try {
   assert.match(component, /Evaluation day/)
   assert.doesNotMatch(component, /Day 0|Day 1/)
   assert.match(component, /const submissionDate = utcCalendarDate\(round\.submissionOpen\) \?\? round\.icpSetDate/)
-  assert.match(component, /Available after evaluation and cost checks\./)
   assert.doesNotMatch(component, /label="Round baseline"|label="Round status"|SummaryMetric/, 'summary must not repeat its score and status in metric cards')
   assert.match(component, /ICP set · \{formatUtcDate\(icpSetDate\)\}/)
   assert.match(component, /normalizeCompetitionBenchmark\(response\.body, \{ roundId, icpSetDate, publicAt, benchmarkIcpCount \}\)/)

@@ -127,7 +127,7 @@ function CompetitionHeader({ historyOpen = false, onHistory }: { historyOpen?: b
         <h1 className="font-display text-[28px] font-medium tracking-[-0.04em] text-[var(--white)] md:text-[36px]">{historyOpen ? 'Competition history' : 'Agent competition'}</h1>
         <p className="mt-2 text-[13px] text-[var(--muted)]">Open agents, public benchmarks, on-chain rewards.</p>
       </div>
-      <div className="flex flex-wrap gap-2"><button type="button" onClick={onHistory} disabled={!onHistory} aria-pressed={historyOpen} className="rounded-md border border-[var(--line-2)] px-4 py-2.5 text-[12px] text-[var(--platinum)] transition-colors hover:bg-white/5 disabled:opacity-50">{historyOpen ? 'Back to competition' : 'History'}</button><a href="https://github.com/leadpoet/champion_model" target="_blank" rel="noreferrer" className="inline-flex items-center gap-3 rounded-md border border-[var(--line-2)] px-4 py-2.5 text-[12px] text-[var(--platinum)] transition-colors hover:bg-white/5">Top Sales Agent Model <span aria-hidden>↗</span></a></div>
+      <div className="flex flex-wrap gap-2"><button type="button" onClick={onHistory} disabled={!onHistory} aria-pressed={historyOpen} className="rounded-md border border-[var(--line-2)] px-4 py-2.5 text-[12px] text-[var(--platinum)] transition-colors hover:bg-white/5 disabled:opacity-50">{historyOpen ? 'Back to competition' : 'History'}</button><a href="https://github.com/leadpoet/champion_model" target="_blank" rel="noreferrer" className="rounded-md border border-[var(--line-2)] px-4 py-2.5 text-[12px] text-[var(--platinum)] transition-colors hover:bg-white/5">Top Sales Agent Model</a></div>
     </header>
   )
 }
@@ -223,25 +223,23 @@ function RoundSummary({ round }: { round: CompetitionRoundSummary }) {
       </div>
       <details className="group border-t border-[var(--line)]">
         <summary className="flex cursor-pointer list-none items-center justify-between py-3 text-[12px] text-[var(--muted)] transition-colors hover:text-[var(--white)] [&::-webkit-details-marker]:hidden">Round details<span aria-hidden className="text-[16px] transition-transform group-open:rotate-45">+</span></summary>
-        <div className="grid gap-5 pb-5 text-[12px] leading-relaxed text-[var(--muted)] sm:grid-cols-2">
-          <div className="space-y-2">
-            <p>Defending champion score · <span className="font-mono text-[var(--platinum)]">{baselineScore === null ? 'Awaiting score' : formatCompetitionScore(baselineScore)}</span></p>
-            <p>{baselineScore === null ? 'Available after evaluation and cost checks.' : evaluationComplete ? `${round.publishedAt ? `Published ${formatUtc(round.publishedAt)}` : 'Published result'}` : round.status === 'scored' ? 'Final result pending.' : 'Defending champion evaluated. Round still in progress.'}</p>
-            <p>Promotion margin · +{formatCompetitionScore(round.promotionMargin)} points above the defending champion</p>
-            {round.submissionCutoff ? <p>Submissions close · {formatUtc(round.submissionCutoff)}</p> : null}
-            {round.publicAt ? <p>ICPs publish · {formatUtc(round.publicAt)}. Scores follow evaluation.</p> : null}
-          </div>
-          <div className="space-y-2">
-            {round.champion ? <><p className="text-[var(--platinum)]">Champion · {shortHotkey(round.champion.minerHotkey)}</p><p>{championMetricDetail(round, round.champion.finalScore)}</p></>
-              : round.cancelReason ? <p>No champion was published · {humanize(round.cancelReason)}</p>
-                : <><p>Promotion · {evaluationComplete ? humanize(round.promotionStatus ?? 'not required') : 'Pending'}</p><p>{evaluationComplete ? 'No champion was published' : 'Decision follows completed evaluation'}</p></>}
-            {round.champion && round.promotionStatus === 'superseded' ? <p>This round’s champion was not promoted because a newer evaluation day was published.</p> : null}
-            <p className="font-mono text-[11px] text-[var(--muted-2)]">{round.roundId} · {round.benchmarkIcpCount} ICPs</p>
-          </div>
-        </div>
+        <dl className="grid grid-cols-2 gap-x-4 gap-y-5 pb-5 pt-1 sm:grid-cols-[calc((100%-2rem)/3+1rem)_minmax(0,1fr)_minmax(0,1fr)]">
+          <RoundDetail label="Defending champion score" note={baselineScore === null ? null : evaluationComplete ? (round.publishedAt ? `Published ${formatUtc(round.publishedAt)}` : 'Published result') : round.status === 'scored' ? 'Final result pending' : 'Round still in progress'}>{baselineScore === null ? 'Awaiting score' : formatCompetitionScore(baselineScore)}</RoundDetail>
+          {round.champion ? <RoundDetail label="Champion" note={<>{championMetricDetail(round, round.champion.finalScore)}{round.promotionStatus === 'superseded' ? <> This round’s champion was not promoted because a newer evaluation day was published.</> : null}</>}><span className="font-mono">{shortHotkey(round.champion.minerHotkey)}</span></RoundDetail>
+            : round.cancelReason ? <RoundDetail label="Promotion" note={humanize(round.cancelReason)}>No champion was published</RoundDetail>
+              : <RoundDetail label="Promotion" note={evaluationComplete ? 'No champion was published' : null}>{evaluationComplete ? humanize(round.promotionStatus ?? 'not required') : 'Pending'}</RoundDetail>}
+          <RoundDetail label="Promotion margin">+{formatCompetitionScore(round.promotionMargin)} points</RoundDetail>
+          {round.submissionCutoff ? <RoundDetail label="Submissions close">{formatUtc(round.submissionCutoff)}</RoundDetail> : null}
+          {round.publicAt ? <RoundDetail label="ICPs publish">{formatUtc(round.publicAt)}</RoundDetail> : null}
+          <RoundDetail label="Round" note={`${round.benchmarkIcpCount} ICPs`}><span className="font-mono text-[12px]">{round.roundId}</span></RoundDetail>
+        </dl>
       </details>
     </section>
   )
+}
+
+function RoundDetail({ label, note, children }: { label: string; note?: ReactNode; children: ReactNode }) {
+  return <div className="min-w-0"><dt className="text-[12px] text-[var(--muted)]">{label}</dt><dd className="mt-1.5 text-[13px] text-[var(--platinum)]">{children}{note ? <span className="mt-1 block text-[12px] leading-relaxed text-[var(--muted)]">{note}</span> : null}</dd></div>
 }
 
 function ChampionScoreHistory({ points }: { points: CompetitionScoreHistoryPoint[] }) {
