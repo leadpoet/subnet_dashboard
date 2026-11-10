@@ -94,7 +94,7 @@ export function ResearchLab({
   return (
     <ValidatorNamesContext.Provider value={validatorNames}><div className="w-full pb-12">
       <CompetitionHeader historyOpen={historyOpen} onHistory={() => setHistoryOpen((open) => !open)} />
-      {historyOpen ? <CompetitionHistory active={active} /> : !competition ? <Unavailable message="Competition data is temporarily unavailable. This page will retry automatically." /> : selectedRound ? <><ChampionSummary round={championRound} history={competitionChampionHistory(competition)} active={active} /><RewardSeats seats={rewardSeats} /><div className="mt-6 max-w-sm"><span className={filterLabelClass}>Competition round</span><CompetitionSelect label="Competition round" value={selectedRound.roundId} options={roundOptions.map((round) => ({ value: round.roundId, label: `${round.evaluationDate ? formatDay(round.evaluationDate) : round.roundId} · ${roundStatusLabel(round.status).replace(' in progress', '')}` }))} onChange={setSelectedRoundId} /></div><RoundSummary round={selectedRound} /><RoundWorkspace key={selectedRound.roundId} round={selectedRound} active={active} /></> : <p className="border-b border-[var(--line)] py-12 text-[14px] text-[var(--muted)]">No production competition round is available.</p>}
+      {historyOpen ? <CompetitionHistory active={active} /> : !competition ? <Unavailable message="Competition data is temporarily unavailable. This page will retry automatically." /> : selectedRound ? <><ChampionSummary round={championRound} history={competitionChampionHistory(competition)} active={active} /><RewardSeats seats={rewardSeats} /><div className="mt-6 max-w-sm"><span className={filterLabelClass}>Competition round</span><CompetitionSelect label="Competition round" value={selectedRound.roundId} options={roundOptions.map((round) => ({ value: round.roundId, label: `${round.evaluationDate ? formatUtcDate(round.evaluationDate) : round.roundId} · ${roundStatusLabel(round.status).replace(' in progress', '')}` }))} onChange={setSelectedRoundId} /></div><RoundSummary round={selectedRound} /><RoundWorkspace key={selectedRound.roundId} round={selectedRound} active={active} /></> : <p className="border-b border-[var(--line)] py-12 text-[14px] text-[var(--muted)]">No production competition round is available.</p>}
       {error && competition ? <p className="mt-5 text-[12px] text-[var(--muted-2)]">Latest refresh failed: {error}</p> : null}
     </div></ValidatorNamesContext.Provider>
   )
@@ -103,12 +103,12 @@ export function ResearchLab({
 function ResearchLabLoading() {
   return <div aria-busy="true" aria-label="Loading competition"><CompetitionHeader />
     <section aria-label="Current champion" className="grid min-w-0 gap-4 rounded-xl border border-[var(--line)] bg-[var(--surface)] p-4 md:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)] md:gap-12 md:p-8">
-      <div className="flex flex-col justify-center"><h2 className="text-[13px] text-[var(--muted)]">Current champion</h2><div className="mt-4 h-[88px] w-48 shimmer rounded-md" /><div className="mt-5 h-4 w-56 shimmer rounded" /><div className="mt-2 h-3 w-36 shimmer rounded" /></div>
-      <div className="hidden md:block"><div className="text-[13px] text-[var(--platinum)]">Champion score by day <span className="text-[11px] text-[var(--muted-2)]">/100</span></div><div className="mt-3 h-[180px] shimmer rounded-md" /><div className="mt-2 h-3 w-36 shimmer rounded" /></div>
+      <div className="flex flex-col justify-center"><h2 className="text-[14px] text-[var(--muted)]">Current champion</h2><div className="mt-4 h-[88px] w-48 shimmer rounded-md" /><div className="mt-5 h-4 w-56 shimmer rounded" /><div className="mt-2 h-3 w-36 shimmer rounded" /></div>
+      <div className="hidden md:block"><div className="text-[14px] text-[var(--platinum)]">Champion score by day <span className="text-[12px] text-[var(--muted-2)]">/100</span></div><div className="mt-3 h-[180px] shimmer rounded-md" /><div className="mt-2 h-3 w-36 shimmer rounded" /></div>
     </section>
     <RewardSeats seats={undefined} />
     <section className="mt-8 border-y border-[var(--line)] py-5"><div className="grid gap-5 sm:grid-cols-[1fr_2fr]"><div className="h-12 w-32 shimmer rounded" /><div className="grid grid-cols-2 gap-5"><div className="h-12 shimmer rounded" /><div className="h-12 shimmer rounded" /></div></div><div className="mt-5 h-4 w-24 shimmer rounded" /></section>
-    <section className="pt-10"><h3 className="font-display text-[22px] text-[var(--platinum)]">Submissions</h3><div className="my-5 h-10 shimmer rounded-md" /><SubmissionRowsLoading /></section>
+    <section className="pt-10"><h2 className="font-display text-[20px] text-[var(--platinum)]">Submissions</h2><div className="my-5 h-10 shimmer rounded-md" /><SubmissionRowsLoading /></section>
   </div>
 }
 
@@ -122,13 +122,13 @@ function Unavailable({ message }: { message: string }) {
 
 function CompetitionHeader({ historyOpen = false, onHistory }: { historyOpen?: boolean; onHistory?: () => void }) {
   return (
-    <header className="flex flex-wrap items-center justify-between gap-4 py-5 md:gap-5 md:py-9">
+    <div className="flex flex-wrap items-center justify-between gap-4 py-5 md:gap-5 md:py-9">
       <div>
         <h1 className="font-display text-[28px] font-medium tracking-[-0.04em] text-[var(--white)] md:text-[36px]">{historyOpen ? 'Competition history' : 'Agent competition'}</h1>
-        <p className="mt-2 text-[13px] text-[var(--muted)]">Open agents, public benchmarks, on-chain rewards.</p>
+        <p className="mt-2 text-[14px] text-[var(--muted)]">Open agents, public benchmarks, on-chain rewards.</p>
       </div>
-      <div className="flex flex-wrap gap-2"><button type="button" onClick={onHistory} disabled={!onHistory} aria-pressed={historyOpen} className="rounded-md border border-[var(--line-2)] px-4 py-2.5 text-[12px] text-[var(--platinum)] transition-colors hover:bg-white/5 disabled:opacity-50">{historyOpen ? 'Back to competition' : 'History'}</button><a href="https://github.com/leadpoet/champion_model" target="_blank" rel="noreferrer" className="rounded-md border border-[var(--line-2)] px-4 py-2.5 text-[12px] text-[var(--platinum)] transition-colors hover:bg-white/5">Top Sales Agent Model</a></div>
-    </header>
+      <div className="flex flex-wrap gap-2"><button type="button" onClick={onHistory} disabled={!onHistory} aria-pressed={historyOpen} className={secondaryButtonClass}>{historyOpen ? 'Back to competition' : 'History'}</button><a href="https://github.com/leadpoet/champion_model" target="_blank" rel="noreferrer" className={secondaryButtonClass}>Top Sales Agent Model</a></div>
+    </div>
   )
 }
 
@@ -148,9 +148,9 @@ function ChampionSummary({ round, history = [], active = true }: { round: Compet
   return (
     <section aria-label="Current champion" className="grid min-w-0 rounded-xl border border-[var(--line)] bg-[var(--surface)] p-4 md:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)] md:gap-12 md:p-8">
       <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-3 md:flex md:flex-col md:items-start md:justify-center md:gap-0">
-        <h2 className="text-[13px] text-[var(--muted)]">Current champion</h2>
+        <h2 className="text-[14px] text-[var(--muted)]">Current champion</h2>
         <div className="font-display text-[48px] font-medium leading-none tracking-[-0.06em] text-[var(--white)] md:mt-4 md:text-[88px]">
-          {formatCompetitionScore(latest?.score ?? champion?.finalScore ?? null)}<span className="ml-2 text-[18px] tracking-normal text-[var(--muted)] md:ml-3 md:text-[22px]">/100</span>
+          {formatCompetitionScore(latest?.score ?? champion?.finalScore ?? null)}<span className="ml-2 text-[20px] tracking-normal text-[var(--muted)] md:ml-3">/100</span>
         </div>
         {round && champion ? <div className="col-span-2 space-y-1.5 text-[12px] text-[var(--muted)] md:mt-5">
           {latest && !latest.newChampion ? <p>Latest score · {formatUtcDate(latest.evaluationDate)}</p> : <p>Winning score · crowned {formatUtcDate(round.evaluationDate)}</p>}
@@ -159,7 +159,7 @@ function ChampionSummary({ round, history = [], active = true }: { round: Compet
           {champion.finalScore === null && !latest ? <p>Champion score unavailable.</p> : null}
         </div> : <p className="col-span-2 text-[12px] text-[var(--muted)] md:mt-5">No promoted champion in published history.</p>}
       </div>
-      <button type="button" aria-expanded={historyExpanded} aria-controls={historyId} onClick={() => setHistoryExpanded((expanded) => !expanded)} className="mt-4 flex min-h-11 w-full items-center justify-between border-t border-[var(--line)] pt-3 text-[13px] text-[var(--platinum)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 md:hidden">
+      <button type="button" aria-expanded={historyExpanded} aria-controls={historyId} onClick={() => setHistoryExpanded((expanded) => !expanded)} className="mt-4 flex min-h-11 w-full items-center justify-between border-t border-[var(--line)] pt-3 text-[14px] text-[var(--platinum)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 md:hidden">
         <span>{historyExpanded ? 'Hide score history' : 'Show score history'}</span><ChevronDown aria-hidden className={`h-4 w-4 transition-transform ${historyExpanded ? 'rotate-180' : ''}`} />
       </button>
       <div id={historyId} className={`${historyExpanded ? 'block pt-4' : 'hidden'} min-w-0 md:block md:pt-0`}>{active && (desktopHistory || historyExpanded) ? <ChampionScoreHistory points={history} /> : null}</div>
@@ -173,12 +173,12 @@ const REWARD_SEAT_PODIUM = ['md:order-2 md:border-[var(--line-2)] md:py-6', 'md:
 function RewardSeats({ seats }: { seats: CompetitionRewardSeats | null | undefined }) {
   return (
     <section aria-label="Reward seats" aria-busy={seats === undefined} className="mt-6">
-      <h2 className="text-[13px] text-[var(--muted)]">Reward seats</h2>
+      <h2 className="text-[14px] text-[var(--muted)]">Reward seats</h2>
       {seats === null ? <p role="status" className="mt-3 text-[12px] text-[var(--muted)]">Reward seats are temporarily unavailable. This section will retry automatically.</p> : <>
         <ul className="mt-3 grid min-w-0 gap-3 md:grid-cols-3">
           {seats ? seats.seats.map((seat, index) => <RewardSeatCard key={seat.minimumImprovement} seat={seat} podiumClass={REWARD_SEAT_PODIUM[index]} />) : REWARD_SEAT_PODIUM.map((podiumClass) => <li key={podiumClass} className={`min-h-[132px] shimmer rounded-xl ${podiumClass}`} />)}
         </ul>
-        <p className="mt-3 text-[11px] leading-relaxed text-[var(--muted-2)]">A new champion takes only the seats its improvement clears, so a larger seat can stay with an earlier winner. Shares are shown before any funding reduction.</p>
+        <p className="mt-3 text-[12px] leading-relaxed text-[var(--muted-2)]">A new champion takes only the seats its improvement clears, so a larger seat can stay with an earlier winner. Shares are shown before any funding reduction.</p>
       </>}
     </section>
   )
@@ -191,12 +191,12 @@ function RewardSeatCard({ seat, podiumClass }: { seat: CompetitionRewardSeat; po
   return (
     <li className={`min-w-0 rounded-xl border border-[var(--line)] bg-[var(--surface)] p-4 ${podiumClass}`}>
       <div className="flex items-baseline justify-between gap-3">
-        <h3 className="text-[13px] text-[var(--platinum)]">+{seat.minimumImprovement} or more</h3>
-        <p className="whitespace-nowrap font-mono text-[13px] text-[var(--white)]">{formatRewardSeatShare(share)}<span className="ml-1 font-sans text-[11px] text-[var(--muted)]">of emissions</span></p>
+        <h3 className="text-[14px] text-[var(--platinum)]">+{seat.minimumImprovement} or more</h3>
+        <p className="whitespace-nowrap font-mono text-[14px] text-[var(--white)]">{formatRewardSeatShare(share)}<span className="ml-1 font-sans text-[12px] text-[var(--muted)]">of emissions</span></p>
       </div>
       {holder ? <div className="mt-3 space-y-1.5 text-[12px] text-[var(--muted)]">
         <p className="font-mono text-[var(--platinum)]" title={holder.minerHotkey}>{shortHotkey(holder.minerHotkey)}</p>
-        <p>+{formatCompetitionScore(holder.improvement)} · {formatCompetitionScore(holder.winnerScore)} vs {formatCompetitionScore(holder.baselineScore)}{wonOn ? ` · ${formatDay(wonOn)}` : ''}</p>
+        <p>+{formatCompetitionScore(holder.improvement)} · {formatCompetitionScore(holder.winnerScore)} vs {formatCompetitionScore(holder.baselineScore)}{wonOn ? ` · ${formatUtcDate(wonOn)}` : ''}</p>
         <p>{rewardSeatDecayLabel(seat)}</p>
       </div> : <p className="mt-3 text-[12px] text-[var(--muted)]">Open. No winner holds this seat, so its share is burned.</p>}
     </li>
@@ -222,7 +222,7 @@ function RoundSummary({ round }: { round: CompetitionRoundSummary }) {
         <CompetitionSchedule round={round} />
       </div>
       <details className="group border-t border-[var(--line)]">
-        <summary className="flex cursor-pointer list-none items-center justify-between py-3 text-[12px] text-[var(--muted)] transition-colors hover:text-[var(--white)] [&::-webkit-details-marker]:hidden">Round details<span aria-hidden className="text-[16px] transition-transform group-open:rotate-45">+</span></summary>
+        <summary className="flex cursor-pointer list-none items-center justify-between py-3 text-[12px] text-[var(--muted)] transition-colors hover:text-[var(--white)] [&::-webkit-details-marker]:hidden">Round details<ChevronDown aria-hidden className="h-4 w-4 shrink-0 transition-transform group-open:rotate-180" /></summary>
         <dl className="grid grid-cols-2 gap-x-4 gap-y-5 pb-5 pt-1 sm:grid-cols-[calc((100%-2rem)/3+1rem)_minmax(0,1fr)_minmax(0,1fr)]">
           <RoundDetail label="Defending champion score" note={baselineScore === null ? null : evaluationComplete ? (round.publishedAt ? `Published ${formatUtc(round.publishedAt)}` : 'Published result') : round.status === 'scored' ? 'Final result pending' : 'Round still in progress'}>{baselineScore === null ? 'Awaiting score' : formatCompetitionScore(baselineScore)}</RoundDetail>
           {round.champion ? <RoundDetail label="Champion" note={<>{championMetricDetail(round, round.champion.finalScore)}{round.promotionStatus === 'superseded' ? <> This round’s champion was not promoted because a newer evaluation day was published.</> : null}</>}><span className="font-mono">{shortHotkey(round.champion.minerHotkey)}</span></RoundDetail>
@@ -239,7 +239,7 @@ function RoundSummary({ round }: { round: CompetitionRoundSummary }) {
 }
 
 function RoundDetail({ label, note, children }: { label: string; note?: ReactNode; children: ReactNode }) {
-  return <div className="min-w-0"><dt className="text-[12px] text-[var(--muted)]">{label}</dt><dd className="mt-1.5 text-[13px] text-[var(--platinum)]">{children}{note ? <span className="mt-1 block text-[12px] leading-relaxed text-[var(--muted)]">{note}</span> : null}</dd></div>
+  return <div className="min-w-0"><dt className="text-[12px] text-[var(--muted)]">{label}</dt><dd className="mt-1.5 text-[14px] text-[var(--platinum)]">{children}{note ? <span className="mt-1 block text-[12px] leading-relaxed text-[var(--muted)]">{note}</span> : null}</dd></div>
 }
 
 function ChampionScoreHistory({ points }: { points: CompetitionScoreHistoryPoint[] }) {
@@ -247,20 +247,20 @@ function ChampionScoreHistory({ points }: { points: CompetitionScoreHistoryPoint
   const upperBound = Math.max(5, Math.ceil((maxScore + Math.max(1, maxScore / 10)) / 5) * 5)
   const ticks = [0, upperBound / 2, upperBound]
   return <div className="min-w-0" role="region" aria-label="Champion score by day">
-    <h4 className="text-[13px] text-[var(--platinum)]">Champion score by day <span className="text-[11px] text-[var(--muted-2)]">/100</span></h4>
+    <h3 className="text-[14px] text-[var(--platinum)]">Champion score by day <span className="text-[12px] text-[var(--muted-2)]">/100</span></h3>
     {points.length ? <>
       <div className="mt-3 h-[180px] w-full min-w-0">
         <ResponsiveContainer width="100%" height="100%" minWidth={0} initialDimension={{ width: 320, height: 180 }}>
           <LineChart data={points} accessibilityLayer margin={{ top: 8, right: 9, bottom: 0, left: 0 }}>
             <CartesianGrid vertical={false} stroke="var(--line)" strokeDasharray="3 5" />
-            <XAxis dataKey="timestamp" type="number" scale="time" domain={points.length === 1 ? [points[0].timestamp - 43_200_000, points[0].timestamp + 43_200_000] : ['dataMin', 'dataMax']} ticks={historyTicks(points)} tickFormatter={formatHistoryDate} stroke="var(--line)" tick={{ fill: 'var(--muted-2)', fontSize: 10 }} tickLine={false} axisLine={false} minTickGap={25} tickMargin={10} />
-            <YAxis domain={[0, upperBound]} ticks={ticks} tick={{ fill: 'var(--muted-2)', fontSize: 10 }} tickLine={false} axisLine={false} width={30} tickMargin={8} />
+            <XAxis dataKey="timestamp" type="number" scale="time" domain={points.length === 1 ? [points[0].timestamp - 43_200_000, points[0].timestamp + 43_200_000] : ['dataMin', 'dataMax']} ticks={historyTicks(points)} tickFormatter={formatHistoryDate} stroke="var(--line)" tick={{ fill: 'var(--muted-2)', fontSize: 12 }} tickLine={false} axisLine={false} minTickGap={25} tickMargin={10} />
+            <YAxis domain={[0, upperBound]} ticks={ticks} tick={{ fill: 'var(--muted-2)', fontSize: 12 }} tickLine={false} axisLine={false} width={30} tickMargin={8} />
             <Tooltip content={<ScoreHistoryTooltip />} cursor={{ stroke: 'var(--line-3)', strokeDasharray: '3 3' }} />
             <Line type="linear" dataKey="score" name="Champion score" stroke="var(--brand)" strokeWidth={2} dot={{ r: 3, fill: 'var(--brand)', stroke: 'none' }} activeDot={{ r: 5, stroke: 'var(--surface)', strokeWidth: 2 }} isAnimationActive={false} />
           </LineChart>
         </ResponsiveContainer>
       </div>
-      <p className="mt-2 text-[10px] text-[var(--muted-2)]">{points.length === 1 ? 'First published champion score' : `${formatHistoryDate(points[0].timestamp)} – ${formatHistoryDate(points[points.length - 1].timestamp)} · UTC`} · The champion’s score on each day’s ICPs.</p>
+      <p className="mt-2 text-[12px] text-[var(--muted)]">{points.length === 1 ? 'First published champion score' : `${formatHistoryDate(points[0].timestamp)} – ${formatHistoryDate(points[points.length - 1].timestamp)} · UTC`} · The champion’s score on each day’s ICPs.</p>
     </> : <div className="mt-3 flex h-[180px] items-center justify-center rounded-md border border-dashed border-[var(--line)] text-[12px] text-[var(--muted-2)]">No champion scores yet.</div>}
   </div>
 }
@@ -272,7 +272,7 @@ function ScoreHistoryTooltip({ active, payload }: { active?: boolean; payload?: 
     : point.challengerScore !== null ? <div className="mt-1 text-[var(--muted)]">Top challenger {formatCompetitionScore(point.challengerScore)} · {point.promotionStatus === 'pending' ? 'promotion pending' : 'not promoted'}</div>
       : point.championNotRerun ? <div className="mt-1 text-[var(--muted)]">A different defending champion ran this round</div>
         : <div className="mt-1 text-[var(--muted)]">Champion held the title</div>
-  return <div className="rounded-md border border-[var(--line-3)] bg-[#101010] px-3 py-2 text-[11px] shadow-lg"><div className="text-[var(--muted)]">Evaluation · {formatUtcDate(point.evaluationDate)}</div><div className="mt-1 font-mono text-[var(--platinum)]">{point.newChampion ? 'New champion' : point.championNotRerun ? 'Previous champion' : 'Champion'} {formatCompetitionScore(point.score)} /100</div><div className="mt-1 font-mono text-[var(--muted)]" title={point.championHotkey ?? undefined}>{point.championHotkey ? shortHotkey(point.championHotkey) : 'Miner unavailable'}</div>{detail}</div>
+  return <div className="rounded-md border border-[var(--line-3)] bg-[var(--surface)] px-3 py-2 text-[12px] shadow-lg"><div className="text-[var(--muted)]">Evaluation · {formatUtcDate(point.evaluationDate)}</div><div className="mt-1 font-mono text-[var(--platinum)]">{point.newChampion ? 'New champion' : point.championNotRerun ? 'Previous champion' : 'Champion'} {formatCompetitionScore(point.score)} /100</div><div className="mt-1 font-mono text-[var(--muted)]" title={point.championHotkey ?? undefined}>{point.championHotkey ? shortHotkey(point.championHotkey) : 'Miner unavailable'}</div>{detail}</div>
 }
 
 function historyTicks(points: CompetitionScoreHistoryPoint[]): number[] {
@@ -288,8 +288,8 @@ function CompetitionSchedule({ round }: { round: CompetitionRoundSummary }) {
   if (!round.icpSetDate && !round.evaluationDate && !round.publicAt) return null
   const submissionDate = utcCalendarDate(round.submissionOpen) ?? round.icpSetDate
   return <div className="grid grid-cols-2 gap-4">
-    <div><div className="text-[12px] text-[var(--muted)]">Submission day</div><div className="mt-2 text-[13px] text-[var(--platinum)]">{formatDay(submissionDate)}</div></div>
-    <div><div className="text-[12px] text-[var(--muted)]">Evaluation day</div><div className="mt-2 text-[13px] text-[var(--platinum)]">{formatDay(round.evaluationDate)}</div></div>
+    <div><div className="text-[12px] text-[var(--muted)]">Submission day</div><div className="mt-2 text-[14px] text-[var(--platinum)]">{formatUtcDate(submissionDate)}</div></div>
+    <div><div className="text-[12px] text-[var(--muted)]">Evaluation day</div><div className="mt-2 text-[14px] text-[var(--platinum)]">{formatUtcDate(round.evaluationDate)}</div></div>
   </div>
 }
 
@@ -435,14 +435,14 @@ function RoundWorkspace({ round, active, initialSubmissionId = null, inspectionO
   const pageCount = Math.max(1, Math.ceil(filtered.length / 15))
   const currentPage = Math.min(page, pageCount - 1)
   const inspection = selectedSubmission ? <div className="p-4 sm:p-6" aria-label="Submission evaluation">
-    <div className="mb-6 flex flex-wrap items-start justify-between gap-3"><div className="min-w-0"><h4 className="text-[14px] text-[var(--white)]">Agent evaluation</h4><p className="mt-1 text-[12px] text-[var(--muted)]">{formatDay(round.evaluationDate)}</p><p className="mt-2 break-all font-mono text-[10px] text-[var(--muted-2)]">Submission · {selectedSubmission.submissionId}</p><p className="mt-1 break-all font-mono text-[10px] text-[var(--muted-2)]">{selectedMiner ? `Miner hotkey · ${selectedMiner}` : 'Run by organizer'}</p></div><button type="button" onClick={() => { setInspectionOpen(false); document.getElementById(`evaluation-toggle-${selectedSubmission.submissionId}`)?.focus() }} className={`${inspectionOnly ? 'hidden' : ''} min-h-11 rounded border border-[var(--line-2)] px-3 py-1.5 text-[11px] text-[var(--muted)]`}>Close evaluation</button></div>
-    <div className="mb-4 text-[11px] text-[var(--muted)]"><SubmissionStatus submission={selectedSubmission} round={round} /></div>
+    <div className="mb-6 flex flex-wrap items-start justify-between gap-3"><div className="min-w-0"><h3 className="text-[14px] text-[var(--white)]">Agent evaluation</h3><p className="mt-1 text-[12px] text-[var(--muted)]">{formatUtcDate(round.evaluationDate)}</p><p className="mt-2 break-all font-mono text-[12px] text-[var(--muted-2)]">Submission · {selectedSubmission.submissionId}</p><p className="mt-1 break-all font-mono text-[12px] text-[var(--muted-2)]">{selectedMiner ? `Miner hotkey · ${selectedMiner}` : 'Run by organizer'}</p></div><button type="button" onClick={() => { setInspectionOpen(false); document.getElementById(`evaluation-toggle-${selectedSubmission.submissionId}`)?.focus() }} className={`${inspectionOnly ? 'hidden' : ''} ${secondaryButtonClass}`}>Close evaluation</button></div>
+    <div className="mb-4 text-[12px] text-[var(--muted)]"><SubmissionStatus submission={selectedSubmission} round={round} /></div>
     <EvaluationRunSummary submission={selectedSubmission} />
     <div className="grid min-w-0 grid-cols-1 gap-8 xl:grid-cols-[minmax(0,1.5fr)_minmax(260px,0.5fr)]"><PublishedResults benchmark={benchmark} benchmarkState={benchmarkState} results={results} resultsState={resultsState} round={round} submission={selectedSubmission} /><SourcePanel submission={selectedSubmission} cancelled={round.status === 'cancelled'} code={code} codeState={codeState} selectedFile={selectedCodeFile} onSelectFile={setSelectedFile} onRequest={() => void requestCode()} /></div>
   </div> : null
   if (inspectionOnly) return roundLoading ? <div className="p-5"><SubmissionRowsLoading /></div> : inspection ?? <InlineNotice>{roundError ?? 'Submission details are unavailable.'}</InlineNotice>
   return <section className="pt-6 md:pt-10" aria-label="Current submissions">
-    <div className="mb-5 flex items-end justify-between gap-4"><div><h3 className="font-display text-[22px] font-medium tracking-[-0.025em] text-[var(--platinum)]">Submissions</h3><p className="mt-1 text-[12px] text-[var(--muted-2)]">{formatDay(round.evaluationDate)}</p></div><span className="font-mono text-[12px] text-[var(--muted)]">{submissionSnapshot === null ? roundLoading ? 'Loading…' : 'Unavailable' : `${submissions.length} total`}</span></div>
+    <div className="mb-5 flex items-end justify-between gap-4"><div><h2 className="font-display text-[20px] font-medium tracking-[-0.025em] text-[var(--platinum)]">Submissions</h2><p className="mt-1 text-[12px] text-[var(--muted-2)]">{formatUtcDate(round.evaluationDate)}</p></div><span className="font-mono text-[12px] text-[var(--muted)]">{submissionSnapshot === null ? roundLoading ? 'Loading…' : 'Unavailable' : `${submissions.length} total`}</span></div>
     <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-end">
       <label className="min-w-0 flex-1"><span className={filterLabelClass}>Find your miner</span><input ref={searchInputRef} type="search" value={query} onChange={(event) => { setQuery(event.target.value); setPage(0) }} placeholder="Miner hotkey or submission" className={filterClass} /></label>
       <div className="sm:w-48"><span className={filterLabelClass}>Submission status</span><CompetitionSelect label="Submission status" value={statusFilter} onChange={(value) => { setStatusFilter(value); setPage(0) }} options={submissionStatusOptions} /></div>
@@ -456,9 +456,10 @@ function RoundWorkspace({ round, active, initialSubmissionId = null, inspectionO
 // Stretch the native button over its row, preserving keyboard and table semantics.
 const evaluationRowButtonClass = 'text-left after:absolute after:inset-0 after:cursor-pointer focus-visible:outline-none focus-visible:after:ring-1 focus-visible:after:ring-inset focus-visible:after:ring-[var(--platinum)]'
 
+const secondaryButtonClass = 'min-h-11 inline-flex items-center justify-center rounded-md border border-[var(--line-2)] px-4 py-2.5 text-[12px] text-[var(--platinum)] transition-colors hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-40'
 const controlClass = 'h-11 w-full min-w-0 rounded-md border border-[var(--line-2)] bg-[var(--surface)] px-3 text-[var(--platinum)] placeholder:text-[var(--muted-2)] outline-none transition-colors hover:border-[var(--line-3)] focus-visible:border-[var(--platinum)] focus-visible:ring-1 focus-visible:ring-[var(--platinum)]'
 const filterClass = `${controlClass} text-[16px] sm:text-[14px]`
-const filterLabelClass = 'mb-2 block text-[11px] text-[var(--muted)]'
+const filterLabelClass = 'mb-2 block text-[12px] text-[var(--muted)]'
 
 const submissionStatusOptions = [
   { value: 'all', label: 'All statuses' }, { value: 'evaluating', label: 'Evaluating' },
@@ -475,7 +476,7 @@ function CompetitionSelect({ label, value, options, onChange, mono = false }: { 
     </Select.Trigger>
     <Select.Portal><Select.Content position="popper" sideOffset={6} align="start" collisionPadding={16} className="dashboard-popover z-50 max-h-[min(320px,var(--radix-select-content-available-height))] w-[var(--radix-select-trigger-width)] max-w-[calc(100vw-2rem)] overflow-hidden rounded-lg border border-[var(--line-3)] shadow-xl">
       <Select.ScrollUpButton className="flex h-7 items-center justify-center text-[var(--muted)]"><ChevronUp aria-hidden className="h-4 w-4" /></Select.ScrollUpButton>
-      <Select.Viewport className="p-1">{options.map((option) => <Select.Item key={option.value} value={option.value} className={`relative flex min-h-11 cursor-default items-center rounded-md py-2.5 pl-3 pr-9 text-[var(--platinum)] outline-none data-[highlighted]:bg-white/8 data-[state=checked]:text-[var(--white)] ${mono ? 'font-mono text-[11px]' : 'text-[13px]'}`}>
+      <Select.Viewport className="p-1">{options.map((option) => <Select.Item key={option.value} value={option.value} className={`relative flex min-h-11 cursor-default items-center rounded-md py-2.5 pl-3 pr-9 text-[var(--platinum)] outline-none data-[highlighted]:bg-white/8 data-[state=checked]:text-[var(--white)] ${mono ? 'font-mono text-[12px]' : 'text-[14px]'}`}>
         <Select.ItemText className="min-w-0 flex-1"><span className={mono ? 'break-all' : 'break-words'}>{option.label}</span></Select.ItemText>
         <Select.ItemIndicator className="absolute right-3"><Check aria-hidden className="h-3.5 w-3.5" /></Select.ItemIndicator>
       </Select.Item>)}</Select.Viewport>
@@ -511,8 +512,8 @@ function EvaluationRunSummary({ submission }: { submission: CompetitionSubmissio
   const versions = evaluation?.codeVersions
   if (!evaluation && !['scoring', 'scoring_failed', 'scored', 'champion'].includes(submission.status)) return null
   return <details className="group mb-6 border-y border-[var(--line)]">
-    <summary className="flex cursor-pointer list-none items-center justify-between gap-3 py-3 text-[12px] text-[var(--muted)] [&::-webkit-details-marker]:hidden"><span>Evaluation run versions</span><span aria-hidden className="transition-transform group-open:rotate-45">+</span></summary>
-    <div className="space-y-3 pb-4 text-[11px] text-[var(--muted)]">{evaluation?.counts ? <p>Tasks · {evaluation.counts.queued} queued · {evaluation.counts.active} active · {evaluation.counts.completed} completed · {evaluation.counts.failed} failed · {evaluation.counts.retrying} retrying</p> : null}
+    <summary className="flex cursor-pointer list-none items-center justify-between gap-3 py-3 text-[12px] text-[var(--muted)] [&::-webkit-details-marker]:hidden"><span>Evaluation run versions</span><ChevronDown aria-hidden className="h-4 w-4 shrink-0 transition-transform group-open:rotate-180" /></summary>
+    <div className="space-y-3 pb-4 text-[12px] text-[var(--muted)]">{evaluation?.counts ? <p>Tasks · {evaluation.counts.queued} queued · {evaluation.counts.active} active · {evaluation.counts.completed} completed · {evaluation.counts.failed} failed · {evaluation.counts.retrying} retrying</p> : null}
       <p className="text-[var(--muted-2)]">Execution and scoring runs. Accepted scoring attribution below identifies the original judgments, including reused judgments.</p>
       {versions?.length ? <><CheckoutStateExplanation />{versions.map((version, index) => <div key={`${version.validatorHotkey}-${version.phase}-${version.commit}-${index}`}><p>{version.phase === 'executing' ? 'Execution' : 'Scoring'} · <ValidatorIdentity hotkey={version.validatorHotkey} full /></p><div className="mt-1 break-all"><ValidatorCodeVersion commit={version.commit} workingTree={version.workingTree} full /></div></div>)}</> : <p>Evaluation run versions were not recorded.</p>}
     </div>
@@ -520,7 +521,7 @@ function EvaluationRunSummary({ submission }: { submission: CompetitionSubmissio
 }
 
 function Pagination({ page, hasNext, onPrevious, onNext, label, loading = false }: { page: number; hasNext: boolean; onPrevious: () => void; onNext: () => void; label?: string; loading?: boolean }) {
-  return <nav aria-label="Submission pages" className="mt-4 flex items-center justify-between gap-3 text-[11px] text-[var(--muted)]"><span aria-live="polite">{label ? `${label} · ` : ''}Page {page + 1}</span><div className="flex gap-2"><button type="button" disabled={loading || page === 0} onClick={onPrevious} className="min-h-11 rounded border border-[var(--line-2)] px-3 py-2 disabled:opacity-30 hover:bg-white/5">Previous</button><button type="button" disabled={loading || !hasNext} onClick={onNext} className="min-h-11 rounded border border-[var(--line-2)] px-3 py-2 disabled:opacity-30 hover:bg-white/5">Next</button></div></nav>
+  return <nav aria-label="Submission pages" className="mt-4 flex items-center justify-between gap-3 text-[12px] text-[var(--muted)]"><span aria-live="polite">{label ? `${label} · ` : ''}Page {page + 1}</span><div className="flex gap-2"><button type="button" disabled={loading || page === 0} onClick={onPrevious} className={secondaryButtonClass}>Previous</button><button type="button" disabled={loading || !hasNext} onClick={onNext} className={secondaryButtonClass}>Next</button></div></nav>
 }
 
 function CompetitionHistory({ active }: { active: boolean }) {
@@ -559,10 +560,10 @@ function CompetitionHistory({ active }: { active: boolean }) {
       <button type="submit" className="h-11 rounded-md bg-[var(--white)] px-5 text-[12px] font-medium text-black">Search history</button>
       {(day || hotkey || filters.day || filters.hotkey) ? <button type="button" onClick={() => { setDay(''); setHotkey(''); setPage(0); setCursors([null]); setFilters({ day: '', hotkey: '' }); hotkeyInputRef.current?.focus() }} className="h-11 rounded-md px-3 text-[12px] text-[var(--muted)]">Clear</button> : null}
     </form>
-    {loading && !history ? <SubmissionRowsLoading /> : error ? <InlineNotice>{error} <button type="button" className="underline" onClick={() => void refresh()}>Retry</button></InlineNotice> : history?.entries.length ? <div className="overflow-x-auto rounded-lg border border-[var(--line)]"><table className="w-full table-fixed text-left"><thead className="bg-[var(--surface)] text-[11px] text-[var(--muted)]"><tr><th className="w-[45%] px-4 py-3 font-normal sm:w-1/2" scope="col">Miner</th><th className="px-3 py-3 font-normal" scope="col">Evaluation day</th><th className="w-[20%] px-4 py-3 text-right font-normal" scope="col">Score</th></tr></thead><tbody>{history.entries.map(({ round, submission }) => {
+    {loading && !history ? <SubmissionRowsLoading /> : error ? <InlineNotice>{error} <button type="button" className="underline" onClick={() => void refresh()}>Retry</button></InlineNotice> : history?.entries.length ? <div className="overflow-x-auto rounded-lg border border-[var(--line)]"><table className="w-full table-fixed text-left"><thead className="bg-[var(--surface)] text-[12px] text-[var(--muted)]"><tr><th className="w-[45%] px-4 py-3 font-normal sm:w-1/2" scope="col">Miner</th><th className="px-3 py-3 font-normal" scope="col">Evaluation day</th><th className="w-[20%] px-4 py-3 text-right font-normal" scope="col">Score</th></tr></thead><tbody>{history.entries.map(({ round, submission }) => {
       const key = `${round.roundId}:${submission.submissionId}`
       const miner = competitionSubmissionMiner(submission, round)
-      return <Fragment key={key}><tr className={`relative cursor-pointer border-t border-[var(--line)] transition-colors ${selected === key ? 'bg-white/[0.045]' : 'hover:bg-white/[0.025]'}`}><td className="px-4 py-3"><button type="button" aria-expanded={selected === key} aria-controls={`evaluation-${key}`} onClick={() => setSelected(selected === key ? null : key)} className={evaluationRowButtonClass} title={miner ?? undefined}><span className="block break-words font-mono text-[11px] text-[var(--platinum)]">{miner ? shortHotkey(miner) : 'Defending champion'}</span><span className="mt-1 block text-[10px] text-[var(--muted)]">{submission.isBaseline ? miner ? 'Defending champion · ' : 'Run by organizer · ' : submission.isChampion ? 'Champion · ' : ''}{selected === key ? 'Close evaluation −' : 'View evaluation +'}</span></button></td><td className="px-3 py-3 text-[11px] text-[var(--muted)]">{formatDay(round.evaluationDate)}</td><td className="px-4 py-3 text-right font-mono text-[12px] text-[var(--platinum)]">{formatCompetitionScore(submission.finalScore)}</td></tr>{selected === key ? <tr id={`evaluation-${key}`}><td colSpan={3} className="border-t border-[var(--line)] bg-[var(--surface)]"><RoundWorkspace key={key} round={round} active={active} initialSubmissionId={submission.submissionId} inspectionOnly /></td></tr> : null}</Fragment>
+      return <Fragment key={key}><tr className={`relative cursor-pointer border-t border-[var(--line)] transition-colors ${selected === key ? 'bg-white/[0.045]' : 'hover:bg-white/[0.025]'}`}><td className="px-4 py-3"><button type="button" aria-expanded={selected === key} aria-controls={`evaluation-${key}`} onClick={() => setSelected(selected === key ? null : key)} className={evaluationRowButtonClass} title={miner ?? undefined}><span className="block break-words font-mono text-[12px] text-[var(--platinum)]">{miner ? shortHotkey(miner) : 'Defending champion'}</span><span className="mt-1 block text-[12px] text-[var(--muted)]">{submission.isBaseline ? miner ? 'Defending champion · ' : 'Run by organizer · ' : submission.isChampion ? 'Champion · ' : ''}{selected === key ? 'Close evaluation' : 'View evaluation'}</span></button></td><td className="px-3 py-3 text-[12px] text-[var(--muted)]">{formatUtcDate(round.evaluationDate)}</td><td className="px-4 py-3 text-right font-mono text-[12px] text-[var(--platinum)]">{formatCompetitionScore(submission.finalScore)}</td></tr>{selected === key ? <tr id={`evaluation-${key}`}><td colSpan={3} className="border-t border-[var(--line)] bg-[var(--surface)]"><RoundWorkspace key={key} round={round} active={active} initialSubmissionId={submission.submissionId} inspectionOnly /></td></tr> : null}</Fragment>
     })}</tbody></table></div> : <InlineNotice>{history?.nextCursor ? 'No matches on this page. Continue to earlier rounds or filter by day.' : 'No published submissions match these filters.'}</InlineNotice>}
     <Pagination page={page} hasNext={Boolean(history?.nextCursor)} loading={loading} onPrevious={() => setPage((page) => Math.max(0, page - 1))} onNext={() => { if (history?.nextCursor) { setCursors((items) => [...items.slice(0, page + 1), history.nextCursor]); setPage(page + 1) } }} />
   </section>
@@ -586,10 +587,10 @@ function SubmissionTable({ submissions, round, selectedId, onSelect, expandedCon
                 <span className="mt-1 block font-mono text-[12px] text-[var(--muted)] sm:hidden" title={miner ?? undefined}>{miner ? shortHotkey(miner) : 'Run by organizer'}</span>
                 <span className="mt-2 flex items-center gap-1 text-[12px] text-[var(--platinum)]">{selected ? 'Close evaluation' : 'View evaluation'}<ChevronRight aria-hidden className={`h-3.5 w-3.5 transition-transform ${selected ? 'rotate-90' : ''}`} /></span>
               </button>
-              <div className="px-4 pb-4 text-[13px] leading-relaxed text-[var(--muted)] sm:hidden"><SubmissionStatus submission={submission} round={round} /></div>
+              <div className="px-4 pb-4 text-[14px] leading-relaxed text-[var(--muted)] sm:hidden"><SubmissionStatus submission={submission} round={round} /></div>
             </td>
             <td className="hidden break-words px-4 py-4 font-mono text-[12px] text-[var(--muted)] sm:table-cell" title={miner ?? undefined}>{miner ? shortHotkey(miner) : 'Run by organizer'}</td>
-            <td className="hidden px-3 py-4 text-[13px] leading-relaxed text-[var(--muted)] sm:table-cell"><SubmissionStatus submission={submission} round={round} /></td>
+            <td className="hidden px-3 py-4 text-[14px] leading-relaxed text-[var(--muted)] sm:table-cell"><SubmissionStatus submission={submission} round={round} /></td>
             <td className="px-4 py-4 text-right align-top font-mono text-[14px] text-[var(--platinum)] sm:align-middle">{formatCompetitionScore(submission.finalScore)}</td>
           </tr>{selected && expandedContent ? <tr id={`submission-${submission.submissionId}`}><td colSpan={4} className="border-t border-[var(--line)] bg-[var(--surface)]">{expandedContent}</td></tr> : null}</Fragment>
         })}</tbody>
@@ -601,7 +602,7 @@ function SubmissionTable({ submissions, round, selectedId, onSelect, expandedCon
 function ValidatorIdentity({ hotkey, full = false }: { hotkey: string; full?: boolean }) {
   const names = useContext(ValidatorNamesContext)
   const name = Object.hasOwn(names, hotkey) ? names[hotkey] : null
-  return <span title={hotkey} className="break-words">{name ?? (full ? 'Validator' : shortHotkey(hotkey))}{name && !full ? <span className="font-mono"> · {shortHotkey(hotkey)}</span> : null}{full ? <span className="mt-1 block break-all font-mono text-[10px] text-[var(--muted-2)]">{hotkey}</span> : null}</span>
+  return <span title={hotkey} className="break-words">{name ?? (full ? 'Validator' : shortHotkey(hotkey))}{name && !full ? <span className="font-mono"> · {shortHotkey(hotkey)}</span> : null}{full ? <span className="mt-1 block break-all font-mono text-[12px] text-[var(--muted-2)]">{hotkey}</span> : null}</span>
 }
 
 function SubmissionStatus({ submission, round }: { submission: CompetitionSubmission; round: CompetitionRoundSummary }) {
@@ -616,7 +617,7 @@ function ValidatorCodeVersion({ commit, workingTree, full = false }: { commit: s
 }
 
 function CheckoutStateExplanation() {
-  return <p className="text-[10px] leading-relaxed text-[var(--muted-2)]">This file check was recorded when the validator started. The linked commit is the checkout’s base version (Git HEAD). Uncommitted files can include modified, staged, deleted, or untracked files; the record does not list them or show that scoring code changed. “File state not recorded” means the check was unavailable, not that files changed.</p>
+  return <p className="text-[12px] leading-relaxed text-[var(--muted-2)]">This file check was recorded when the validator started. The linked commit is the checkout’s base version (Git HEAD). Uncommitted files can include modified, staged, deleted, or untracked files; the record does not list them or show that scoring code changed. “File state not recorded” means the check was unavailable, not that files changed.</p>
 }
 
 function PublishedResults({ benchmark, benchmarkState, results, resultsState, round, submission }: { benchmark: CompetitionBenchmark | null; benchmarkState: ReleaseState; results: CompetitionSubmissionResults | null; resultsState: ReleaseState; round: CompetitionRoundSummary; submission: CompetitionSubmission }) {
@@ -642,10 +643,10 @@ function PublishedResults({ benchmark, benchmarkState, results, resultsState, ro
   const scores = submission.isBaseline && round.status === 'published'
     ? new Map(benchmark.icps.flatMap((icp) => icp.baselineScore === null ? [] : [[icp.position, icp.baselineScore] as const]))
     : results?.publicScores ?? new Map<number, number>()
-  return <ResultFrame><div className="mb-5 flex flex-wrap gap-5 font-mono text-[13px] text-[var(--platinum)]"><span>{round.status === 'published' ? 'Final score' : 'Provisional score'} {formatCompetitionScore(results?.finalScore ?? submission.finalScore)}</span><span>{submission.isBaseline ? `Defending champion${round.defendingChampion ? ` · ${shortHotkey(round.defendingChampion.minerHotkey)}` : ''}` : shortHotkey(submission.minerHotkey)}</span></div><ScoringAttributionSummary attribution={results?.scoringAttribution ?? null} /><IcpList title={`Public ICPs (${benchmark.benchmarkIcpCount})`} icpSetDate={benchmark.icpSetDate} icps={benchmark.icps} scores={scores} scoringAttribution={results?.scoringAttribution ?? null} companyDiagnostics={results?.companyDiagnostics ?? null} /></ResultFrame>
+  return <ResultFrame><div className="mb-5 flex flex-wrap gap-5 font-mono text-[14px] text-[var(--platinum)]"><span>{round.status === 'published' ? 'Final score' : 'Provisional score'} {formatCompetitionScore(results?.finalScore ?? submission.finalScore)}</span><span>{submission.isBaseline ? `Defending champion${round.defendingChampion ? ` · ${shortHotkey(round.defendingChampion.minerHotkey)}` : ''}` : shortHotkey(submission.minerHotkey)}</span></div><ScoringAttributionSummary attribution={results?.scoringAttribution ?? null} /><IcpList title={`Public ICPs (${benchmark.benchmarkIcpCount})`} icpSetDate={benchmark.icpSetDate} icps={benchmark.icps} scores={scores} scoringAttribution={results?.scoringAttribution ?? null} companyDiagnostics={results?.companyDiagnostics ?? null} /></ResultFrame>
 }
 
-function ResultFrame({ children }: { children: ReactNode }) { return <div><h3 className="font-display text-[19px] font-medium text-[var(--platinum)]">Evaluation results</h3><div className="mt-4">{children}</div></div> }
+function ResultFrame({ children }: { children: ReactNode }) { return <div><h4 className="font-display text-[20px] font-medium text-[var(--platinum)]">Evaluation results</h4><div className="mt-4">{children}</div></div> }
 
 function PendingIcpResults({ benchmark, children, scores = new Map<number, number>() }: { benchmark: CompetitionBenchmark; children: ReactNode; scores?: Map<number, number> }) { return <ResultFrame><InlineNotice>{children}</InlineNotice><div className="mt-5"><IcpList title={`Public ICPs (${benchmark.benchmarkIcpCount})`} icpSetDate={benchmark.icpSetDate} icps={benchmark.icps} scores={scores} /></div></ResultFrame> }
 
@@ -654,72 +655,72 @@ function ScoringAttributionSummary({ attribution, loading = false }: { attributi
   return <details className="group mb-5 border-y border-[var(--line)]">
     <summary className="flex cursor-pointer list-none items-center justify-between gap-3 py-3 text-[12px] text-[var(--muted)] [&::-webkit-details-marker]:hidden">
       <span>Scored by <span className="ml-1 text-[var(--platinum)]">{loading ? 'Loading…' : attribution?.validators.length ? attribution.validators.map(({ hotkey }) => Object.hasOwn(names, hotkey) ? `${names[hotkey]} (${shortHotkey(hotkey)})` : shortHotkey(hotkey)).join(', ') : 'Unavailable'}</span></span>
-      <span aria-hidden className="transition-transform group-open:rotate-45">+</span>
+      <ChevronDown aria-hidden className="h-4 w-4 shrink-0 transition-transform group-open:rotate-180" />
     </summary>
     <div className="space-y-3 pb-4">{attribution?.codeVersions?.length ? <CheckoutStateExplanation /> : null}{attribution?.validators.map((validator) => {
       const codeVersions = attribution.codeVersions?.filter((version) => version.validatorHotkey === validator.hotkey) ?? []
       const missingCommitCount = Math.max(0, validator.icpCount - new Set(codeVersions.flatMap((version) => version.icpPositions)).size)
       return <div key={validator.hotkey}>
       <div className="text-[12px] leading-relaxed text-[var(--platinum)]"><ValidatorIdentity hotkey={validator.hotkey} full /></div>
-      <div className="mt-1 text-[11px] text-[var(--muted)]">{formatIcpCount(validator.icpCount)} · {validator.reusedIcpCount} reused</div>
-      <div className="mt-3 space-y-1 text-[11px] text-[var(--muted)]">
-        <p className="mb-2 text-[10px] text-[var(--muted-2)]">Validator code commits</p>
+      <div className="mt-1 text-[12px] text-[var(--muted)]">{formatIcpCount(validator.icpCount)} · {validator.reusedIcpCount} reused</div>
+      <div className="mt-3 space-y-1 text-[12px] text-[var(--muted)]">
+        <p className="mb-2 text-[12px] text-[var(--muted-2)]">Validator code commits</p>
         {codeVersions.length ? codeVersions.map((version) => <p className="break-all" key={`${version.commit}-${version.workingTree}`}><ValidatorCodeVersion commit={version.commit} workingTree={version.workingTree} full /> · {formatIcpCount(version.icpPositions.length)}</p>) : <p>Commit not recorded for accepted judgments.</p>}
         {codeVersions.length > 0 && missingCommitCount > 0 ? <p>Commit not recorded for {formatIcpCount(missingCommitCount)}.</p> : null}
       </div>
     </div>})}
-    {!loading && attribution ? <p className="text-[11px] text-[var(--muted)]">Unattributed ICPs {attribution.unattributedIcpCount}</p> : <p className="text-[11px] text-[var(--muted)]">{loading ? 'Loading validator attribution…' : 'Validator attribution is unavailable for this result.'}</p>}</div>
+    {!loading && attribution ? <p className="text-[12px] text-[var(--muted)]">Unattributed ICPs {attribution.unattributedIcpCount}</p> : <p className="text-[12px] text-[var(--muted)]">{loading ? 'Loading validator attribution…' : 'Validator attribution is unavailable for this result.'}</p>}</div>
   </details>
 }
 
 function IcpList({ title, icpSetDate, icps, scores, scoringAttribution = null, companyDiagnostics = null }: { title: string; icpSetDate: string; icps: CompetitionIcp[]; scores: Map<number, number>; scoringAttribution?: CompetitionScoringAttribution | null; companyDiagnostics?: CompetitionCompanyDiagnostic[] | null }) {
   const attributionByPosition = new Map(scoringAttribution?.icps.map((item) => [item.icpPosition, item]))
-  return <div><div className="mb-1 flex flex-wrap items-center justify-between gap-2 font-mono text-[9.5px] uppercase tracking-[0.12em] text-[var(--muted-2)]"><span>{title}</span><span>ICP set · {formatUtcDate(icpSetDate)}</span></div><div className="overflow-hidden rounded-md border border-[var(--line)]">{icps.map((icp) => { const attribution = attributionByPosition.get(icp.position); return <details key={`${icp.position}-${icp.id}`} className="group border-b border-[var(--line)] last:border-b-0"><summary className="grid cursor-pointer list-none grid-cols-[36px_minmax(0,1fr)_52px_16px] items-center gap-2 px-3 py-3 focus:outline-none focus-visible:bg-[rgba(236,234,230,0.04)] [&::-webkit-details-marker]:hidden"><span className="font-mono text-[10px] text-[var(--muted-2)]">{String(icp.position + 1).padStart(2, '0')}</span><span className="truncate text-[12px] text-[var(--platinum)]">{icp.prompt}</span><span className="text-right font-mono text-[11px] text-[var(--white)]">{formatCompetitionScore(scores.get(icp.position) ?? null)}</span><span aria-hidden className="font-mono text-[11px] text-[var(--muted-2)] transition-transform group-open:rotate-45">+</span></summary><div className="border-t border-[var(--line)] bg-[#090909] px-4 py-4"><p className="mb-5 break-words text-[13px] leading-relaxed text-[var(--platinum)]">{icp.prompt}</p><dl className="grid gap-x-5 gap-y-3 sm:grid-cols-2"><IcpDetail label="Industry" value={[icp.industry, icp.subIndustry].filter(Boolean).join(' · ')} /><IcpDetail label="Geography" value={icp.geography ?? icp.country} /><IcpDetail label="Company size" value={icp.employeeCount.join(', ')} /><IcpDetail label="Company stage" value={icp.companyStage} /><IcpDetail label="Product or service" value={icp.productService} /><IcpDetail label="Required attribute" value={icp.requiredAttribute} /><IcpDetail label={icp.intentCategory ? `Intent · ${humanize(icp.intentCategory)}` : 'Intent'} value={icp.intentSignal} wide /><IcpScoringAttribution attributionAvailable={scoringAttribution !== null} attribution={attribution} /></dl><CompanyDiagnostics rows={companyDiagnostics?.filter((row) => row.icpPosition === icp.position) ?? null} /></div></details> })}</div></div>
+  return <div><div className="mb-1 flex flex-wrap items-center justify-between gap-2 text-[12px] text-[var(--muted)]"><span>{title}</span><span>ICP set · {formatUtcDate(icpSetDate)}</span></div><div className="overflow-hidden rounded-md border border-[var(--line)]">{icps.map((icp) => { const attribution = attributionByPosition.get(icp.position); return <details key={`${icp.position}-${icp.id}`} className="group border-b border-[var(--line)] last:border-b-0"><summary className="grid cursor-pointer list-none grid-cols-[36px_minmax(0,1fr)_52px_16px] items-center gap-2 px-3 py-3 focus:outline-none focus-visible:bg-[rgba(236,234,230,0.04)] [&::-webkit-details-marker]:hidden"><span className="font-mono text-[12px] text-[var(--muted-2)]">{String(icp.position + 1).padStart(2, '0')}</span><span className="truncate text-[12px] text-[var(--platinum)]">{icp.prompt}</span><span className="text-right font-mono text-[12px] text-[var(--white)]">{formatCompetitionScore(scores.get(icp.position) ?? null)}</span><ChevronDown aria-hidden className="h-4 w-4 shrink-0 text-[var(--muted)] transition-transform group-open:rotate-180" /></summary><div className="border-t border-[var(--line)] bg-[var(--canvas)] px-4 py-4"><p className="mb-5 break-words text-[14px] leading-relaxed text-[var(--platinum)]">{icp.prompt}</p><dl className="grid gap-x-5 gap-y-3 sm:grid-cols-2"><IcpDetail label="Industry" value={[icp.industry, icp.subIndustry].filter(Boolean).join(' · ')} /><IcpDetail label="Geography" value={icp.geography ?? icp.country} /><IcpDetail label="Company size" value={icp.employeeCount.join(', ')} /><IcpDetail label="Company stage" value={icp.companyStage} /><IcpDetail label="Product or service" value={icp.productService} /><IcpDetail label="Required attribute" value={icp.requiredAttribute} /><IcpDetail label={icp.intentCategory ? `Intent · ${humanize(icp.intentCategory)}` : 'Intent'} value={icp.intentSignal} wide /><IcpScoringAttribution attributionAvailable={scoringAttribution !== null} attribution={attribution} /></dl><CompanyDiagnostics rows={companyDiagnostics?.filter((row) => row.icpPosition === icp.position) ?? null} /></div></details> })}</div></div>
 }
 
-function IcpDetail({ label, value, wide = false }: { label: string; value: string | null; wide?: boolean }) { if (!value) return null; return <div className={wide ? 'sm:col-span-2' : ''}><dt className="font-mono text-[9px] uppercase tracking-[0.1em] text-[var(--muted-2)]">{label}</dt><dd className="mt-1 text-[11.5px] leading-relaxed text-[var(--muted)]">{value}</dd></div> }
+function IcpDetail({ label, value, wide = false }: { label: string; value: string | null; wide?: boolean }) { if (!value) return null; return <div className={wide ? 'sm:col-span-2' : ''}><dt className="text-[12px] text-[var(--muted)]">{label}</dt><dd className="mt-1.5 text-[14px] leading-relaxed text-[var(--muted)]">{value}</dd></div> }
 
 function CompanyDiagnostics({ rows }: { rows: CompetitionCompanyDiagnostic[] | null }) {
   return <div className="mt-5 border-t border-[var(--line)] pt-4">
-    <h4 className="text-[12px] text-[var(--platinum)]">Company checks</h4>
-    <p className="mt-1 text-[11px] text-[var(--muted-2)]">Recorded evaluation results. Later checks can be skipped after an earlier failure.</p>
-    {rows === null ? <p className="mt-2 text-[11px] text-[var(--muted)]">Company checks are unavailable.</p>
-      : rows.length === 0 ? <p className="mt-2 text-[11px] text-[var(--muted)]">No company checks were recorded for this ICP.</p>
-      : rows.map((row) => <details key={row.companyIndex} className="mt-3 rounded border border-[var(--line)] px-3 py-2">
+    <h5 className="text-[12px] text-[var(--platinum)]">Company checks</h5>
+    <p className="mt-1 text-[12px] text-[var(--muted-2)]">Recorded evaluation results. Later checks can be skipped after an earlier failure.</p>
+    {rows === null ? <p className="mt-2 text-[12px] text-[var(--muted)]">Company checks are unavailable.</p>
+      : rows.length === 0 ? <p className="mt-2 text-[12px] text-[var(--muted)]">No company checks were recorded for this ICP.</p>
+      : rows.map((row) => <details key={row.companyIndex} className="mt-3 rounded-md border border-[var(--line)] px-3 py-2">
         <summary className="cursor-pointer text-[12px] text-[var(--platinum)]">{row.companyName} · {row.qualified ? 'Qualified' : 'Not qualified'}{row.missingContact ? ' · Missing contact' : ''}{row.duplicateCompany ? ' · Duplicate company' : ''}</summary>
         <dl className="mt-3 grid gap-3 sm:grid-cols-2">{(Object.keys(COMPANY_CHECK_LABELS) as Array<keyof typeof COMPANY_CHECK_LABELS>).map((name) => {
           const status = row.checks[name]
           if (status === undefined) return null
           const reasons = row.checkReasons?.[name] ?? []
-          return <div key={name} className="text-[11px]">
+          return <div key={name} className="text-[12px]">
             <dt className="text-[var(--muted-2)]">{COMPANY_CHECK_LABELS[name]}</dt>
             <dd className="mt-1 text-[var(--muted)]"><span>{COMPANY_CHECK_STATUS_LABELS[status]}</span>
               {reasons.map((reason, index) => <p key={`${reason.code}-${index}`} className="mt-1 leading-relaxed">{reason.message}</p>)}
             </dd>
           </div>
         })}</dl>
-        {row.contactFailure ? <p className="mt-2 text-[11px] text-[var(--muted)]">Contact check stopped at: {row.contactFailure}.</p> : null}
+        {row.contactFailure ? <p className="mt-2 text-[12px] text-[var(--muted)]">Contact check stopped at: {row.contactFailure}.</p> : null}
       </details>)}
   </div>
 }
 
 function IcpScoringAttribution({ attributionAvailable, attribution }: { attributionAvailable: boolean; attribution: CompetitionScoringAttribution['icps'][number] | undefined }) {
   const state = attributionAvailable ? attribution ? null : 'Not judged' : 'Unavailable'
-  return <><div><dt className="font-mono text-[9px] uppercase tracking-[0.1em] text-[var(--muted-2)]">Scored by</dt><dd className="mt-1 text-[11.5px] leading-relaxed text-[var(--muted)]">{state ?? (attribution?.validatorHotkeys.length ? <span className="space-y-1">{attribution.validatorHotkeys.map((hotkey) => <span key={hotkey} className="block"><ValidatorIdentity hotkey={hotkey} full /></span>)}</span> : 'Unavailable')}</dd></div><IcpDetail label="Reused judgment" value={state ?? (attribution?.reusedJudgment ? 'Yes' : 'No')} /></>
+  return <><div><dt className="text-[12px] text-[var(--muted)]">Scored by</dt><dd className="mt-1.5 text-[14px] leading-relaxed text-[var(--muted)]">{state ?? (attribution?.validatorHotkeys.length ? <span className="space-y-1">{attribution.validatorHotkeys.map((hotkey) => <span key={hotkey} className="block"><ValidatorIdentity hotkey={hotkey} full /></span>)}</span> : 'Unavailable')}</dd></div><IcpDetail label="Reused judgment" value={state ?? (attribution?.reusedJudgment ? 'Yes' : 'No')} /></>
 }
 
 function SourcePanel({ submission, cancelled, code, codeState, selectedFile, onSelectFile, onRequest }: { submission: CompetitionSubmission; cancelled: boolean; code: CompetitionCode | null; codeState: ReleaseState; selectedFile: CompetitionCode['files'][number] | null; onSelectFile: (path: string) => void; onRequest: () => void }) {
-  if (isCompetitionReviewExcluded(submission)) return <aside className="min-w-0"><h3 className="font-display text-[19px] font-medium text-[var(--platinum)]">Source code</h3><div className="mt-4"><InlineNotice>Source was not published because this submission was not evaluated.</InlineNotice></div></aside>
-  if (cancelled && !submission.code.available) return <aside className="min-w-0"><h3 className="font-display text-[19px] font-medium text-[var(--platinum)]">Source code</h3><div className="mt-4"><InlineNotice>This round was cancelled. Source code was not published.</InlineNotice></div></aside>
+  if (isCompetitionReviewExcluded(submission)) return <div className="min-w-0"><h4 className="font-display text-[20px] font-medium text-[var(--platinum)]">Source code</h4><div className="mt-4"><InlineNotice>Source was not published because this submission was not evaluated.</InlineNotice></div></div>
+  if (cancelled && !submission.code.available) return <div className="min-w-0"><h4 className="font-display text-[20px] font-medium text-[var(--platinum)]">Source code</h4><div className="mt-4"><InlineNotice>This round was cancelled. Source code was not published.</InlineNotice></div></div>
   const availableAt = submission.code.availableAt ? formatUtc(submission.code.availableAt) : null
-  return <aside className="min-w-0"><h3 className="font-display text-[19px] font-medium text-[var(--platinum)]">Source code</h3>
-    {codeState === 'idle' ? <div className="mt-4"><button type="button" disabled={!submission.code.available} onClick={onRequest} className="min-h-11 rounded-md border border-[var(--line-3)] px-3.5 py-2 font-mono text-[10px] uppercase tracking-[0.11em] text-[var(--platinum)] transition-colors hover:text-[var(--white)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand)] disabled:cursor-not-allowed disabled:opacity-45">{submission.code.available ? 'View source' : 'Source locked'}</button>{!submission.code.available ? <p className="mt-2 font-mono text-[9.5px] text-[var(--muted-2)]">{availableAt ? `Available ${availableAt}` : 'Awaiting source release'}</p> : null}</div> : null}
-    {codeState === 'loading' ? <div className="mt-4 h-20 shimmer rounded-md" /> : null}{codeState === 'gated' ? <div className="mt-4"><InlineNotice>Source is not public yet. Release follows this round’s schedule.</InlineNotice></div> : null}{codeState === 'error' ? <div className="mt-4"><InlineNotice>Released source is temporarily unavailable. <button type="button" onClick={onRequest} className="mt-2 block min-h-11 rounded border border-[var(--line-2)] px-3 text-[var(--platinum)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2">Retry source</button></InlineNotice></div> : null}
-    {codeState === 'available' && code ? <div className="mt-4 overflow-hidden rounded-md border border-[var(--line)]"><div className="border-b border-[var(--line)] bg-[#090909] p-3"><span className={filterLabelClass}>Source file</span>{code.files.length ? <CompetitionSelect label="Source file" value={selectedFile?.path ?? code.files[0].path} onChange={onSelectFile} options={code.files.map((file) => ({ value: file.path, label: file.path }))} mono /> : null}</div>{selectedFile ? <pre className="max-h-[420px] overflow-auto bg-[#070707] p-3 text-[10px] leading-[1.65] text-[var(--muted)]"><code>{selectedFile.content}</code></pre> : <p className="p-3 text-[11px] text-[var(--muted-2)]">No text files were released.</p>}{code.truncated ? <p className="border-t border-[var(--line)] px-3 py-2 text-[10px] text-[var(--muted-2)]">Some files are omitted from this preview.</p> : null}</div> : null}
-  </aside>
+  return <div className="min-w-0"><h4 className="font-display text-[20px] font-medium text-[var(--platinum)]">Source code</h4>
+    {codeState === 'idle' ? <div className="mt-4"><button type="button" disabled={!submission.code.available} onClick={onRequest} className={secondaryButtonClass}>{submission.code.available ? 'View source' : 'Source locked'}</button>{!submission.code.available ? <p className="mt-2 font-mono text-[12px] text-[var(--muted-2)]">{availableAt ? `Available ${availableAt}` : 'Awaiting source release'}</p> : null}</div> : null}
+    {codeState === 'loading' ? <div className="mt-4 h-20 shimmer rounded-md" /> : null}{codeState === 'gated' ? <div className="mt-4"><InlineNotice>Source is not public yet. Release follows this round’s schedule.</InlineNotice></div> : null}{codeState === 'error' ? <div className="mt-4"><InlineNotice>Released source is temporarily unavailable. <button type="button" onClick={onRequest} className={`mt-2 ${secondaryButtonClass}`}>Retry source</button></InlineNotice></div> : null}
+    {codeState === 'available' && code ? <div className="mt-4 overflow-hidden rounded-md border border-[var(--line)]"><div className="border-b border-[var(--line)] bg-[var(--canvas)] p-3"><span className={filterLabelClass}>Source file</span>{code.files.length ? <CompetitionSelect label="Source file" value={selectedFile?.path ?? code.files[0].path} onChange={onSelectFile} options={code.files.map((file) => ({ value: file.path, label: file.path }))} mono /> : null}</div>{selectedFile ? <pre className="max-h-[420px] overflow-auto bg-[#070707] p-3 text-[12px] leading-[1.65] text-[var(--muted)]"><code>{selectedFile.content}</code></pre> : <p className="p-3 text-[12px] text-[var(--muted-2)]">No text files were released.</p>}{code.truncated ? <p className="border-t border-[var(--line)] px-3 py-2 text-[12px] text-[var(--muted-2)]">Some files are omitted from this preview.</p> : null}</div> : null}
+  </div>
 }
 
-function InlineNotice({ children }: { children: ReactNode }) { return <p className="rounded-md border border-[var(--line)] bg-[#0a0a0a] px-4 py-4 text-[12px] leading-relaxed text-[var(--muted-2)]">{children}</p> }
+function InlineNotice({ children }: { children: ReactNode }) { return <p className="rounded-md border border-[var(--line)] bg-[var(--surface)] px-4 py-4 text-[12px] leading-relaxed text-[var(--muted)]">{children}</p> }
 
 function formatIcpCount(count: number): string {
   return `${count} ICP${count === 1 ? '' : 's'}`
@@ -749,8 +750,7 @@ function roundStatusLabel(value: string): string {
 function humanize(value: string): string { const normalized = value.trim().replaceAll('_', ' '); return normalized ? normalized[0].toUpperCase() + normalized.slice(1) : 'Unavailable' }
 function shortId(value: string): string { return value.length > 18 ? `${value.slice(0, 9)}…${value.slice(-6)}` : value }
 function shortHotkey(value: string): string { return value.length > 18 ? `${value.slice(0, 9)}…${value.slice(-6)}` : value }
-function formatUtc(value: string): string { const date = new Date(value); return Number.isFinite(date.getTime()) ? `${date.toISOString().slice(0, 16).replace('T', ' ')} UTC` : value }
-function formatDay(value: string | null): string { return formatUtcDate(value).replace(' · UTC', '') }
-function formatUtcDate(value: string | null): string { if (!value) return 'Date unavailable'; const date = new Date(`${value}T00:00:00Z`); return Number.isFinite(date.getTime()) ? `${new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' }).format(date)} · UTC` : value }
+function formatUtc(value: string): string { const date = new Date(value); return Number.isFinite(date.getTime()) ? `${new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone: 'UTC' }).format(date)} UTC` : value }
+function formatUtcDate(value: string | null): string { if (!value) return 'Date unavailable'; const date = new Date(`${value}T00:00:00Z`); return Number.isFinite(date.getTime()) ? `${new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' }).format(date)}` : value }
 function utcCalendarDate(value: string | null): string | null { if (!value) return null; const date = new Date(value); return Number.isFinite(date.getTime()) ? date.toISOString().slice(0, 10) : null }
 function errorMessage(value: unknown, fallback: string): string { return value instanceof Error ? value.message : fallback }

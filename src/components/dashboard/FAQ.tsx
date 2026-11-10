@@ -120,11 +120,11 @@ export function FAQ() {
       {/* ════════════════════════════════════════════════════════════
           Hero: overline + title + subtitle
           ════════════════════════════════════════════════════════════ */}
-      <header className="py-7 md:py-9">
-        <h2 className="text-2xl md:text-3xl font-semibold text-slate-100 tracking-tight">
+      <div className="py-7 md:py-9">
+        <h1 className="font-display text-[28px] font-medium tracking-[-0.04em] text-[var(--white)] md:text-[36px]">
           Frequently asked questions
-        </h2>
-      </header>
+        </h1>
+      </div>
 
       {/* ════════════════════════════════════════════════════════════
           Body: two-column on lg+, single column on mobile.
@@ -227,7 +227,7 @@ function FAQAccordionItem({
       >
         <div className="pl-[2.65rem] pr-4 pb-4 pt-1 space-y-2.5">
           {paragraphs.map((p, i) => (
-            <p key={i} className="text-[13px] text-slate-400 leading-relaxed">
+            <p key={i} className="text-[14px] text-[var(--muted)] leading-relaxed">
               {p}
             </p>
           ))}
@@ -243,7 +243,7 @@ function FAQAccordionItem({
 function Sidebar() {
   return (
     <nav aria-label="Subnet 71 links" className="border-t border-[var(--line)] pt-4 lg:border-t-0 lg:border-l lg:pl-6">
-      <h3 className="mb-3 px-4 text-[12px] text-[var(--muted)]">Explore Subnet 71</h3>
+      <h2 className="mb-3 px-4 text-[12px] text-[var(--muted)]">Explore Subnet 71</h2>
       <SidebarLink href="https://github.com/leadpoet/leadpoet">GitHub</SidebarLink>
       <SidebarLink href="https://discord.gg/dVxQZmJwxB">Discord</SidebarLink>
     </nav>
@@ -263,7 +263,7 @@ function SidebarLink({
       href={href}
       target={external ? '_blank' : undefined}
       rel={external ? 'noopener noreferrer' : undefined}
-      className="flex items-center gap-2 px-4 py-2.5 text-[12px] text-slate-300 hover:text-gold hover-bg-warm transition-colors group"
+      className="flex items-center gap-2 px-4 py-2.5 text-[12px] text-[var(--platinum)] hover:text-[var(--white)] hover-bg-warm transition-colors group"
     >
       <span className="flex-1 truncate font-mono">{children}</span>
     </a>

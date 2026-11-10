@@ -84,7 +84,7 @@ export function DashboardClient() {
       <div className="relative z-10 max-w-[1240px] mx-auto px-5 md:px-8">
         <header className="py-6 md:py-8">
           <div className="flex items-center gap-4">
-            <span className="font-display text-[20px] md:text-[22px] font-semibold tracking-[-0.02em] text-[var(--white)]">
+            <span className="font-display text-[20px] font-semibold tracking-[-0.02em] text-[var(--white)]">
               Subnet 71<span className="ml-3 hidden border-l border-[var(--line-3)] pl-3 text-[12px] font-normal tracking-normal text-[var(--muted)] sm:inline">Research lab</span>
             </span>
           </div>
@@ -139,7 +139,7 @@ function DashboardTabTrigger({
       value={value}
       className={cn(
         'relative flex-none inline-flex items-center justify-center rounded-none border-0 bg-transparent',
-        'h-10 px-1 font-mono text-[11px] uppercase tracking-[0.14em] whitespace-nowrap transition-colors duration-200',
+        'h-10 px-1 text-[14px] whitespace-nowrap transition-colors duration-200',
         'text-[var(--muted-2)] dark:text-[var(--muted-2)] hover:bg-transparent',
         'hover:text-[var(--platinum)] dark:hover:text-[var(--platinum)]',
         'focus:outline-none focus-visible:text-[var(--platinum)]',
