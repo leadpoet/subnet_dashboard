@@ -682,6 +682,8 @@ jobs:
       - name: Activate and verify validator weights alert
         uses: appleboy/ssh-action@v1.2.0
         timeout-minutes: 3
+        env:
+          WEIGHTS_ALERT_WEBHOOK: ${{ secrets.WEIGHTS_ALERT_WEBHOOK }}
         with:
           host: 127.0.0.1
           port: 2222
@@ -689,6 +691,7 @@ jobs:
           key: ${{ secrets.EC2_SSH_KEY }}
           timeout: 45s
           command_timeout: 2m
+          envs: WEIGHTS_ALERT_WEBHOOK
           script: |
             set -euo pipefail
 
@@ -735,6 +738,11 @@ jobs:
             grep -Fq '__incident_delivery_epochs__' "$ACTIVE_SCRIPT"
             grep -Fq '"delivery_failed"' "$ACTIVE_SCRIPT"
             grep -Fq '__heartbeat__' "$ACTIVE_SCRIPT"
+
+            # An optional repository secret performs a guarded Slack cutover;
+            # an unset or unchanged secret leaves the current destination alone.
+            "$ALERT_PYTHON" "$ACTIVE_SCRIPT" \
+              --configure-webhook --expected-slack-workspace T09LJDCSA4W
 
             echo "Validator weights alert deployed and verified at $DEPLOY_SHA"
 

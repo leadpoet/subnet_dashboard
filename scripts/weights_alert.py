@@ -26,6 +26,7 @@ import json
 import os
 import re
 import sys
+import tempfile
 import time
 import urllib.request
 from urllib.parse import urlsplit
@@ -103,6 +104,8 @@ def display_label(role: str, fallback_label: str, identity_name: str) -> str:
 
 NETUID = 71
 WEBHOOK_FILE = os.path.expanduser("~/.config/leadpoet/weights_alert_webhook")
+WEBHOOK_ENV = "WEIGHTS_ALERT_WEBHOOK"
+WEBHOOK_ROLLBACK_FILE = WEBHOOK_FILE + ".before-slack"
 STATE_FILE = os.path.expanduser("~/.config/leadpoet/weights_alert_state.json")
 LOG_FILE = os.path.expanduser("~/weights_alert.log")
 LAST_ALERT_EPOCH_KEY = "__last_alert_epoch__"
@@ -457,6 +460,74 @@ def post_alert(content: str, url: Optional[str] = None) -> bool:
         return False
 
 
+def webhook_workspace(url: str) -> str:
+    """Return the Slack workspace segment for a validated Slack webhook."""
+    if webhook_provider(url) != "slack":
+        return ""
+    return urlsplit(url).path.split("/")[2]
+
+
+def _replace_private_file(path: str, content: str) -> None:
+    """Write content privately and replace the target atomically."""
+    directory = os.path.dirname(path) or "."
+    fd, pending = tempfile.mkstemp(prefix=".weights-webhook-", dir=directory)
+    try:
+        if hasattr(os, "fchmod"):
+            os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "w") as handle:
+            fd = None
+            handle.write(content)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(pending, path)
+    finally:
+        if fd is not None:
+            os.close(fd)
+        if os.path.exists(pending):
+            os.unlink(pending)
+
+
+def configure_webhook_from_env(expected_slack_workspace: str) -> str:
+    """Safely switch the active destination when the deployment secret exists.
+
+    The candidate is read only from ``WEIGHTS_ALERT_WEBHOOK``. A missing
+    candidate is a no-op so ordinary releases preserve the current destination.
+    A candidate is tested before a private rollback copy and atomic replacement.
+    """
+    candidate = os.environ.get(WEBHOOK_ENV, "").strip()
+    if not candidate:
+        return "no-op"
+    if webhook_provider(candidate) != "slack":
+        raise ValueError("candidate is not an official Slack webhook")
+    if webhook_workspace(candidate) != expected_slack_workspace:
+        raise ValueError("candidate Slack webhook has the wrong workspace")
+
+    target = WEBHOOK_FILE
+    if os.path.islink(target) or not os.path.isfile(target):
+        raise RuntimeError("active webhook file is missing or unsafe")
+    previous = webhook_url()
+    if not webhook_provider(previous):
+        raise RuntimeError("active webhook is missing or unsupported")
+    if previous == candidate:
+        return "no-op"
+    rollback = WEBHOOK_ROLLBACK_FILE
+    if os.path.lexists(rollback) and (
+        os.path.islink(rollback) or not os.path.isfile(rollback)
+    ):
+        raise RuntimeError("rollback copy is unsafe")
+
+    test_message = (
+        "SN71 missed-weight monitor — connection test only. "
+        "This verifies the configured alert destination; no incident was generated."
+    )
+    if not post_alert(test_message, url=candidate):
+        raise RuntimeError("candidate webhook did not acknowledge the test")
+
+    _replace_private_file(rollback, previous + "\n")
+    _replace_private_file(target, candidate + "\n")
+    return "switched"
+
+
 def _scale(value):
     inner = getattr(value, "value", value)
     return int(inner or 0)
@@ -489,6 +560,22 @@ def official_epoch_state(subtensor):
 
 
 def main() -> int:
+    if "--configure-webhook" in sys.argv:
+        expected_workspace = ""
+        try:
+            index = sys.argv.index("--expected-slack-workspace")
+            expected_workspace = sys.argv[index + 1]
+            status = configure_webhook_from_env(expected_workspace)
+        except Exception as exc:
+            log(f"webhook configuration failed ({type(exc).__name__})")
+            print(
+                f"webhook configuration failed ({type(exc).__name__})",
+                file=sys.stderr,
+            )
+            return 1
+        print(f"webhook configuration: {status}")
+        return 0
+
     if "--test" in sys.argv:
         sent = post_alert(
             "✅ SN71 weights watch: test message (official-epoch alerting is wired up)"

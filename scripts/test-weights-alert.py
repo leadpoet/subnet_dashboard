@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 
 import json
+import os
+import stat
 import sys
+import tempfile
 import types
 import unittest
 from contextlib import ExitStack
@@ -44,6 +47,11 @@ class _FakeResponse:
 
 
 class WeightsAlertWebhookTest(unittest.TestCase):
+    def _config_paths(self, directory):
+        target = os.path.join(directory, "weights_alert_webhook")
+        rollback = target + ".before-slack"
+        return target, rollback
+
     def test_webhook_provider_requires_exact_official_https_endpoint(self):
         self.assertEqual(
             weights_alert.webhook_provider(
@@ -137,6 +145,149 @@ class WeightsAlertWebhookTest(unittest.TestCase):
         with patch.object(weights_alert, "post_alert", return_value=False):
             with patch.object(sys, "argv", ["weights_alert.py", "--test"]):
                 self.assertEqual(weights_alert.main(), 1)
+
+    def test_configure_webhook_noops_without_sending_when_already_current(self):
+        candidate = "https://hooks.slack.com/services/T09LJDCSA4W/B000/secret"
+        with tempfile.TemporaryDirectory() as directory:
+            target, rollback = self._config_paths(directory)
+            with open(target, "w") as handle:
+                handle.write(candidate + "\n")
+            with ExitStack() as stack:
+                stack.enter_context(patch.object(weights_alert, "WEBHOOK_FILE", target))
+                stack.enter_context(
+                    patch.object(weights_alert, "WEBHOOK_ROLLBACK_FILE", rollback)
+                )
+                stack.enter_context(
+                    patch.dict(os.environ, {weights_alert.WEBHOOK_ENV: candidate})
+                )
+                sender = stack.enter_context(patch.object(weights_alert, "post_alert"))
+                self.assertEqual(
+                    weights_alert.configure_webhook_from_env("T09LJDCSA4W"),
+                    "no-op",
+                )
+            sender.assert_not_called()
+            self.assertFalse(os.path.exists(rollback))
+
+    def test_configure_webhook_failed_ack_keeps_active_destination(self):
+        previous = "https://discord.com/api/webhooks/123/oldtoken"
+        candidate = "https://hooks.slack.com/services/T09LJDCSA4W/B000/secret"
+        with tempfile.TemporaryDirectory() as directory:
+            target, rollback = self._config_paths(directory)
+            with open(target, "w") as handle:
+                handle.write(previous + "\n")
+            with ExitStack() as stack:
+                stack.enter_context(patch.object(weights_alert, "WEBHOOK_FILE", target))
+                stack.enter_context(
+                    patch.object(weights_alert, "WEBHOOK_ROLLBACK_FILE", rollback)
+                )
+                stack.enter_context(
+                    patch.dict(os.environ, {weights_alert.WEBHOOK_ENV: candidate})
+                )
+                stack.enter_context(patch.object(weights_alert, "post_alert", return_value=False))
+                with self.assertRaisesRegex(RuntimeError, "did not acknowledge"):
+                    weights_alert.configure_webhook_from_env("T09LJDCSA4W")
+            with open(target) as handle:
+                self.assertEqual(handle.read(), previous + "\n")
+            self.assertFalse(os.path.exists(rollback))
+
+    def test_configure_webhook_success_writes_private_rollback_and_replaces_atomically(self):
+        previous = "https://discord.com/api/webhooks/123/oldtoken"
+        candidate = "https://hooks.slack.com/services/T09LJDCSA4W/B000/secret"
+        with tempfile.TemporaryDirectory() as directory:
+            target, rollback = self._config_paths(directory)
+            with open(target, "w") as handle:
+                handle.write(previous + "\n")
+            with ExitStack() as stack:
+                stack.enter_context(patch.object(weights_alert, "WEBHOOK_FILE", target))
+                stack.enter_context(
+                    patch.object(weights_alert, "WEBHOOK_ROLLBACK_FILE", rollback)
+                )
+                stack.enter_context(
+                    patch.dict(os.environ, {weights_alert.WEBHOOK_ENV: candidate})
+                )
+                sender = stack.enter_context(
+                    patch.object(weights_alert, "post_alert", return_value=True)
+                )
+                self.assertEqual(
+                    weights_alert.configure_webhook_from_env("T09LJDCSA4W"),
+                    "switched",
+                )
+            sender.assert_called_once()
+            self.assertEqual(sender.call_args.kwargs["url"], candidate)
+            with open(target) as handle:
+                self.assertEqual(handle.read(), candidate + "\n")
+            with open(rollback) as handle:
+                self.assertEqual(handle.read(), previous + "\n")
+            rotated = "https://hooks.slack.com/services/T09LJDCSA4W/C000/newsecret"
+            with ExitStack() as stack:
+                stack.enter_context(patch.object(weights_alert, "WEBHOOK_FILE", target))
+                stack.enter_context(
+                    patch.object(weights_alert, "WEBHOOK_ROLLBACK_FILE", rollback)
+                )
+                stack.enter_context(
+                    patch.dict(os.environ, {weights_alert.WEBHOOK_ENV: rotated})
+                )
+                with patch.object(weights_alert, "post_alert", return_value=True) as sender:
+                    self.assertEqual(
+                        weights_alert.configure_webhook_from_env("T09LJDCSA4W"),
+                        "switched",
+                    )
+            sender.assert_called_once()
+            with open(target) as handle:
+                self.assertEqual(handle.read(), rotated + "\n")
+            with open(rollback) as handle:
+                self.assertEqual(handle.read(), candidate + "\n")
+            if os.name != "nt":
+                self.assertEqual(stat.S_IMODE(os.stat(target).st_mode), 0o600)
+                self.assertEqual(stat.S_IMODE(os.stat(rollback).st_mode), 0o600)
+
+    def test_configure_webhook_rejects_unsafe_or_wrong_workspace_without_sending(self):
+        previous = "https://discord.com/api/webhooks/123/oldtoken"
+        candidates = (
+            "http://hooks.slack.com/services/T09LJDCSA4W/B000/secret",
+            "https://hooks.slack.com/services/T09LJDCSA4W/B000/secret?x=1",
+            "https://hooks.slack.com/services/T999/B000/secret",
+            "https://untrusted.example/services/T09LJDCSA4W/B000/secret",
+        )
+        for candidate in candidates:
+            with self.subTest(candidate=candidate), tempfile.TemporaryDirectory() as directory:
+                target, rollback = self._config_paths(directory)
+                with open(target, "w") as handle:
+                    handle.write(previous + "\n")
+                with ExitStack() as stack:
+                    stack.enter_context(patch.object(weights_alert, "WEBHOOK_FILE", target))
+                    stack.enter_context(
+                        patch.object(weights_alert, "WEBHOOK_ROLLBACK_FILE", rollback)
+                    )
+                    stack.enter_context(
+                        patch.dict(os.environ, {weights_alert.WEBHOOK_ENV: candidate})
+                    )
+                    sender = stack.enter_context(patch.object(weights_alert, "post_alert"))
+                    with self.assertRaises(ValueError):
+                        weights_alert.configure_webhook_from_env("T09LJDCSA4W")
+                sender.assert_not_called()
+                with open(target) as handle:
+                    self.assertEqual(handle.read(), previous + "\n")
+
+    def test_configure_webhook_rejects_unsupported_previous_destination(self):
+        candidate = "https://hooks.slack.com/services/T09LJDCSA4W/B000/secret"
+        with tempfile.TemporaryDirectory() as directory:
+            target, rollback = self._config_paths(directory)
+            with open(target, "w") as handle:
+                handle.write("not-a-webhook\n")
+            with ExitStack() as stack:
+                stack.enter_context(patch.object(weights_alert, "WEBHOOK_FILE", target))
+                stack.enter_context(
+                    patch.object(weights_alert, "WEBHOOK_ROLLBACK_FILE", rollback)
+                )
+                stack.enter_context(
+                    patch.dict(os.environ, {weights_alert.WEBHOOK_ENV: candidate})
+                )
+                sender = stack.enter_context(patch.object(weights_alert, "post_alert"))
+                with self.assertRaisesRegex(RuntimeError, "unsupported"):
+                    weights_alert.configure_webhook_from_env("T09LJDCSA4W")
+            sender.assert_not_called()
+            self.assertFalse(os.path.exists(rollback))
 
 
 class WeightsAlertIncidentStateTest(unittest.TestCase):
