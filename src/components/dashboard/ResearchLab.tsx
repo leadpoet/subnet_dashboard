@@ -223,7 +223,7 @@ function RewardSeats({ seats }: { seats: CompetitionRewardSeats | null | undefin
         <ul className="mt-3 grid min-w-0 gap-3 md:grid-cols-3">
           {seats ? seats.seats.map((seat, index) => <RewardSeatCard key={seat.minimumImprovement} seat={seat} podiumClass={REWARD_SEAT_PODIUM[index]} />) : REWARD_SEAT_PODIUM.map((podiumClass) => <li key={podiumClass} className={`min-h-[132px] shimmer rounded-xl ${podiumClass}`} />)}
         </ul>
-        <p className="mt-3 text-[12px] leading-relaxed text-[var(--muted-2)]">A new champion takes only the seats its improvement clears, so a larger seat can stay with an earlier winner. Shares are shown before any funding reduction.</p>
+        <p className="mt-3 text-[12px] leading-relaxed text-[var(--muted-2)]">A new champion takes only the seats its improvement clears, so a larger seat can stay with an earlier winner. {seats?.seats.some((seat) => seat.postFundingSharePercent !== null) ? 'Shares show the amount before funding halvings, then the amount after.' : 'Shares are shown before funding halvings.'}</p>
       </>}
     </section>
   )
@@ -237,7 +237,7 @@ function RewardSeatCard({ seat, podiumClass }: { seat: CompetitionRewardSeat; po
     <li className={`min-w-0 rounded-xl border border-[var(--line)] bg-[var(--surface)] p-4 ${podiumClass}`}>
       <div className="flex items-baseline justify-between gap-3">
         <h3 className="text-[14px] text-[var(--platinum)]">+{seat.minimumImprovement} or more</h3>
-        <p className="whitespace-nowrap font-mono text-[14px] text-[var(--white)]">{formatRewardSeatShare(share)}<span className="ml-1 font-sans text-[12px] text-[var(--muted)]">of emissions</span></p>
+        <p className="whitespace-nowrap font-mono text-[14px] text-[var(--white)]">{seat.postFundingSharePercent === null ? formatRewardSeatShare(share) : <><span className="text-[var(--muted)]">{formatRewardSeatShare(share)}</span><span className="text-[var(--muted)]" aria-hidden> / </span><span className="sr-only"> before funding halving, </span>{formatRewardSeatShare(seat.postFundingSharePercent)}<span className="sr-only"> after</span></>}<span className="ml-1 font-sans text-[12px] text-[var(--muted)]">of emissions</span></p>
       </div>
       {holder ? <div className="mt-3 space-y-1.5 text-[12px] text-[var(--muted)]">
         <p className="font-mono text-[var(--platinum)]" title={holder.minerHotkey}>{shortHotkey(holder.minerHotkey)}</p>
@@ -251,6 +251,7 @@ function RewardSeatCard({ seat, podiumClass }: { seat: CompetitionRewardSeat; po
 function rewardSeatDecayLabel(seat: CompetitionRewardSeat): string {
   if (seat.currentSharePercent === null || seat.halvings === null || seat.epochsToNextHalving === null) return `Base share · current decay unavailable`
   const next = `next halving in ${seat.epochsToNextHalving} ${seat.epochsToNextHalving === 1 ? 'epoch' : 'epochs'}`
+  if (seat.halvings === 0 && seat.postFundingSharePercent !== null) return `Funding halved · ${next}`
   return seat.halvings === 0 ? `Full share · ${next}` : `Halved ${seat.halvings}× from ${formatRewardSeatShare(seat.baseSharePercent)} · ${next}`
 }
 
