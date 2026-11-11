@@ -268,13 +268,15 @@ function RewardSeatShare({ seat }: { seat: CompetitionRewardSeat }) {
   const emissions = <span className="ml-1 font-sans text-[12px] text-[var(--muted)]">of emissions</span>
   const shareClass = 'whitespace-nowrap font-mono text-[14px] text-[var(--white)]'
   if (!reductions.length) return <p className={shareClass}>{formatRewardSeatShare(seat.currentSharePercent ?? seat.baseSharePercent)}{emissions}</p>
+  // Weekly decay is routine, so the struck-through share and the breakdown carry it. Failed keys stay visible.
+  const funding = reductions.find((reduction) => reduction.kind === 'funding')
   return (
     <div className="ml-auto text-right">
       <p className={shareClass}>
         <s className="text-[var(--muted)]"><span className="sr-only">Full share </span>{formatRewardSeatShare(seat.baseSharePercent)}</s>{' '}
         <RewardShareBreakdown seat={seat} reductions={reductions} />{emissions}
       </p>
-      <p className="mt-0.5 text-[12px] text-[var(--muted)]">{reductions.map((reduction) => `${REWARD_REDUCTION_LABEL[reduction.kind]} ÷${reduction.divisor}`).join(' · ')}</p>
+      {funding ? <p className="mt-0.5 text-[12px] text-[var(--muted)]">{`${REWARD_REDUCTION_LABEL.funding} ÷${funding.divisor}`}</p> : null}
     </div>
   )
 }
