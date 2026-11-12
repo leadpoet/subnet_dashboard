@@ -27,10 +27,14 @@ export async function fetchPublicArenaJson(
   return { body, status: response.status }
 }
 
-export async function proxyPublicArenaJson(path: string, timeoutMs?: number): Promise<NextResponse> {
+export async function proxyPublicArenaJson(
+  path: string,
+  timeoutMs?: number,
+  transformOk?: (body: unknown) => unknown,
+): Promise<NextResponse> {
   try {
     const { body, status } = await fetchPublicArenaJson(path, timeoutMs)
-    return NextResponse.json(body, { status, headers: NO_STORE_HEADERS })
+    return NextResponse.json(status === 200 && transformOk ? transformOk(body) : body, { status, headers: NO_STORE_HEADERS })
   } catch {
     return NextResponse.json({ error: 'Arena is temporarily unavailable.' }, { status: 502, headers: NO_STORE_HEADERS })
   }

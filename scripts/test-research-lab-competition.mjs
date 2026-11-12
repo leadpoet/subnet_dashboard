@@ -14,6 +14,7 @@ try {
   const tsc = spawnSync(process.execPath, [
     resolve('node_modules/typescript/bin/tsc'),
     resolve('src/lib/research-lab-competition.ts'),
+    resolve('src/lib/research-lab-current-cache.ts'),
     '--target', 'ES2022', '--module', 'CommonJS', '--moduleResolution', 'Node',
     '--lib', 'ES2022,DOM', '--outDir', outDir, '--strict', '--skipLibCheck',
   ], { stdio: 'inherit' })
@@ -1647,6 +1648,27 @@ try {
   const { weekly_slot_decay: _clock, ...withoutClock } = liveSeats
   assert.deepEqual(normalizeCompetitionRewardSeats(withoutClock).seats.map((seat) => seat.currentSharePercent), [null, null, null])
   assert.equal(normalizeCompetitionRewardSeats({ ...liveSeats, epoch_eligible: false }).seats[0].currentSharePercent, null)
+  // At an epoch boundary the gateway withholds the clock until validators accept
+  // the new state; the proxy keeps the last accepted clock for the same seats only.
+  const { withCachedSlotDecay } = require(join(outDir, 'research-lab-current-cache.js'))
+  const shares = (body) => normalizeCompetitionRewardSeats(body).seats.map((seat) => seat.currentSharePercent)
+  const boundary = { ...withoutClock, epoch_eligible: null, current_epoch: liveSeats.current_epoch + 1 }
+  assert.deepEqual(withCachedSlotDecay(boundary, null), { body: boundary, cache: null }, 'a cold cache serves the gateway as it is')
+  const warm = withCachedSlotDecay(liveSeats, null).cache
+  assert.deepEqual(warm, { epoch: liveSeats.current_epoch, seatsKey: warm.seatsKey, clock: liveSeats.weekly_slot_decay })
+  const served = withCachedSlotDecay(boundary, warm)
+  assert.deepEqual(shares(served.body), shares({ ...liveSeats, current_epoch: boundary.current_epoch }), 'the first load after an epoch flip shows decay')
+  assert.equal(served.body.weekly_slot_decay_epoch, liveSeats.current_epoch, 'the reused clock names the epoch it came from')
+  assert.equal(served.cache, warm)
+  for (const [label, body] of [
+    ['an ineligible epoch', { ...boundary, epoch_eligible: false }],
+    ['two epochs without a state', { ...boundary, current_epoch: liveSeats.current_epoch + 2 }],
+    ['an older epoch', { ...boundary, current_epoch: liveSeats.current_epoch - 1 }],
+    ['a new seat holder', { ...boundary, reward_slots: [{ ...liveSeats.reward_slots[0], miner_hotkey: '5newHolder' }, ...liveSeats.reward_slots.slice(1)] }],
+    ['a new policy', { ...boundary, reward_slot_policy: { ...liveSeats.reward_slot_policy, pool_percent: 40 } }],
+    ['no epoch', { ...boundary, current_epoch: null }],
+  ]) assert.equal(withCachedSlotDecay(body, warm).body, body, `${label} never reuses a clock`)
+  assert.equal(withCachedSlotDecay(liveSeats, { ...warm, epoch: liveSeats.current_epoch + 5 }).cache.epoch, liveSeats.current_epoch + 5, 'an out-of-order older response never rolls the cache back')
   const { pool_percent: _pool, ...noPool } = liveSeats.reward_slot_policy
   assert.equal(normalizeCompetitionRewardSeats({ ...liveSeats, reward_slot_policy: noPool }).seats[0].baseSharePercent, 40)
   for (const malformed of [null, {}, { ...liveSeats, reward_slots: [null] }, { ...liveSeats, reward_slots: [{ miner_hotkey: '5X' }, null, null] }, { ...liveSeats, reward_slot_policy: { ...liveSeats.reward_slot_policy, tiers: [] } }]) {
