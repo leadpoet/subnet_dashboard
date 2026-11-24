@@ -97,7 +97,7 @@ export function DashboardClient() {
         >
           <div ref={navWrapRef} className="relative">
             <TabsList className={cn('flex w-full justify-start gap-8 sm:gap-10 overflow-x-auto no-scrollbar rounded-none border-0 border-b border-[var(--line)] bg-transparent h-auto p-0')}>
-              <DashboardTabTrigger value="research-lab" label="Competition" />
+              <DashboardTabTrigger value="research-lab" label="Research lab" />
               <DashboardTabTrigger value="faq" label="FAQ" />
             </TabsList>
             <span

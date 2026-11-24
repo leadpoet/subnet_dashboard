@@ -118,7 +118,9 @@ try {
   assert.doesNotMatch(routeSource, /root\.king/)
 
   const componentSource = await readFile(resolve('src/components/dashboard/ResearchLab.tsx'), 'utf8')
-  assert.match(componentSource, /Agent competition/)
+  assert.match(componentSource, /Sales research lab/)
+  assert.match(componentSource, /docs\/locked-collection\.md#enrollment/)
+  assert.match(componentSource, /leadpoet\/issues\/1343/)
   assert.doesNotMatch(componentSource, /Retired rebenchmark detail/)
 
   console.log('research-lab-arena: public baseline join, active stage, and incomplete-score handling passed')

@@ -19,31 +19,31 @@ interface FAQItem {
 const FAQ_DATA: FAQItem[] = [
   {
     id: 'problem', question: 'What is Subnet 71?',
-    answer: 'Subnet 71 is a Bittensor subnet advancing autonomous sales research. Independent contributors build agents that find companies matching a shared set of buyer criteria. Published benchmarks, agent source and evaluation results make their performance open to inspection.',
+    answer: 'Subnet 71 is a Bittensor research lab for open sales models. Miners fund model runs. Leadpoet assigns the tasks, runs the public agent and records its decisions and tool results.',
   },
   {
     id: 'why-bittensor', question: 'Why Bittensor?',
-    answer: 'Bittensor provides an incentive network for independent contributors. Subnet 71 uses shared benchmarks and validator evaluations to compare sales research agents and reward progress under the subnet’s active reward policy. Published results let participants inspect how submissions performed.',
+    answer: 'Bittensor connects independent compute funders and validators. Validators publish weights for eligible collection work. The dashboard also archives earlier Arena submissions, benchmarks and scores.',
   },
   {
-    id: 'how-it-works', question: 'How does the agent competition work?',
-    answer: 'Miners improve an agent and submit it to Arena during the daily submission window. Submissions must pass code review before evaluation. Validators evaluate eligible agents and the defending champion against the same benchmark. Each round records its benchmark size and promotion margin.\n\nFor current rounds, benchmark inputs and eligible frozen source become public after the submission cutoff is committed. A model’s score appears after its evaluation and cost checks finish. The final round publication records the champion and promotion outcome; historical rounds retain their original release rules.',
+    id: 'how-it-works', question: 'How can I participate?',
+    answer: 'Register on subnet 71 and follow Miner enrollment to sign the terms for your chosen track. You supply a dedicated OpenRouter key and a spending cap. Your private statement shows jobs, charges and outstanding reservations. You can revoke an enrollment at any time.',
   },
   {
-    id: 'fulfillment', question: 'What do agents produce?',
-    answer: 'The current competition evaluates company research: company information and evidence that a company matches the benchmark’s criteria and intent signals. The current output schema is company-only. Contact discovery and email verification are not part of the current competition output.',
+    id: 'fulfillment', question: 'What do collection runs produce?',
+    answer: 'Open models make decisions and use local tools in simulated sales workflows. A comparison runs different models on the same scenario. In a correction, a stronger model resumes at a smaller model’s mistake. The lab retains the original evidence for review.',
   },
   {
-    id: 'scoring', question: 'What does the score mean?',
-    answer: 'Each round gives every agent the same set of ideal customer profiles (ICPs). An agent’s score out of 100 is the average of its scores across those ICPs. The ICPs change every day, so scores from different days are not directly comparable.',
+    id: 'scoring', question: 'What do historical Arena scores mean?',
+    answer: 'Each Arena round evaluated agents on the same set of ideal customer profiles. The score out of 100 averaged their performance on those profiles. The tasks changed between days. Published round records include the decisions, source and evaluation details.',
   },
   {
-    id: 'incentives', question: 'How are champions and rewards decided?',
-    answer: 'Eligible challengers must beat the defending champion, the current champion re-evaluated on the same day’s benchmark, by the round’s recorded promotion margin to qualify for promotion. The published decision identifies the winner, and a successfully promoted agent becomes the new champion.\n\nRewards follow three seats, each with its own improvement threshold. A promoted winner takes every seat its improvement clears, and earlier holders keep the seats it does not. Each seat’s share halves weekly, and shares for empty seats or unregistered hotkeys are burned. If a champion’s own provider keys keep failing during its daily rerun, its seats also pay half until a rerun finishes on its own keys or it wins a new round.\n\nRewards are handled separately under the active reward policy. A high score or a displayed champion does not, by itself, confirm reward settlement. The repository documents the policy and its activation requirements.',
+    id: 'incentives', question: 'How are miners paid?',
+    answer: 'Pilot runs use real API credits and earn no emissions. Paid collection requires fresh live consent and an approved fixed price based on measured pilot costs. Accepted live jobs receive their quoted amount, scaled proportionally if total quotes exceed available emissions. Champion rewards end at the retirement epoch. All unallocated emissions go to the designated burn hotkey.',
   },
   {
-    id: 'beyond-sales', question: 'What comes next?',
-    answer: 'The current focus is better company-level sales research. Broader sales workflows and other research domains are possible future directions; they are not current competition capabilities.',
+    id: 'beyond-sales', question: 'Can I help without funding a run?',
+    answer: 'Yes. Independent reviewers can volunteer to assess blind workflow cases. You can review without a miner wallet or API credits. Use the public pilot thread to request the private packet.',
   },
 ]
 
@@ -248,6 +248,8 @@ function Sidebar() {
   return (
     <nav aria-label="Subnet 71 links" className="border-t border-[var(--line)] pt-4 lg:border-t-0 lg:border-l lg:pl-6">
       <h2 className="mb-3 px-4 text-[12px] text-[var(--muted)]">Explore Subnet 71</h2>
+      <SidebarLink href="https://github.com/leadpoet/leadpoet/blob/main/docs/locked-collection.md#enrollment">Miner enrollment</SidebarLink>
+      <SidebarLink href="https://github.com/leadpoet/leadpoet/issues/1343">Pilot support and reviewers</SidebarLink>
       <SidebarLink href="https://github.com/leadpoet/leadpoet">GitHub</SidebarLink>
       <SidebarLink href="https://discord.gg/dVxQZmJwxB">Discord</SidebarLink>
     </nav>
