@@ -1488,7 +1488,7 @@ try {
   assert.doesNotMatch(component, /settlement|LabEmissionSplit|\/api\/research-lab\?/)
   assert.ok(component.indexOf('<ChampionSummary') < component.indexOf('<RoundSummary'), 'champion headline is separate from the active round')
   assert.match(component, /Public ICPs \(\$\{benchmark\.benchmarkIcpCount\}\)/)
-  assert.match(component, /Open agents, public benchmarks, on-chain rewards\./)
+  assert.match(component, /Fund a simulated sales workflow/)
   assert.doesNotMatch(component, /server-held .* evaluation view/)
   assert.match(component, /response\.status === 403/)
   assert.match(component, /icp\.position/)
@@ -1561,7 +1561,7 @@ try {
   assert.equal(formatCompetitionScorePrecise(2.45), '2.45')
   assert.equal(formatCompetitionScorePrecise(8), '8.00')
   assert.equal(normalizeCompetitionCurrentRound({ king: { hotkey: '5king' } }).kingHotkey, '5king', 'the reigning champion survives its crowning round aging out')
-  assert.deepEqual(normalizeCompetitionCurrentRound(null), { kingHotkey: null, openRoundId: null, replacementCutoff: null })
+  assert.deepEqual(normalizeCompetitionCurrentRound(null), { kingHotkey: null, openRoundId: null, replacementCutoff: null, championRetired: false })
 
   // Published Nov 9 round: the defender scored 32.95 with an 8-point margin and nobody cleared it.
   const heldRound = { status: 'published', promotionStatus: 'not_required', promotionMargin: 8, champion: null, baseline: { finalScore: 32.95 } }
@@ -1699,6 +1699,17 @@ try {
   assert.match(seatsMarkup, /5NewerSmallWinner/)
   assert.match(seatsMarkup, /Open\. No winner holds this seat/)
   assert.match(renderToStaticMarkup(React.createElement(renderedModule.exports.RewardSeats, { seats: null })), /temporarily unavailable/)
+  const retired = normalizeCompetitionCurrentRound({
+    reward_mode: 'fixed_collection_quotes', epoch_eligible: false, reward_slots: null, open_round: null,
+  })
+  assert.equal(retired.championRetired, true, 'recognized collection mode closes legacy champion seats')
+  const retiredSeats = renderToStaticMarkup(React.createElement(renderedModule.exports.RewardSeats, {
+    seats: null, championRetired: retired.championRetired,
+  }))
+  assert.match(retiredSeats, /0%/)
+  assert.match(retiredSeats, /burn hotkey/)
+  assert.doesNotMatch(retiredSeats, /temporarily unavailable|Next halving/)
+
 
   const proxy = await readFile(resolve('src/lib/arena-public-proxy.ts'), 'utf8')
   assert.match(proxy, /PUBLIC_ID/)
@@ -1709,9 +1720,12 @@ try {
   assert.match(codeRoute, /encodeURIComponent\(submissionId\)/)
 
   const shell = await readFile(resolve('src/components/dashboard/DashboardClient.tsx'), 'utf8')
-  assert.match(shell, /label="Competition"/)
+  assert.match(shell, /label="Research lab"/)
   const faq = await readFile(resolve('src/components/dashboard/FAQ.tsx'), 'utf8')
   assert.doesNotMatch(faq, /24.hour|24 hours|keeps the complementary|fixed 10-ICP/i)
+  assert.doesNotMatch(faq, /Miners improve an agent and submit it/)
+  assert.match(faq, /Pilot runs use real API credits and earn no emissions/)
+  assert.match(faq, /leadpoet\/issues\/1343/)
 
   console.log('research-lab-competition: public projection, honest scores, release gates, and narrow proxy checks passed')
 } finally {

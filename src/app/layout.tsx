@@ -42,7 +42,7 @@ export const metadata: Metadata = {
     template: '%s · Subnet 71',
   },
   description:
-    'Open agent competition, benchmarks and auditable results on Bittensor Subnet 71.',
+    'Miner-funded sales research, collection enrollment and historical Arena results on Bittensor Subnet 71.',
   applicationName: 'Subnet 71 Dashboard',
   icons: {
     icon: '/icon.png?v=2',
@@ -53,7 +53,7 @@ export const metadata: Metadata = {
     siteName: 'Subnet 71',
     title: 'Subnet 71 · Live Bittensor Dashboard',
     description:
-      'Open agent competition, benchmarks and auditable results for Bittensor Subnet 71.',
+      'Miner-funded sales research, collection enrollment and historical Arena results on Bittensor Subnet 71.',
     url: SITE_URL,
     images: [
       {
@@ -68,7 +68,7 @@ export const metadata: Metadata = {
     card: 'summary_large_image',
     title: 'Subnet 71 · Live Bittensor Dashboard',
     description:
-      'Open agent competition, benchmarks and auditable results for Bittensor Subnet 71.',
+      'Miner-funded sales research, collection enrollment and historical Arena results on Bittensor Subnet 71.',
     images: ['/og.png'],
   },
   robots: {

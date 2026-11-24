@@ -105,10 +105,28 @@ export function ResearchLab({
   const roundOptions = competition ? competitionRoundOptions(competition) : []
   const selectedRound = roundOptions.find((round) => round.roundId === selectedRoundId) ?? roundOptions[0] ?? null
   const championRound = competition ? currentChampionRound(competition) : null
+  const championRetired = currentRound?.championRetired === true
   return (
     <ValidatorNamesContext.Provider value={validatorNames}><div className="w-full pb-12">
       <CompetitionHeader historyOpen={historyOpen} onHistory={() => setHistoryOpen((open) => !open)} />
-      {historyOpen ? <CompetitionHistory active={active} /> : !competition ? <Unavailable message="Competition data is temporarily unavailable. This page will retry automatically." /> : selectedRound ? <><ChampionSummary round={championRound} history={competitionChampionHistory(competition)} active={active} kingHotkey={currentRound?.kingHotkey ?? null} /><RoundBrief open={competition.openRound} latest={competition.latestCompletedRound} replacementCutoff={currentRound?.openRoundId === competition.openRound?.roundId ? currentRound?.replacementCutoff ?? null : null} /><RewardSeats seats={rewardSeats} /><div className="mt-6 max-w-sm"><span className={filterLabelClass}>Competition round</span><CompetitionSelect label="Competition round" value={selectedRound.roundId} options={roundOptions.map((round) => ({ value: round.roundId, label: `${round.evaluationDate ? formatUtcDate(round.evaluationDate) : round.roundId} · ${roundStatusLabel(round.status).replace(' in progress', '')}` }))} onChange={setSelectedRoundId} /></div><RoundSummary round={selectedRound} /><RoundWorkspace key={selectedRound.roundId} round={selectedRound} active={active} /></> : <p className="border-b border-[var(--line)] py-12 text-[14px] text-[var(--muted)]">No production competition round is available.</p>}
+      {championRetired && <RewardSeats seats={null} championRetired />}
+      {historyOpen ? <CompetitionHistory active={active} /> : !competition ? (
+        <Unavailable message="Competition data is temporarily unavailable. This page will retry automatically." />
+      ) : selectedRound ? <>
+        <ChampionSummary round={championRound} history={competitionChampionHistory(competition)} active={active}
+          kingHotkey={currentRound?.kingHotkey ?? null} championRetired={championRetired} />
+        {!championRetired && <>
+          <RoundBrief open={competition.openRound} latest={competition.latestCompletedRound}
+            replacementCutoff={currentRound?.openRoundId === competition.openRound?.roundId ? currentRound?.replacementCutoff ?? null : null} />
+          <RewardSeats seats={rewardSeats} />
+        </>}
+        <div className="mt-6 max-w-sm">
+          <span className={filterLabelClass}>Competition round</span>
+          <CompetitionSelect label="Competition round" value={selectedRound.roundId} options={roundOptions.map((round) => ({ value: round.roundId, label: `${round.evaluationDate ? formatUtcDate(round.evaluationDate) : round.roundId} · ${roundStatusLabel(round.status).replace(' in progress', '')}` }))} onChange={setSelectedRoundId} />
+        </div>
+        <RoundSummary round={selectedRound} />
+        <RoundWorkspace key={selectedRound.roundId} round={selectedRound} active={active} />
+      </> : <p className="border-b border-[var(--line)] py-12 text-[14px] text-[var(--muted)]">No production competition round is available.</p>}
       {error && competition ? <p role="status" className="mt-5 text-[12px] text-[var(--muted)]">Couldn’t refresh.{lastUpdatedAt ? ` Showing data from ${formatUtcTime(lastUpdatedAt)}.` : ' Showing the last update.'}</p> : null}
     </div></ValidatorNamesContext.Provider>
   )
@@ -139,15 +157,19 @@ function CompetitionHeader({ historyOpen = false, onHistory }: { historyOpen?: b
   return (
     <div className="flex flex-wrap items-center justify-between gap-4 py-5 md:gap-5 md:py-9">
       <div>
-        <h1 className="font-display text-[28px] font-medium tracking-[-0.04em] text-[var(--white)] md:text-[36px]">{historyOpen ? 'Competition history' : 'Agent competition'}</h1>
-        <p className="mt-2 text-[14px] text-[var(--muted)]">Open agents, public benchmarks, on-chain rewards.</p>
+        <h1 className="font-display text-[28px] font-medium tracking-[-0.04em] text-[var(--white)] md:text-[36px]">{historyOpen ? 'Competition history' : 'Sales research lab'}</h1>
+        <p className="mt-2 text-[14px] text-[var(--muted)]">Fund a simulated sales workflow, review a case, or explore published Arena results.</p>
       </div>
-      <div className="flex flex-wrap gap-2"><button type="button" onClick={onHistory} disabled={!onHistory} aria-pressed={historyOpen} className={secondaryButtonClass}>{historyOpen ? 'Back to competition' : 'History'}</button><a href="https://github.com/leadpoet/champion_model" target="_blank" rel="noreferrer" className={secondaryButtonClass}>Top Sales Agent Model</a></div>
+      <div className="flex flex-wrap gap-2">
+        <a href="https://github.com/leadpoet/leadpoet/blob/main/docs/locked-collection.md#enrollment" target="_blank" rel="noreferrer" className={secondaryButtonClass}>Miner enrollment</a>
+        <a href="https://github.com/leadpoet/leadpoet/issues/1343" target="_blank" rel="noreferrer" className={secondaryButtonClass}>Volunteer to review</a>
+        <button type="button" onClick={onHistory} disabled={!onHistory} aria-pressed={historyOpen} className={secondaryButtonClass}>{historyOpen ? 'Back to competition' : 'History'}</button><a href="https://github.com/leadpoet/champion_model" target="_blank" rel="noreferrer" className={secondaryButtonClass}>Top Sales Agent Model</a></div>
     </div>
   )
 }
 
-function ChampionSummary({ round, history = [], active = true, kingHotkey = null }: { round: CompetitionRoundSummary | null; history?: CompetitionScoreHistoryPoint[]; active?: boolean; kingHotkey?: string | null }) {
+function ChampionSummary({ round, history = [], active = true, kingHotkey = null, championRetired = false }: { round: CompetitionRoundSummary | null; history?: CompetitionScoreHistoryPoint[]; active?: boolean; kingHotkey?: string | null; championRetired?: boolean }) {
+  const championLabel = championRetired ? 'Last Arena champion' : 'Current champion'
   const champion = round?.champion
   // The crowning round can age out of the public window while its champion still reigns.
   const latest = round ? latestChampionScore(round, history) : kingHotkey ? history.filter((point) => point.championHotkey === kingHotkey).at(-1) ?? null : null
@@ -162,9 +184,9 @@ function ChampionSummary({ round, history = [], active = true, kingHotkey = null
     return () => query.removeEventListener('change', update)
   }, [])
   return (
-    <section aria-label="Current champion" className="grid min-w-0 rounded-xl border border-[var(--line)] bg-[var(--surface)] p-4 md:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)] md:gap-12 md:p-8">
+    <section aria-label={championLabel} className="grid min-w-0 rounded-xl border border-[var(--line)] bg-[var(--surface)] p-4 md:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)] md:gap-12 md:p-8">
       <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-3 md:flex md:flex-col md:items-start md:justify-center md:gap-0">
-        <h2 className="text-[14px] text-[var(--muted)]">Current champion</h2>
+        <h2 className="text-[14px] text-[var(--muted)]">{championLabel}</h2>
         <div className="font-display text-[48px] font-medium leading-none tracking-[-0.06em] text-[var(--white)] md:mt-4 md:text-[88px]">
           {formatCompetitionScore(latest?.score ?? champion?.finalScore ?? null)}<span className="ml-2 text-[20px] tracking-normal text-[var(--muted)] md:ml-3">/100</span>
         </div>
@@ -218,7 +240,14 @@ function formatRemaining(milliseconds: number): string {
 // Policy order is largest seat first: that stays the phone and screen-reader order, and desktop centers it.
 const REWARD_SEAT_PODIUM = ['md:order-2 md:border-[var(--line-2)] md:py-6', 'md:order-1 md:mt-4', 'md:order-3 md:mt-4']
 
-function RewardSeats({ seats }: { seats: CompetitionRewardSeats | null | undefined }) {
+function RewardSeats({ seats, championRetired = false }: { seats: CompetitionRewardSeats | null | undefined; championRetired?: boolean }) {
+  if (championRetired) return (
+    <section aria-label="Collection rewards" className="mb-6 rounded-xl border border-[var(--line)] bg-[var(--surface)] p-4 md:p-6">
+      <h2 className="text-[15px] font-medium text-[var(--platinum)]">Collection rewards</h2>
+      <p className="mt-2 text-[14px] leading-relaxed text-[var(--muted)]">Champion allocation is 0%. Paid collection jobs earn approved fixed prices. Unallocated emissions go to the designated burn hotkey.</p>
+      <p className="mt-2 text-[14px] text-[var(--muted)]">Pilot runs use the miner’s OpenRouter credits and pay no emissions.</p>
+    </section>
+  )
   return (
     <section aria-label="Reward seats" aria-busy={seats === undefined} className="mt-6">
       <h2 className="text-[14px] text-[var(--muted)]">Reward seats</h2>

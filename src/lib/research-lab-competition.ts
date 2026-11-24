@@ -778,10 +778,15 @@ export function competitionRoundOutcome(
 }
 
 /** Public current-round facts the competition snapshot does not carry. */
-export function normalizeCompetitionCurrentRound(value: unknown): { kingHotkey: string | null; openRoundId: string | null; replacementCutoff: string | null } {
+export function normalizeCompetitionCurrentRound(value: unknown): { kingHotkey: string | null; openRoundId: string | null; replacementCutoff: string | null; championRetired: boolean } {
   const source = record(value)
   const open = record(source?.open_round)
-  return { kingHotkey: text(record(source?.king)?.hotkey) || null, openRoundId: text(open?.round_id) || null, replacementCutoff: text(open?.submission_replacement_cutoff) || null }
+  return {
+    kingHotkey: text(record(source?.king)?.hotkey) || null,
+    openRoundId: text(open?.round_id) || null,
+    replacementCutoff: text(open?.submission_replacement_cutoff) || null,
+    championRetired: source?.reward_mode === 'fixed_collection_quotes',
+  }
 }
 
 /** The miner behind a submission row; the defending entry runs the champion it names. */
