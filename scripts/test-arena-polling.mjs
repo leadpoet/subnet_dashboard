@@ -95,7 +95,7 @@ let benchmarkGated = true
 const publicResponse = (url) => {
   if (url.endsWith('/metagraph')) return Response.json({ hotkeyToUid: { '5Validator': 0 }, names: { '5Validator': 'Subnet 71' } })
   if (url.endsWith('/competition')) return Response.json(snapshot)
-  if (url.endsWith('/current')) return Response.json({})
+  if (url.endsWith('/current')) return Response.json({ open_round: { round_id: round.round_id } })
   const roundId = url.match(/\/rounds\/([^/]+)/)?.[1]
   if (url.endsWith('/submissions')) return Response.json({ round_id: roundId, submissions: [baseline, competitor] })
   if (url.endsWith('/benchmark')) {
@@ -121,6 +121,29 @@ async function unmount() {
 }
 
 try {
+  respond = publicResponse
+  await act(async () => { renderer = TestRenderer.create(React.createElement(ResearchLab, { active: false }), rendererOptions) })
+  assert.match(markup(), /Pilot runs.*no emissions/)
+  assert.doesNotMatch(markup(), /Current champion|A new champion takes|Reward seats/)
+  await unmount()
+
+  respond = (url) => url.endsWith('/current') ? new Response(null, { status: 503 }) : publicResponse(url)
+  await act(async () => { renderer = TestRenderer.create(React.createElement(ResearchLab), rendererOptions) })
+  assert.match(markup(), /Reward status is temporarily unavailable/)
+  assert.doesNotMatch(markup(), /Current champion|A new champion takes/)
+  respond = (url) => url.endsWith('/current') ? Response.json({}) : publicResponse(url)
+  await advance(300_000)
+  assert.match(markup(), /Reward status is temporarily unavailable/)
+  assert.doesNotMatch(markup(), /Current champion|A new champion takes/)
+  respond = (url) => url.endsWith('/current') ? Response.json({ reward_mode: 'fixed_collection_quotes' }) : publicResponse(url)
+  await advance(300_000)
+  assert.match(markup(), /Champion allocation is 0%/)
+  assert.doesNotMatch(markup(), /Current champion|A new champion takes|Reward status is temporarily unavailable/)
+  respond = (url) => url.endsWith('/current') ? new Response(null, { status: 503 }) : publicResponse(url)
+  await advance(300_000)
+  assert.match(markup(), /Champion allocation is 0%/)
+  await unmount()
+
   respond = publicResponse
   const normalizedRound = normalizeCompetitionSnapshot(snapshot).latestRound
   await act(async () => { renderer = TestRenderer.create(React.createElement(RoundWorkspace, { round: normalizedRound, active: true }), rendererOptions) })
