@@ -39,7 +39,7 @@ const FAQ_DATA: FAQItem[] = [
   },
   {
     id: 'incentives', question: 'How are miners paid?',
-    answer: 'Pilot runs use real API credits and earn no emissions. Paid collection requires fresh live consent and an approved fixed price based on measured pilot costs. Accepted live jobs receive their quoted amount, scaled proportionally if total quotes exceed available emissions. Champion rewards end at the retirement epoch. All unallocated emissions go to the designated burn hotkey.',
+    answer: 'Pilot runs use real API credits and earn no emissions. Paid collection requires fresh live consent and an approved fixed price based on measured pilot costs. Accepted live jobs receive their quoted amount, scaled proportionally if total quotes exceed available emissions. Champion rewards have ended. All unallocated emissions go to the designated burn hotkey.',
   },
   {
     id: 'beyond-sales', question: 'Can I help without funding a run?',

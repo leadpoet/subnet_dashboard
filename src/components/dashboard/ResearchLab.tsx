@@ -75,8 +75,13 @@ export function ResearchLab({
   const refreshRewardSeats = useCallback(async () => {
     try {
       const response = await fetchJson('/api/research-lab/current')
-      setRewardSeats(normalizeCompetitionRewardSeats(response))
-      setCurrentRound(normalizeCompetitionCurrentRound(response))
+      const current = normalizeCompetitionCurrentRound(response)
+      const seats = normalizeCompetitionRewardSeats(response)
+      if (!current.championRetired && !current.openRoundId && !current.kingHotkey && !seats) {
+        throw new Error('Reward status unavailable')
+      }
+      setRewardSeats(seats)
+      setCurrentRound(current)
     } catch { setRewardSeats((current) => current ?? null) }
   }, [])
   useVisiblePolling(refreshRewardSeats, 300_000, { enabled: active })
@@ -113,9 +118,10 @@ export function ResearchLab({
       {historyOpen ? <CompetitionHistory active={active} /> : !competition ? (
         <Unavailable message="Competition data is temporarily unavailable. This page will retry automatically." />
       ) : selectedRound ? <>
-        <ChampionSummary round={championRound} history={competitionChampionHistory(competition)} active={active}
-          kingHotkey={currentRound?.kingHotkey ?? null} championRetired={championRetired} />
-        {!championRetired && <>
+        {currentRound && <ChampionSummary round={championRound} history={competitionChampionHistory(competition)} active={active}
+          kingHotkey={currentRound.kingHotkey} championRetired={championRetired} />}
+        {!currentRound && rewardSeats === null && <Unavailable message="Reward status is temporarily unavailable. This page will retry automatically." />}
+        {currentRound && !championRetired && <>
           <RoundBrief open={competition.openRound} latest={competition.latestCompletedRound}
             replacementCutoff={currentRound?.openRoundId === competition.openRound?.roundId ? currentRound?.replacementCutoff ?? null : null} />
           <RewardSeats seats={rewardSeats} />
@@ -134,12 +140,11 @@ export function ResearchLab({
 
 function ResearchLabLoading() {
   return <div aria-busy="true" aria-label="Loading competition"><CompetitionHeader />
-    <section aria-label="Current champion" className="grid min-w-0 gap-4 rounded-xl border border-[var(--line)] bg-[var(--surface)] p-4 md:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)] md:gap-12 md:p-8">
-      <div className="flex flex-col justify-center"><h2 className="text-[14px] text-[var(--muted)]">Current champion</h2><div className="mt-4 h-[88px] w-48 shimmer rounded-md" /><div className="mt-5 h-4 w-56 shimmer rounded" /><div className="mt-2 h-3 w-36 shimmer rounded" /></div>
+    <section aria-label="Champion history" className="grid min-w-0 gap-4 rounded-xl border border-[var(--line)] bg-[var(--surface)] p-4 md:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)] md:gap-12 md:p-8">
+      <div className="flex flex-col justify-center"><h2 className="text-[14px] text-[var(--muted)]">Champion history</h2><div className="mt-4 h-[88px] w-48 shimmer rounded-md" /><div className="mt-5 h-4 w-56 shimmer rounded" /><div className="mt-2 h-3 w-36 shimmer rounded" /></div>
       <div className="hidden md:block"><div className="text-[14px] text-[var(--platinum)]">Champion score by day <span className="text-[12px] text-[var(--muted-2)]">/100</span></div><div className="mt-3 h-[180px] shimmer rounded-md" /><div className="mt-2 h-3 w-36 shimmer rounded" /></div>
     </section>
     <div className="mt-6 min-h-[254px] shimmer rounded-xl sm:min-h-[134px]" />
-    <RewardSeats seats={undefined} />
     <section className="mt-8 border-y border-[var(--line)] py-5"><div className="grid gap-5 sm:grid-cols-[1fr_2fr]"><div className="h-12 w-32 shimmer rounded" /><div className="grid grid-cols-2 gap-5"><div className="h-12 shimmer rounded" /><div className="h-12 shimmer rounded" /></div></div><div className="mt-5 h-4 w-24 shimmer rounded" /></section>
     <section className="pt-10"><h2 className="font-display text-[20px] text-[var(--platinum)]">Submissions</h2><div className="my-5 h-10 shimmer rounded-md" /><SubmissionRowsLoading /></section>
   </div>
@@ -158,7 +163,7 @@ function CompetitionHeader({ historyOpen = false, onHistory }: { historyOpen?: b
     <div className="flex flex-wrap items-center justify-between gap-4 py-5 md:gap-5 md:py-9">
       <div>
         <h1 className="font-display text-[28px] font-medium tracking-[-0.04em] text-[var(--white)] md:text-[36px]">{historyOpen ? 'Competition history' : 'Sales research lab'}</h1>
-        <p className="mt-2 text-[14px] text-[var(--muted)]">Fund a simulated sales workflow, review a case, or explore published Arena results.</p>
+        <p className="mt-2 text-[14px] text-[var(--muted)]">Fund a simulated sales workflow with OpenRouter credits. Pilot runs earn no emissions.</p>
       </div>
       <div className="flex flex-wrap gap-2">
         <a href="https://github.com/leadpoet/leadpoet/blob/main/docs/locked-collection.md#enrollment" target="_blank" rel="noreferrer" className={secondaryButtonClass}>Miner enrollment</a>
@@ -245,7 +250,6 @@ function RewardSeats({ seats, championRetired = false }: { seats: CompetitionRew
     <section aria-label="Collection rewards" className="mb-6 rounded-xl border border-[var(--line)] bg-[var(--surface)] p-4 md:p-6">
       <h2 className="text-[15px] font-medium text-[var(--platinum)]">Collection rewards</h2>
       <p className="mt-2 text-[14px] leading-relaxed text-[var(--muted)]">Champion allocation is 0%. Paid collection jobs earn approved fixed prices. Unallocated emissions go to the designated burn hotkey.</p>
-      <p className="mt-2 text-[14px] text-[var(--muted)]">Pilot runs use the miner’s OpenRouter credits and pay no emissions.</p>
     </section>
   )
   return (
