@@ -163,7 +163,7 @@ function CompetitionHeader({ historyOpen = false, onHistory }: { historyOpen?: b
     <div className="flex flex-wrap items-center justify-between gap-4 py-5 md:gap-5 md:py-9">
       <div>
         <h1 className="font-display text-[28px] font-medium tracking-[-0.04em] text-[var(--white)] md:text-[36px]">{historyOpen ? 'Competition history' : 'Sales research lab'}</h1>
-        <p className="mt-2 text-[14px] text-[var(--muted)]">Fund a simulated sales workflow with OpenRouter credits. Pilot runs earn no emissions.</p>
+        <p className="mt-2 text-[14px] text-[var(--muted)]">Fund a sales agent with OpenRouter credits. Check the current fixed prices and spending caps before enrolling.</p>
       </div>
       <div className="flex flex-wrap gap-2">
         <a href="https://github.com/leadpoet/leadpoet/blob/main/docs/locked-collection.md#enrollment" target="_blank" rel="noreferrer" className={secondaryButtonClass}>Miner enrollment</a>
