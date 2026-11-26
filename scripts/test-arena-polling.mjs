@@ -123,7 +123,8 @@ async function unmount() {
 try {
   respond = publicResponse
   await act(async () => { renderer = TestRenderer.create(React.createElement(ResearchLab, { active: false }), rendererOptions) })
-  assert.match(markup(), /Pilot runs.*no emissions/)
+  assert.match(markup(), /Check the current fixed prices and spending caps before enrolling/)
+  assert.doesNotMatch(markup(), /Pilot runs.*no emissions/)
   assert.doesNotMatch(markup(), /Current champion|A new champion takes|Reward seats/)
   await unmount()
 
