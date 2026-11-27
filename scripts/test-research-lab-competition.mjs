@@ -1725,8 +1725,8 @@ try {
   const faq = await readFile(resolve('src/components/dashboard/FAQ.tsx'), 'utf8')
   assert.doesNotMatch(faq, /keeps the complementary|fixed 10-ICP/i)
   assert.doesNotMatch(faq, /Miners improve an agent and submit it/)
-  assert.match(faq, /fixed quote before spending/)
-  assert.match(faq, /rolling 24-hour spending cap/)
+  assert.match(faq, /1.25 times its actual settled OpenRouter cost/)
+  assert.match(faq, /total spending limit for the enrollment/)
 
   console.log('research-lab-competition: public projection, honest scores, release gates, and narrow proxy checks passed')
 } finally {

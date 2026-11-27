@@ -20,7 +20,7 @@ interface FAQItem {
 const FAQ_DATA: FAQItem[] = [
   {
     id: 'how-it-works', question: 'How do I enroll?',
-    answer: 'Use a registered Subnet 71 hotkey and the miner CLI. Run leadpoet collection-terms to see the available tasks and prices. Follow the enrollment guide to sign the offer you want to fund. Each signature covers that offer and its spending limits.',
+    answer: 'Use a registered Subnet 71 hotkey and the miner CLI. Register your OpenRouter key with a total spending limit. The same signed enrollment can fund multiple sales experiments. The subnet assigns the work.',
   },
   {
     id: 'keys', question: 'Which OpenRouter keys do I need?',
@@ -28,7 +28,7 @@ const FAQ_DATA: FAQItem[] = [
   },
   {
     id: 'spending', question: 'How do I limit or stop spending?',
-    answer: 'Set a rolling 24-hour spending cap when you enroll. Each offer also shows a maximum spend per run. Your private miner statement shows assignments, charges and outstanding reservations. Revoke the enrollment in the CLI to stop new assignments.',
+    answer: 'Set a total spending limit for the enrollment. Settled charges and unresolved reservations consume it. Your limit does not reset each day. Your private miner statement shows assignments, charges and outstanding reservations. Revoke the enrollment in the CLI to stop new assignments.',
   },
   {
     id: 'fulfillment', question: 'What data does a run produce?',
@@ -36,7 +36,7 @@ const FAQ_DATA: FAQItem[] = [
   },
   {
     id: 'incentives', question: 'How are rewards calculated?',
-    answer: 'You see a fixed quote before spending. It targets 1.25 times the measured cost of that model and task. A run becomes eligible when its result and trace pass verification. Failed work can still use OpenRouter credits. If eligible quotes exceed available emissions, they scale proportionally. Validator votes and token prices affect what you receive.',
+    answer: 'Each verified complete run earns a reward target of 1.25 times its actual settled OpenRouter cost. Both correct and incorrect decisions qualify. Incomplete or unverifiable work can use credits without earning a reward. If eligible targets exceed the available emissions, they scale proportionally. Validator votes and token prices affect what you receive.',
   },
 ]
 
