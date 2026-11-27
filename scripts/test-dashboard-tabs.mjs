@@ -41,6 +41,12 @@ try {
   assert.match(clientSource, /normalizeDashboardTab\(tab, visibleTabs\)/)
   assert.doesNotMatch(clientSource, /fulfillment|\/api\/dashboard/i)
 
+  assert.match(clientSource, /<CollectionLab active=/)
+  assert.match(clientSource, /href="\/archive"/)
+  assert.doesNotMatch(clientSource, /<ResearchLab |<ArenaArchive /)
+  const archive = await readFile(resolve('src/app/archive/page.tsx'), 'utf8')
+  assert.match(archive, /<ArenaArchive \/>/)
+
   console.log('dashboard-tabs: hostname visibility and active-tab fallback checks passed')
 } finally {
   await rm(outDir, { recursive: true, force: true })

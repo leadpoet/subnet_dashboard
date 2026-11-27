@@ -5,6 +5,7 @@ import {
   ChevronDown,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { ENROLLMENT_GUIDE, SALES_AGENT } from '@/lib/collection'
 
 interface FAQItem {
   id: string
@@ -18,32 +19,24 @@ interface FAQItem {
 
 const FAQ_DATA: FAQItem[] = [
   {
-    id: 'problem', question: 'What is Subnet 71?',
-    answer: 'Subnet 71 is a Bittensor research lab for open sales models. Miners fund model runs. Leadpoet assigns the tasks, runs the public agent and records its decisions and tool results.',
+    id: 'how-it-works', question: 'How do I enroll?',
+    answer: 'Use a registered Subnet 71 hotkey and the miner CLI. Run leadpoet collection-terms to see the available tasks and prices. Follow the enrollment guide to sign the offer you want to fund. Each signature covers that offer and its spending limits.',
   },
   {
-    id: 'why-bittensor', question: 'Why Bittensor?',
-    answer: 'Bittensor connects independent compute funders and validators. Validators publish weights for eligible collection work. The dashboard also archives earlier Arena submissions, benchmarks and scores.',
+    id: 'keys', question: 'Which OpenRouter keys do I need?',
+    answer: 'Create a dedicated, funded OpenRouter API key and a read-only management key in the same workspace. Enter both through the miner CLI. The gateway uses the management key to verify ownership and settings, and stores the funding key encrypted.',
   },
   {
-    id: 'how-it-works', question: 'How can I participate?',
-    answer: 'Register on subnet 71 and follow Miner enrollment to sign the terms for your chosen track. You supply a dedicated OpenRouter key and a spending cap. Your private statement shows jobs, charges and outstanding reservations. You can revoke an enrollment at any time.',
+    id: 'spending', question: 'How do I limit or stop spending?',
+    answer: 'Set a rolling 24-hour spending cap when you enroll. Each offer also shows a maximum spend per run. Your private miner statement shows assignments, charges and outstanding reservations. Revoke the enrollment in the CLI to stop new assignments.',
   },
   {
-    id: 'fulfillment', question: 'What do collection runs produce?',
-    answer: 'Open models make decisions and use local tools in simulated sales workflows. A comparison runs different models on the same scenario. In a correction, a stronger model resumes at a smaller model’s mistake. The lab retains the original evidence for review.',
+    id: 'fulfillment', question: 'What data does a run produce?',
+    answer: 'Our public agent runs an assigned sales workflow. In a research task it searches a simulated company archive, checks dated sources and cites evidence for its qualification decision. We retain the prompts, responses, reasoning the model exposes, tool calls and results, and the final outcome. Failed runs can also provide training examples.',
   },
   {
-    id: 'scoring', question: 'What do historical Arena scores mean?',
-    answer: 'Each Arena round evaluated agents on the same set of ideal customer profiles. The score out of 100 averaged their performance on those profiles. The tasks changed between days. Published round records include the decisions, source and evaluation details.',
-  },
-  {
-    id: 'incentives', question: 'How are miners paid?',
-    answer: 'Pilot runs use real API credits and earn no emissions. Paid collection requires fresh live consent and an approved fixed price based on measured pilot costs. Accepted live jobs receive their quoted amount, scaled proportionally if total quotes exceed available emissions. Champion rewards have ended. All unallocated emissions go to the designated burn hotkey.',
-  },
-  {
-    id: 'beyond-sales', question: 'Can I help without funding a run?',
-    answer: 'Yes. Independent reviewers can volunteer to assess blind workflow cases. You can review without a miner wallet or API credits. Use the public pilot thread to request the private packet.',
+    id: 'incentives', question: 'How are rewards calculated?',
+    answer: 'You see a fixed quote before spending. It targets 1.25 times the measured cost of that model and task. A run becomes eligible when its result and trace pass verification. Failed work can still use OpenRouter credits. If eligible quotes exceed available emissions, they scale proportionally. Validator votes and token prices affect what you receive.',
   },
 ]
 
@@ -248,8 +241,8 @@ function Sidebar() {
   return (
     <nav aria-label="Subnet 71 links" className="border-t border-[var(--line)] pt-4 lg:border-t-0 lg:border-l lg:pl-6">
       <h2 className="mb-3 px-4 text-[12px] text-[var(--muted)]">Explore Subnet 71</h2>
-      <SidebarLink href="https://github.com/leadpoet/leadpoet/blob/main/docs/locked-collection.md#enrollment">Miner enrollment</SidebarLink>
-      <SidebarLink href="https://github.com/leadpoet/leadpoet/issues/1343">Pilot support and reviewers</SidebarLink>
+      <SidebarLink href={ENROLLMENT_GUIDE}>Miner enrollment</SidebarLink>
+      <SidebarLink href={SALES_AGENT}>Public sales agent</SidebarLink>
       <SidebarLink href="https://github.com/leadpoet/leadpoet">GitHub</SidebarLink>
       <SidebarLink href="https://discord.gg/dVxQZmJwxB">Discord</SidebarLink>
     </nav>

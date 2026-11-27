@@ -53,7 +53,8 @@ function load(path, extra = '') {
   modules.set(path, module.exports)
   return module.exports
 }
-const { ResearchLab, RoundWorkspace, CompetitionHistory, CompetitionSelect } = load('src/components/dashboard/ResearchLab.tsx', '\nexport { RoundWorkspace, CompetitionHistory, CompetitionSelect };')
+const { ArenaArchive, RoundWorkspace, CompetitionHistory, CompetitionSelect } = load('src/components/dashboard/ArenaArchive.tsx', '\nexport { RoundWorkspace, CompetitionHistory, CompetitionSelect };')
+const { CollectionLab } = load('src/components/dashboard/CollectionLab.tsx')
 const { AdminResearchLab } = load('src/app/admin/_components/AdminResearchLab.tsx')
 const { normalizeCompetitionSnapshot } = load('src/lib/research-lab-competition.ts')
 // Radix controls use window timers when cleaning up their keyboard state.
@@ -121,15 +122,42 @@ async function unmount() {
 }
 
 try {
+  const collection = { as_of: '2026-11-27T05:00:00Z', running_runs: 0, verified_runs: 14, paid_enrollment_open: true, champion_rewards_off: true }
+  respond = () => new Response(null, { status: 503 })
+  await act(async () => { renderer = TestRenderer.create(React.createElement(CollectionLab), rendererOptions) })
+  assert.deepEqual(calls, ['/api/collection/status'])
+  assert.match(markup(), /Live status is temporarily unavailable/)
+  assert.match(markup(), /Enroll as a miner/)
+  assert.doesNotMatch(markup(), /Current champion|Reward seats|Submissions|"Idle"/)
+  respond = () => Response.json(collection)
+  await advance(60_000)
+  assert.match(markup(), /"Idle"/)
+  assert.match(markup(), /"Open"/)
+  assert.match(markup(), /"Off"/)
+  assert.match(markup(), /"14"/)
+  respond = () => Response.json({ ...collection, running_runs: -1 })
+  await advance(60_000)
+  assert.match(markup(), /Last confirmed/)
+  respond = () => Response.json({ ...collection, running_runs: 2, paid_enrollment_open: false })
+  await advance(60_000)
+  assert.match(markup(), /"2 running"/)
+  assert.match(markup(), /"Closed"/)
+  assert.doesNotMatch(markup(), /Last confirmed/)
+  await act(async () => { renderer.update(React.createElement(CollectionLab, { active: false })) })
+  const beforeFAQ = calls.length
+  await advance(60_000)
+  assert.equal(calls.length, beforeFAQ)
+  await unmount()
+
   respond = publicResponse
-  await act(async () => { renderer = TestRenderer.create(React.createElement(ResearchLab, { active: false }), rendererOptions) })
-  assert.match(markup(), /Check the current fixed prices and spending caps before enrolling/)
+  await act(async () => { renderer = TestRenderer.create(React.createElement(ArenaArchive, { active: false }), rendererOptions) })
+  assert.match(markup(), /Past submissions, benchmarks and results/)
   assert.doesNotMatch(markup(), /Pilot runs.*no emissions/)
   assert.doesNotMatch(markup(), /Current champion|A new champion takes|Reward seats/)
   await unmount()
 
   respond = (url) => url.endsWith('/current') ? new Response(null, { status: 503 }) : publicResponse(url)
-  await act(async () => { renderer = TestRenderer.create(React.createElement(ResearchLab), rendererOptions) })
+  await act(async () => { renderer = TestRenderer.create(React.createElement(ArenaArchive), rendererOptions) })
   assert.match(markup(), /Reward status is temporarily unavailable/)
   assert.doesNotMatch(markup(), /Current champion|A new champion takes/)
   respond = (url) => url.endsWith('/current') ? Response.json({}) : publicResponse(url)
@@ -233,7 +261,7 @@ try {
   respond = publicResponse
 
   // Exercise the actual parent/child refresh cascade and saved visible output.
-  await act(async () => { renderer = TestRenderer.create(React.createElement(ResearchLab), rendererOptions) })
+  await act(async () => { renderer = TestRenderer.create(React.createElement(ArenaArchive), rendererOptions) })
   assert.equal(calls.length, 4)
   assert.equal(count('/metagraph'), 1)
   assert.equal(count('/current'), 1)
@@ -276,11 +304,11 @@ try {
   await act(async () => { historyToggle().props.onClick() })
   assert.match(markup(), /Champion score by day/, 'expanded score history is visible before changing tabs')
   const beforeInactive = calls.length
-  await act(async () => { renderer.update(React.createElement(ResearchLab, { active: false })) })
+  await act(async () => { renderer.update(React.createElement(ArenaArchive, { active: false })) })
   await advance(2 * 60_000)
   assert.equal(calls.length, beforeInactive, 'switching to FAQ pauses the kept-mounted competition')
   assert.doesNotMatch(markup(), /Champion score by day/, 'hidden competition must not measure a chart inside the inactive panel')
-  await act(async () => { renderer.update(React.createElement(ResearchLab, { active: true })) })
+  await act(async () => { renderer.update(React.createElement(ArenaArchive, { active: true })) })
   assert.equal(calls.length, beforeInactive + 6)
   assert.equal(historyToggle().props['aria-expanded'], true, 'returning to competition preserves expanded score history')
   assert.match(markup(), /Champion score by day/, 'score history returns when competition becomes visible')
@@ -310,7 +338,7 @@ try {
     return publicResponse(url)
   }
   const roundSelect = () => renderer.root.findAllByType(CompetitionSelect).find((select) => select.props.label === 'Competition round')
-  await act(async () => { renderer = TestRenderer.create(React.createElement(ResearchLab), rendererOptions) })
+  await act(async () => { renderer = TestRenderer.create(React.createElement(ArenaArchive), rendererOptions) })
   assert.ok(roundSelect(), 'a recent-round selector must make older review exclusions reachable')
   assert.equal(roundSelect().props.value, nov7.round_id, 'the initial view retains the latest round')
   const renderedText = (node) => node.children.map((child) => typeof child === 'string' ? child : renderedText(child)).join('')
@@ -342,7 +370,7 @@ try {
   assert.equal(calls.some((url) => url.includes('/history')), false, 'round selection must not change or load History membership')
   await unmount()
   recentSnapshot = { ...recentSnapshot, latest_round: nov7, rounds: [nov7, nov6, reigning] }
-  await act(async () => { renderer = TestRenderer.create(React.createElement(ResearchLab), rendererOptions) })
+  await act(async () => { renderer = TestRenderer.create(React.createElement(ArenaArchive), rendererOptions) })
   recentSnapshot = { ...recentSnapshot, latest_round: nov8, rounds: [nov8, nov7, nov6, reigning] }
   await advance(60_000)
   assert.equal(roundSelect().props.value, nov8.round_id, 'without a deliberate choice the default continues to follow the latest round')

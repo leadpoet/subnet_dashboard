@@ -38,12 +38,12 @@ export const viewport: Viewport = {
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
   title: {
-    default: 'Subnet 71 · Live Bittensor Dashboard',
+    default: 'Subnet 71 · Sales Research Lab',
     template: '%s · Subnet 71',
   },
   description:
-    'Miner-funded sales research, collection enrollment and historical Arena results on Bittensor Subnet 71.',
-  applicationName: 'Subnet 71 Dashboard',
+    'Fund sales-agent runs with OpenRouter credits. Review spending caps, collection activity and rewards on Bittensor Subnet 71.',
+  applicationName: 'Subnet 71 Sales Research Lab',
   icons: {
     icon: '/icon.png?v=2',
     apple: '/apple-icon.png',
@@ -51,25 +51,25 @@ export const metadata: Metadata = {
   openGraph: {
     type: 'website',
     siteName: 'Subnet 71',
-    title: 'Subnet 71 · Live Bittensor Dashboard',
+    title: 'Subnet 71 · Sales Research Lab',
     description:
-      'Miner-funded sales research, collection enrollment and historical Arena results on Bittensor Subnet 71.',
+      'Fund sales-agent runs with OpenRouter credits. Review spending caps, collection activity and rewards on Bittensor Subnet 71.',
     url: SITE_URL,
     images: [
       {
-        url: '/og.png',
+        url: '/og.png?v=collection',
         width: 1200,
         height: 630,
-        alt: 'Subnet 71, the open competition for sales research agents',
+        alt: 'Subnet 71 sales research lab. Fund a sales agent.',
       },
     ],
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'Subnet 71 · Live Bittensor Dashboard',
+    title: 'Subnet 71 · Sales Research Lab',
     description:
-      'Miner-funded sales research, collection enrollment and historical Arena results on Bittensor Subnet 71.',
-    images: ['/og.png'],
+      'Fund sales-agent runs with OpenRouter credits. Review spending caps, collection activity and rewards on Bittensor Subnet 71.',
+    images: ['/og.png?v=collection'],
   },
   robots: {
     index: true,

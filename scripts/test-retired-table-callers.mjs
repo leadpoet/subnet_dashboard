@@ -48,7 +48,7 @@ const ready = await readFile(resolve('src/app/api/health/ready/route.ts'), 'utf8
 assert.match(ready, /fetchPublicArenaJson\('\/arena\/v1\/current'/)
 assert.match(ready, /fetchMetagraph\(\)/)
 assert.doesNotMatch(ready, /precalc|supabase/i)
-const arena = await readFile(resolve('src/components/dashboard/ResearchLab.tsx'), 'utf8')
+const arena = await readFile(resolve('src/components/dashboard/ArenaArchive.tsx'), 'utf8')
 assert.match(arena, /fetchJson\('\/api\/research-lab\/competition'\)/)
 assert.doesNotMatch(arena, /\/api\/research-lab\?|settlement|LabEmissionSplit/)
 assert.ok(existsSync(resolve('src/app/admin/_components/AdminMetagraph.tsx')), 'current metagraph admin UI must remain')

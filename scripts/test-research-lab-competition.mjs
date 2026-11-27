@@ -376,7 +376,7 @@ try {
   assert.deepEqual(code.files[0], { path: 'agent.py', content: 'print(1)', language: null })
   assert.equal(code.truncated, true)
 
-  const component = await readFile(resolve('src/components/dashboard/ResearchLab.tsx'), 'utf8')
+  const component = await readFile(resolve('src/components/dashboard/ArenaArchive.tsx'), 'utf8')
   const renderedModule = { exports: {} }
   vm.runInNewContext(ts.transpileModule(component, {
     compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX },
@@ -1483,13 +1483,12 @@ try {
     }
   }
   assert.doesNotMatch(component, /if \(!competition\) return/, 'an Arena outage must render its retry state')
-  assert.match(component, /https:\/\/github\.com\/leadpoet\/champion_model/); assert.match(component, /Top Sales Agent Model/)
+  assert.match(component, /https:\/\/github\.com\/leadpoet\/champion_model/); assert.match(component, /Champion repository/)
   assert.match(component, /Competition data is temporarily unavailable\. This page will retry automatically\./)
   assert.doesNotMatch(component, /settlement|LabEmissionSplit|\/api\/research-lab\?/)
   assert.ok(component.indexOf('<ChampionSummary') < component.indexOf('<RoundSummary'), 'champion headline is separate from the active round')
   assert.match(component, /Public ICPs \(\$\{benchmark\.benchmarkIcpCount\}\)/)
-  assert.match(component, /Fund a sales agent with OpenRouter credits/)
-  assert.match(component, /Check the current fixed prices and spending caps before enrolling/)
+  assert.match(component, /Past submissions, benchmarks and results/)
   assert.doesNotMatch(component, /Pilot runs earn no emissions/)
   assert.doesNotMatch(component, /server-held .* evaluation view/)
   assert.match(component, /response\.status === 403/)
@@ -1722,12 +1721,12 @@ try {
   assert.match(codeRoute, /encodeURIComponent\(submissionId\)/)
 
   const shell = await readFile(resolve('src/components/dashboard/DashboardClient.tsx'), 'utf8')
-  assert.match(shell, /label="Research lab"/)
+  assert.match(shell, /label="Collection"/)
   const faq = await readFile(resolve('src/components/dashboard/FAQ.tsx'), 'utf8')
-  assert.doesNotMatch(faq, /24.hour|24 hours|keeps the complementary|fixed 10-ICP/i)
+  assert.doesNotMatch(faq, /keeps the complementary|fixed 10-ICP/i)
   assert.doesNotMatch(faq, /Miners improve an agent and submit it/)
-  assert.match(faq, /Pilot runs use real API credits and earn no emissions/)
-  assert.match(faq, /leadpoet\/issues\/1343/)
+  assert.match(faq, /fixed quote before spending/)
+  assert.match(faq, /rolling 24-hour spending cap/)
 
   console.log('research-lab-competition: public projection, honest scores, release gates, and narrow proxy checks passed')
 } finally {
