@@ -7,10 +7,10 @@ import { MinerContributions } from '@/components/dashboard/MinerContributions'
 import { useVisiblePolling } from '@/lib/hooks/useVisiblePolling'
 
 const steps = [
-  ['Choose an offer', 'Review the tasks and fixed quotes in the miner CLI. Choose the offer you want to sign with your registered wallet.'],
-  ['Set your spending cap', 'Provide a dedicated OpenRouter key and sign the offer with a rolling 24-hour budget.'],
-  ['Fund an agent run', 'We run the public sales agent on a simulated workflow and capture its available reasoning, tool calls, evidence and decisions.'],
-  ['Earn emissions', 'When the result and trace pass verification, validators use the fixed quote to allocate subnet emissions.'],
+  ['Register a key', 'Use your registered miner wallet and an OpenRouter key to fund the sales sandbox.'],
+  ['Set a total limit', 'Sign once for the amount you want to spend. Your key can fund multiple experiments until the limit is used or you revoke it.'],
+  ['Fund agent runs', 'We assign the models and scenarios, and record the available reasoning, tool calls, evidence and decisions.'],
+  ['Earn emissions', 'Verified complete runs earn a target of 1.25× their actual generator cost, including runs where the agent gets the task wrong.'],
 ] as const
 
 export function CollectionLab({ active = true }: { active?: boolean }) {
@@ -53,7 +53,7 @@ export function CollectionLab({ active = true }: { active?: boolean }) {
           <h2 id="collection-status" className="text-sm font-medium text-[var(--platinum)]">Collection status</h2>
           <dl className="mt-5">
             <div className="mb-5 flex items-baseline gap-3">
-              <dt className="order-2 text-sm text-[var(--muted)]">Verified runs across paid offers</dt>
+              <dt className="order-2 text-sm text-[var(--muted)]">Verified miner-funded runs</dt>
               <dd className="font-display text-[3.25rem] font-medium leading-none tracking-[-0.065em] text-[var(--white)]">{status ? status.verified_runs.toLocaleString('en-US') : '—'}</dd>
             </div>
             <StatusRow label="Paid enrollment" value={status ? (status.paid_enrollment_open ? 'Open' : 'Closed') : pending} />

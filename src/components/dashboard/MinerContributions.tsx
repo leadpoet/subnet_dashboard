@@ -8,7 +8,7 @@ import { useVisiblePolling } from '@/lib/hooks/useVisiblePolling'
 const dateFormat = new Intl.DateTimeFormat('en-GB', {
   month: 'short', day: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone: 'UTC',
 })
-const columns = ['Miner hotkey', 'Funded runs', 'Last funded run', 'Earned quote', 'On-chain share']
+const columns = ['Miner hotkey', 'Funded runs', 'Last funded run', 'Reward target', 'On-chain share']
 const mobileLabel = 'mb-1 block text-xs font-normal text-[var(--muted)] lg:hidden'
 const cell = 'align-top lg:py-5 lg:pr-5'
 
@@ -45,7 +45,7 @@ export function MinerContributions({ active }: { active: boolean }) {
 
   return <section aria-labelledby="miner-contributions" className="mt-12 border-t border-[var(--line)] pt-8 md:mt-16 md:pt-10">
     <h2 id="miner-contributions" className="font-display text-2xl font-medium tracking-[-0.04em] text-[var(--white)] md:text-3xl">Miner contributions</h2>
-    <p className="mt-2 text-sm leading-relaxed text-[var(--muted)]">Funded runs and earned USD quotes are lifetime totals. On-chain shares refer to the latest finalized collection payout. All times are UTC.</p>
+    <p className="mt-2 text-sm leading-relaxed text-[var(--muted)]">Funded runs and USD reward targets are lifetime totals. On-chain shares refer to the latest finalized collection payout. All times are UTC.</p>
     {payout?.status === 'confirmed' ? <MinerShareChart key={payout.epoch} payout={payout} />
       : result && <p role="status" className="mt-4 text-sm text-[var(--muted)]">{payout?.status === 'none' ? 'No collection payouts have finalized yet.' : 'On-chain payout shares are temporarily unavailable.'}</p>}
     {page?.miners.length ? <table aria-labelledby="miner-contributions" className="mt-6 block w-full text-left text-sm lg:table">
@@ -60,7 +60,7 @@ export function MinerContributions({ active }: { active: boolean }) {
         </th>
         <td className={cell}><span className={mobileLabel}>Funded runs</span>{miner.funded_runs.toLocaleString('en-US')}</td>
         <td className={cell}><span className={mobileLabel}>Last funded run</span>{miner.last_funded_at ? <time dateTime={miner.last_funded_at}>{dateFormat.format(Date.parse(miner.last_funded_at))}</time> : 'No funded runs yet'}</td>
-        <td className={cell}><span className={mobileLabel}>Earned quote</span>${displayUnits(miner.earned_quote_microusd, 6, 2)}</td>
+        <td className={cell}><span className={mobileLabel}>Reward target</span>${displayUnits(miner.earned_quote_microusd, 6, 2)}</td>
         <td className="align-top lg:py-5"><span className={mobileLabel}>On-chain share</span>
           {shareLabel(miner, payout)}
           {miner.payout_status === 'pending' && <span className="mt-1 block text-xs text-[var(--muted)]">Awaiting settlement</span>}
