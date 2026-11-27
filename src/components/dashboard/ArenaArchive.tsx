@@ -54,7 +54,7 @@ import {
 type ReleaseState = 'idle' | 'loading' | 'available' | 'gated' | 'error'
 const ValidatorNamesContext = createContext<Record<string, string>>({})
 
-export function ResearchLab({
+export function ArenaArchive({
   onSync,
   active = true,
 }: { onSync?: () => void; active?: boolean } = {}) {
@@ -106,7 +106,7 @@ export function ResearchLab({
 
   useVisiblePolling(fetchData, 60_000, { enabled: active })
 
-  if (loading && !competition) return <ResearchLabLoading />
+  if (loading && !competition) return <ArchiveLoading />
   const roundOptions = competition ? competitionRoundOptions(competition) : []
   const selectedRound = roundOptions.find((round) => round.roundId === selectedRoundId) ?? roundOptions[0] ?? null
   const championRound = competition ? currentChampionRound(competition) : null
@@ -138,7 +138,7 @@ export function ResearchLab({
   )
 }
 
-function ResearchLabLoading() {
+function ArchiveLoading() {
   return <div aria-busy="true" aria-label="Loading competition"><CompetitionHeader />
     <section aria-label="Champion history" className="grid min-w-0 gap-4 rounded-xl border border-[var(--line)] bg-[var(--surface)] p-4 md:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)] md:gap-12 md:p-8">
       <div className="flex flex-col justify-center"><h2 className="text-[14px] text-[var(--muted)]">Champion history</h2><div className="mt-4 h-[88px] w-48 shimmer rounded-md" /><div className="mt-5 h-4 w-56 shimmer rounded" /><div className="mt-2 h-3 w-36 shimmer rounded" /></div>
@@ -162,13 +162,13 @@ function CompetitionHeader({ historyOpen = false, onHistory }: { historyOpen?: b
   return (
     <div className="flex flex-wrap items-center justify-between gap-4 py-5 md:gap-5 md:py-9">
       <div>
-        <h1 className="font-display text-[28px] font-medium tracking-[-0.04em] text-[var(--white)] md:text-[36px]">{historyOpen ? 'Competition history' : 'Sales research lab'}</h1>
-        <p className="mt-2 text-[14px] text-[var(--muted)]">Fund a sales agent with OpenRouter credits. Check the current fixed prices and spending caps before enrolling.</p>
+        <h1 className="font-display text-[28px] font-medium tracking-[-0.04em] text-[var(--white)] md:text-[36px]">{historyOpen ? 'Competition history' : 'Arena archive'}</h1>
+        <p className="mt-2 text-[14px] text-[var(--muted)]">Past submissions, benchmarks and results from the Subnet 71 agent competition.</p>
       </div>
       <div className="flex flex-wrap gap-2">
-        <a href="https://github.com/leadpoet/leadpoet/blob/main/docs/locked-collection.md#enrollment" target="_blank" rel="noreferrer" className={secondaryButtonClass}>Miner enrollment</a>
-        <a href="https://github.com/leadpoet/leadpoet/issues/1343" target="_blank" rel="noreferrer" className={secondaryButtonClass}>Volunteer to review</a>
-        <button type="button" onClick={onHistory} disabled={!onHistory} aria-pressed={historyOpen} className={secondaryButtonClass}>{historyOpen ? 'Back to competition' : 'History'}</button><a href="https://github.com/leadpoet/champion_model" target="_blank" rel="noreferrer" className={secondaryButtonClass}>Top Sales Agent Model</a></div>
+        <button type="button" onClick={onHistory} disabled={!onHistory} aria-pressed={historyOpen} className={secondaryButtonClass}>{historyOpen ? 'Back to rounds' : 'Browse history'}</button>
+        <a href="https://github.com/leadpoet/champion_model" target="_blank" rel="noreferrer" className={secondaryButtonClass}>Champion repository</a>
+      </div>
     </div>
   )
 }

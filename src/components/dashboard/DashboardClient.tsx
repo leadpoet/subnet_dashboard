@@ -2,7 +2,9 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { FAQ, ResearchLab } from '@/components/dashboard'
+import Link from 'next/link'
+import { FAQ } from './FAQ'
+import { CollectionLab } from './CollectionLab'
 import { ErrorBoundary } from '@/components/shared/ErrorBoundary'
 import { cn } from '@/lib/utils'
 import {
@@ -83,10 +85,11 @@ export function DashboardClient() {
     <div ref={surfaceRef} className="dashboard-surface relative min-h-screen">
       <div className="relative z-10 max-w-[1240px] mx-auto px-5 md:px-8">
         <header className="py-6 md:py-8">
-          <div className="flex items-center gap-4">
+          <div className="flex items-center justify-between gap-4">
             <span className="font-display text-[20px] font-semibold tracking-[-0.02em] text-[var(--white)]">
-              Subnet 71<span className="ml-3 hidden border-l border-[var(--line-3)] pl-3 text-[12px] font-normal tracking-normal text-[var(--muted)] sm:inline">Research lab</span>
+              Subnet 71<span className="block text-xs font-normal tracking-normal text-[var(--muted)] sm:ml-3 sm:inline sm:border-l sm:border-[var(--line-3)] sm:pl-3">Sales research lab</span>
             </span>
+            <Link href="/archive" prefetch={false} className="inline-flex min-h-11 items-center text-sm text-[var(--muted)] hover:text-[var(--white)]">Arena archive</Link>
           </div>
         </header>
 
@@ -97,7 +100,7 @@ export function DashboardClient() {
         >
           <div ref={navWrapRef} className="relative">
             <TabsList className={cn('flex w-full justify-start gap-8 sm:gap-10 overflow-x-auto no-scrollbar rounded-none border-0 border-b border-[var(--line)] bg-transparent h-auto p-0')}>
-              <DashboardTabTrigger value="research-lab" label="Research lab" />
+              <DashboardTabTrigger value="research-lab" label="Collection" />
               <DashboardTabTrigger value="faq" label="FAQ" />
             </TabsList>
             <span
@@ -109,8 +112,8 @@ export function DashboardClient() {
 
           {mountedTabs.has('research-lab') && (
             <TabsContent value="research-lab" keepMounted className="data-[state=active]:animate-in data-[state=active]:fade-in-0 data-[state=active]:duration-300">
-              <ErrorBoundary label="ResearchLab">
-                <ResearchLab active={activeTab === 'research-lab'} />
+              <ErrorBoundary label="Collection">
+                <CollectionLab active={activeTab === 'research-lab'} />
               </ErrorBoundary>
             </TabsContent>
           )}

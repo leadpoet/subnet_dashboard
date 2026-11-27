@@ -103,13 +103,13 @@ try {
   assert.equal(timers.size, 0)
 
   const shell = readFileSync('src/components/dashboard/DashboardClient.tsx', 'utf8')
-  const lab = readFileSync('src/components/dashboard/ResearchLab.tsx', 'utf8')
-  assert.match(shell, /<ResearchLab active=\{activeTab === 'research-lab'\}/)
+  const lab = readFileSync('src/components/dashboard/ArenaArchive.tsx', 'utf8')
+  assert.match(shell, /<CollectionLab active=\{activeTab === 'research-lab'\}/)
   assert.match(shell, /mountedTabs\.has\('research-lab'\)/)
   assert.doesNotMatch(shell, /Fulfillment|\/api\/dashboard/)
   assert.match(lab, /useVisiblePolling\(fetchData, 60_000, \{ enabled: active \}\)/)
   assert.doesNotMatch(lab, /setInterval\([^\n]*fetchData/)
-  console.log('visible-polling: visibility pause, immediate resume, request coalescing, cleanup, and Arena-only shell passed')
+  console.log('visible-polling: visibility pause, immediate resume, request coalescing, cleanup, and collection shell passed')
 } finally {
   await act(async () => { renderer?.unmount() })
 }
