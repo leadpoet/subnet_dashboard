@@ -27,11 +27,15 @@ export interface MinerContribution {
   last_funded_at: string | null
   funded_runs: number
   earned_quote_microusd: string
-  paid_alpha_rao: string | null
   payout_status: 'confirmed' | 'pending' | 'unavailable'
 }
 
+export type LatestPayout =
+  | { status: 'confirmed'; epoch: number; closed_at: string; shares: Record<string, number> }
+  | { status: 'none' | 'unavailable' }
+
 export interface MinerPage {
+  latest_payout?: LatestPayout
   miners: MinerContribution[]
   next: string | null
 }
@@ -39,16 +43,31 @@ export interface MinerPage {
 const units = (value: unknown) => typeof value === 'string' && /^\d+$/.test(value)
 const instant = (value: unknown) => typeof value === 'string' && Number.isFinite(Date.parse(value))
 
+function isLatestPayout(value: unknown): value is LatestPayout {
+  if (!value || typeof value !== 'object') return false
+  const p = value as Record<string, unknown>
+  if (p.status === 'none' || p.status === 'unavailable') return true
+  return p.status === 'confirmed' && Number.isSafeInteger(p.epoch) && Number(p.epoch) >= 0
+    && instant(p.closed_at) && !!p.shares && typeof p.shares === 'object' && !Array.isArray(p.shares)
+    && Object.entries(p.shares).every(([key, pct]) => MINER_HOTKEY.test(key)
+      && typeof pct === 'number' && Number.isFinite(pct) && pct >= 0 && pct <= 100)
+}
+
+export function formatShare(percent: number): string {
+  if (percent > 0 && percent < 0.000001) return '<0.000001%'
+  return percent.toLocaleString('en-US', { maximumSignificantDigits: 4 }) + '%'
+}
+
 export function isMinerPage(value: unknown): value is MinerPage {
   if (!value || typeof value !== 'object') return false
   const page = value as Record<string, unknown>
   if (!Array.isArray(page.miners) || page.miners.length > 25) return false
+  if (page.latest_payout !== undefined && !isLatestPayout(page.latest_payout)) return false
   const valid = page.miners.every((r: MinerContribution) => r && typeof r.hotkey === 'string'
     && MINER_HOTKEY.test(r.hotkey) && instant(r.joined_at)
     && (r.last_funded_at === null || instant(r.last_funded_at))
     && Number.isSafeInteger(r.funded_runs) && r.funded_runs >= 0 && units(r.earned_quote_microusd)
-    && (r.payout_status === 'unavailable' ? r.paid_alpha_rao === null
-      : (r.payout_status === 'confirmed' || r.payout_status === 'pending') && units(r.paid_alpha_rao)))
+    && (r.payout_status === 'unavailable' || r.payout_status === 'confirmed' || r.payout_status === 'pending'))
   return valid && new Set(page.miners.map(r => r.hotkey)).size === page.miners.length
     && (page.next === null || (typeof page.next === 'string' && page.next === page.miners.at(-1)?.hotkey))
 }

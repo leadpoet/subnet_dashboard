@@ -1,15 +1,24 @@
 'use client'
 
 import { useCallback, useState } from 'react'
-import { displayUnits, isMinerPage, type MinerPage } from '@/lib/collection'
+import { displayUnits, formatShare, isMinerPage, type LatestPayout, type MinerContribution, type MinerPage } from '@/lib/collection'
+import { MinerShareChart } from '@/components/dashboard/MinerShareChart'
 import { useVisiblePolling } from '@/lib/hooks/useVisiblePolling'
 
 const dateFormat = new Intl.DateTimeFormat('en-GB', {
   month: 'short', day: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone: 'UTC',
 })
-const columns = ['Miner hotkey', 'Funded runs', 'Last funded run', 'Earned quote', 'Paid on-chain']
+const columns = ['Miner hotkey', 'Funded runs', 'Last funded run', 'Earned quote', 'On-chain share']
 const mobileLabel = 'mb-1 block text-xs font-normal text-[var(--muted)] lg:hidden'
 const cell = 'align-top lg:py-5 lg:pr-5'
+
+function shareLabel(miner: MinerContribution, payout?: LatestPayout): string {
+  if (!payout || payout.status === 'unavailable') return 'Unavailable'
+  if (payout.status !== 'confirmed') return 'No payouts yet'
+  if (Object.hasOwn(payout.shares, miner.hotkey)) return formatShare(payout.shares[miner.hotkey])
+  if (Date.parse(miner.joined_at) > Date.parse(payout.closed_at)) return 'Joined later'
+  return '0%'
+}
 
 export function MinerContributions({ active }: { active: boolean }) {
   const [pages, setPages] = useState<(string | null)[]>([null])
@@ -18,6 +27,7 @@ export function MinerContributions({ active }: { active: boolean }) {
   const [error, setError] = useState<{ after: string | null } | null>(null)
   const page = result?.after === after ? result.page : null
   const failed = error?.after === after
+  const payout = result?.page.latest_payout
   const refresh = useCallback(async () => {
     try {
       const url = '/api/collection/miners' + (after ? '?after=' + encodeURIComponent(after) : '')
@@ -35,7 +45,9 @@ export function MinerContributions({ active }: { active: boolean }) {
 
   return <section aria-labelledby="miner-contributions" className="mt-12 border-t border-[var(--line)] pt-8 md:mt-16 md:pt-10">
     <h2 id="miner-contributions" className="font-display text-2xl font-medium tracking-[-0.04em] text-[var(--white)] md:text-3xl">Miner contributions</h2>
-    <p className="mt-2 text-sm leading-relaxed text-[var(--muted)]">Funded runs count once provider usage is confirmed. Verified work earns a USD quote. Finalized payments are shown in SN71 alpha. All times are UTC.</p>
+    <p className="mt-2 text-sm leading-relaxed text-[var(--muted)]">Funded runs and earned USD quotes are lifetime totals. On-chain shares refer to the latest finalized collection payout. All times are UTC.</p>
+    {payout?.status === 'confirmed' ? <MinerShareChart key={payout.epoch} payout={payout} />
+      : result && <p role="status" className="mt-4 text-sm text-[var(--muted)]">{payout?.status === 'none' ? 'No collection payouts have finalized yet.' : 'On-chain payout shares are temporarily unavailable.'}</p>}
     {page?.miners.length ? <table aria-labelledby="miner-contributions" className="mt-6 block w-full text-left text-sm lg:table">
       <thead className="sr-only lg:not-sr-only lg:table-header-group">
         <tr className="border-b border-[var(--line-2)]">{columns.map(label => <th scope="col" key={label} className="pb-3 pr-5 text-xs font-medium text-[var(--muted)]">{label}</th>)}</tr>
@@ -49,8 +61,8 @@ export function MinerContributions({ active }: { active: boolean }) {
         <td className={cell}><span className={mobileLabel}>Funded runs</span>{miner.funded_runs.toLocaleString('en-US')}</td>
         <td className={cell}><span className={mobileLabel}>Last funded run</span>{miner.last_funded_at ? <time dateTime={miner.last_funded_at}>{dateFormat.format(Date.parse(miner.last_funded_at))}</time> : 'No funded runs yet'}</td>
         <td className={cell}><span className={mobileLabel}>Earned quote</span>${displayUnits(miner.earned_quote_microusd, 6, 2)}</td>
-        <td className="align-top lg:py-5"><span className={mobileLabel}>Paid on-chain</span>
-          {miner.paid_alpha_rao === null ? 'Unavailable' : <>{displayUnits(miner.paid_alpha_rao, 9)} α</>}
+        <td className="align-top lg:py-5"><span className={mobileLabel}>On-chain share</span>
+          {shareLabel(miner, payout)}
           {miner.payout_status === 'pending' && <span className="mt-1 block text-xs text-[var(--muted)]">Awaiting settlement</span>}
         </td>
       </tr>)}</tbody>

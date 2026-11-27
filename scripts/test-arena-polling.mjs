@@ -150,33 +150,47 @@ try {
   assert.equal(calls.length, beforeFAQ)
   await unmount()
 
-  // A payable quote and a finalized alpha receipt are separate values. Preserve their native precision.
+  // The chart and table use the same confirmed epoch across pages. Lifetime quotes stay in USD.
   const keyA = '5' + 'A'.repeat(47)
   const keyB = '5' + 'B'.repeat(47)
   const record = { hotkey: keyA, joined_at: '2026-11-26T09:05:00Z', last_funded_at: '2026-11-27T03:11:00Z',
     funded_runs: 12, earned_quote_microusd: '58178', paid_alpha_rao: '111820693', payout_status: 'confirmed' }
-  let feed = { miners: [record], next: keyA }
+  const payout = { status: 'confirmed', epoch: 26641, closed_at: '2026-11-27T03:23:00Z',
+    shares: { [keyA]: 0.034189177771396025, [keyB]: 0.0037987484488270847 } }
+  let feed = { miners: [record], next: keyA, latest_payout: payout }
   respond = url => {
     if (url.endsWith('/status')) return Response.json(collection)
     if (url.endsWith('?after=' + keyA)) return Response.json({ miners: [{ ...record, hotkey: keyB, last_funded_at: null,
-      funded_runs: 0, earned_quote_microusd: '0', paid_alpha_rao: '0' }], next: null })
+      funded_runs: 0, earned_quote_microusd: '0', paid_alpha_rao: '0' }], next: null, latest_payout: payout })
     return Response.json(feed)
   }
   await act(async () => { renderer = TestRenderer.create(React.createElement(CollectionLab), rendererOptions) })
   const cellText = node => node.children.map(c => typeof c === 'string' ? c : cellText(c)).join('')
   const table = () => cellText(renderer.root.findByType('table'))
-  assert.ok(table().includes(keyA) && table().includes('$0.058178') && table().includes('0.111820693 α'))
+  assert.ok(table().includes(keyA) && table().includes('$0.058178') && table().includes('0.03419%'))
+  const chart = () => cellText(renderer.root.findByType('figure'))
+  assert.ok(chart().includes('26,641') && chart().includes('0.03419%') && chart().includes('0.003799%'))
+  assert.doesNotMatch(markup(), /0\.111820693 α/)
+  const bars = renderer.root.findByType('figure').findAll(n => n.type === 'span' && n.props.style?.width)
+  assert.equal(bars.length, 2)
+  assert.ok(Math.abs(parseFloat(bars[0].props.style.width) / parseFloat(bars[1].props.style.width)
+    - payout.shares[keyA] / payout.shares[keyB]) < 1e-9, 'shares use a common zero-based scale')
   const pageButton = label => renderer.root.findAllByType('button').find(b => cellText(b) === label)
   await act(async () => { pageButton('Next').props.onClick() })
   assert.ok(table().includes(keyB) && !table().includes(keyA) && table().includes('No funded runs yet'))
+  assert.ok(chart().includes('0.03419%'), 'all payout recipients share one graph across roster pages')
   await act(async () => { pageButton('Previous').props.onClick() })
   assert.ok(table().includes(keyA))
-  feed = { miners: [{ ...record, payout_status: 'pending', paid_alpha_rao: '9007199254740993' }], next: null }
+  feed = { miners: [{ ...record, payout_status: 'pending', paid_alpha_rao: '9007199254740993' }], next: null, latest_payout: payout }
   await advance(60_000)
-  assert.ok(table().includes('9007199.254740993 α') && table().includes('Awaiting settlement'))
-  feed = { miners: [{ ...record, payout_status: 'unavailable', paid_alpha_rao: null }], next: null }
+  assert.ok(table().includes('0.03419%') && table().includes('Awaiting settlement'))
+  feed = { miners: [{ ...record, payout_status: 'unavailable', paid_alpha_rao: null }], next: null, latest_payout: { status: 'unavailable' } }
   await advance(60_000)
   assert.ok(table().includes('Unavailable') && table().includes('$0.058178') && !table().includes('0 α'))
+  feed = { miners: [record], next: null, latest_payout: { status: 'none' } }
+  await advance(60_000)
+  assert.ok(table().includes('No payouts yet') && !table().includes('0%'))
+  assert.equal(renderer.root.findAllByType('figure').length, 0)
   feed = { miners: [], next: null }
   await advance(60_000)
   assert.match(markup(), /No miner contributions on this page yet/)
