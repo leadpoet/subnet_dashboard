@@ -2,7 +2,8 @@
 
 import { useCallback, useState } from 'react'
 import { ArrowUpRight } from 'lucide-react'
-import { ENROLLMENT_GUIDE, SALES_AGENT, isCollectionStatus, type CollectionStatus } from '@/lib/collection'
+import { SALES_AGENT, isCollectionStatus, type CollectionStatus } from '@/lib/collection'
+import { MinerContributions } from '@/components/dashboard/MinerContributions'
 import { useVisiblePolling } from '@/lib/hooks/useVisiblePolling'
 
 const steps = [
@@ -44,9 +45,6 @@ export function CollectionLab({ active = true }: { active?: boolean }) {
             Use your OpenRouter credits to fund sales research. Our agent checks company evidence and records its decisions. Verified work earns subnet emissions.
           </p>
           <div className="mt-7 flex flex-wrap items-center gap-x-6 gap-y-2">
-            <a href={ENROLLMENT_GUIDE} className="inline-flex min-h-11 items-center gap-2 rounded-md bg-[var(--white)] px-5 text-sm font-medium text-[var(--surface-base)] transition-opacity hover:opacity-85">
-              Enroll as a miner <ArrowUpRight aria-hidden="true" size={16} />
-            </a>
             <a href={SALES_AGENT} className="inline-flex min-h-11 items-center gap-1.5 text-sm text-[var(--platinum)] hover:underline">View the agent <ArrowUpRight aria-hidden="true" size={14} /></a>
           </div>
         </section>
@@ -80,6 +78,7 @@ export function CollectionLab({ active = true }: { active?: boolean }) {
           ))}
         </ol>
       </section>
+      <MinerContributions active={active} />
     </main>
   )
 }
