@@ -249,7 +249,7 @@ function RewardSeats({ seats, championRetired = false }: { seats: CompetitionRew
   if (championRetired) return (
     <section aria-label="Collection rewards" className="mb-6 rounded-xl border border-[var(--line)] bg-[var(--surface)] p-4 md:p-6">
       <h2 className="text-[15px] font-medium text-[var(--platinum)]">Collection rewards</h2>
-      <p className="mt-2 text-[14px] leading-relaxed text-[var(--muted)]">Champion allocation is 0%. Paid collection jobs earn approved fixed prices. Unallocated emissions go to the designated burn hotkey.</p>
+      <p className="mt-2 text-[14px] leading-relaxed text-[var(--muted)]">Champion allocation is 0%. Verified sandbox runs earn a target based on their settled cost. Unallocated emissions go to the designated burn hotkey.</p>
     </section>
   )
   return (
