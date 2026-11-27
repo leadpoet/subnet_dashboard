@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import vm from 'node:vm'
 import React from 'react'
@@ -47,7 +47,7 @@ function load(path, extra = '') {
     compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX },
   }).outputText, {
     module, exports: module.exports, window, document, Error, URLSearchParams,
-    require: (name) => name.startsWith('@/') ? load(`src/${name.slice(2)}.ts`) : require(name),
+    require: (name) => name.startsWith('@/') ? load(`src/${name.slice(2)}.${existsSync(`src/${name.slice(2)}.ts`) ? 'ts' : 'tsx'}`) : require(name),
     fetch: async (url) => { calls.push(url); return respond(url) },
   })
   modules.set(path, module.exports)
@@ -125,9 +125,10 @@ try {
   const collection = { as_of: '2026-11-27T05:00:00Z', running_runs: 0, verified_runs: 14, paid_enrollment_open: true, champion_rewards_off: true }
   respond = () => new Response(null, { status: 503 })
   await act(async () => { renderer = TestRenderer.create(React.createElement(CollectionLab), rendererOptions) })
-  assert.deepEqual(calls, ['/api/collection/status'])
+  assert.deepEqual(calls.slice().sort(), ['/api/collection/miners', '/api/collection/status'])
   assert.match(markup(), /Live status is temporarily unavailable/)
-  assert.match(markup(), /Enroll as a miner/)
+  assert.doesNotMatch(markup(), /Enroll as a miner/)
+  assert.match(markup(), /Miner contributions/)
   assert.doesNotMatch(markup(), /Current champion|Reward seats|Submissions|"Idle"/)
   respond = () => Response.json(collection)
   await advance(60_000)
@@ -147,6 +148,41 @@ try {
   const beforeFAQ = calls.length
   await advance(60_000)
   assert.equal(calls.length, beforeFAQ)
+  await unmount()
+
+  // A payable quote and a finalized alpha receipt are separate values. Preserve their native precision.
+  const keyA = '5' + 'A'.repeat(47)
+  const keyB = '5' + 'B'.repeat(47)
+  const record = { hotkey: keyA, joined_at: '2026-11-26T09:05:00Z', last_funded_at: '2026-11-27T03:11:00Z',
+    funded_runs: 12, earned_quote_microusd: '58178', paid_alpha_rao: '111820693', payout_status: 'confirmed' }
+  let feed = { miners: [record], next: keyA }
+  respond = url => {
+    if (url.endsWith('/status')) return Response.json(collection)
+    if (url.endsWith('?after=' + keyA)) return Response.json({ miners: [{ ...record, hotkey: keyB, last_funded_at: null,
+      funded_runs: 0, earned_quote_microusd: '0', paid_alpha_rao: '0' }], next: null })
+    return Response.json(feed)
+  }
+  await act(async () => { renderer = TestRenderer.create(React.createElement(CollectionLab), rendererOptions) })
+  const cellText = node => node.children.map(c => typeof c === 'string' ? c : cellText(c)).join('')
+  const table = () => cellText(renderer.root.findByType('table'))
+  assert.ok(table().includes(keyA) && table().includes('$0.058178') && table().includes('0.111820693 α'))
+  const pageButton = label => renderer.root.findAllByType('button').find(b => cellText(b) === label)
+  await act(async () => { pageButton('Next').props.onClick() })
+  assert.ok(table().includes(keyB) && !table().includes(keyA) && table().includes('No funded runs yet'))
+  await act(async () => { pageButton('Previous').props.onClick() })
+  assert.ok(table().includes(keyA))
+  feed = { miners: [{ ...record, payout_status: 'pending', paid_alpha_rao: '9007199254740993' }], next: null }
+  await advance(60_000)
+  assert.ok(table().includes('9007199.254740993 α') && table().includes('Awaiting settlement'))
+  feed = { miners: [{ ...record, payout_status: 'unavailable', paid_alpha_rao: null }], next: null }
+  await advance(60_000)
+  assert.ok(table().includes('Unavailable') && table().includes('$0.058178') && !table().includes('0 α'))
+  feed = { miners: [], next: null }
+  await advance(60_000)
+  assert.match(markup(), /No miner contributions on this page yet/)
+  feed = { miners: null, next: null }
+  await advance(60_000)
+  assert.match(markup(), /Refresh unavailable/)
   await unmount()
 
   respond = publicResponse
