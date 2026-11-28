@@ -36,7 +36,7 @@ const FAQ_DATA: FAQItem[] = [
   },
   {
     id: 'incentives', question: 'How are rewards calculated?',
-    answer: 'Each verified complete run earns a reward target of 1.25 times its actual settled OpenRouter cost. Both correct and incorrect decisions qualify. Incomplete or unverifiable work can use credits without earning a reward. If eligible targets exceed the available emissions, they scale proportionally. Validator votes and token prices affect what you receive.',
+    answer: 'Each new assignment earns a reward target of 1.5 times its settled OpenRouter cost once the completed run is verified. Both correct and incorrect decisions qualify. Incomplete or unverifiable work can use credits without earning a reward. If eligible targets exceed the available emissions, they scale proportionally. Validator votes and token prices affect what you receive.',
   },
 ]
 

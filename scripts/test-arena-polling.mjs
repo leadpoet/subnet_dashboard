@@ -128,6 +128,7 @@ try {
   assert.deepEqual(calls.slice().sort(), ['/api/collection/miners', '/api/collection/status'])
   assert.match(markup(), /Live status is temporarily unavailable/)
   assert.doesNotMatch(markup(), /Enroll as a miner/)
+  assert.match(markup(), /new assignments.*target of 1\.5× their settled OpenRouter cost/i)
   assert.match(markup(), /Miner contributions/)
   assert.doesNotMatch(markup(), /Current champion|Reward seats|Submissions|"Idle"/)
   respond = () => Response.json(collection)
