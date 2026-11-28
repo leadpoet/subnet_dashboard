@@ -10,7 +10,7 @@ const steps = [
   ['Register a key', 'Use your registered miner wallet and an OpenRouter key to fund the sales sandbox.'],
   ['Set a total limit', 'Sign once for the amount you want to spend. Your key can fund multiple experiments until the limit is used or you revoke it.'],
   ['Fund agent runs', 'We assign the models and scenarios, and record the available reasoning, tool calls, evidence and decisions.'],
-  ['Earn emissions', 'Verified complete runs earn a target of 1.25× their actual generator cost, including runs where the agent gets the task wrong.'],
+  ['Earn emissions', 'For new assignments, verified complete runs earn a target of 1.5× their settled OpenRouter cost, even when the agent gets the task wrong.'],
 ] as const
 
 export function CollectionLab({ active = true }: { active?: boolean }) {
